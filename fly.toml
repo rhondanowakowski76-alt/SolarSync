@@ -16,11 +16,12 @@ primary_region = "syd"          # Sydney, Australia — data stays in AU
   auto_start_machines = true
   min_machines_running = 1
 
-# Persistent volume so the SQLite database survives redeploys.
-# Create once with:  fly volumes create solarsync_data --region syd --size 1
-[mounts]
-  source = "solarsync_data"
-  destination = "/data"
+# NOTE: For persistent data across redeploys, add a volume later:
+#   fly volumes create solarsync_data --region syd --size 1
+# then uncomment:
+# [mounts]
+#   source = "solarsync_data"
+#   destination = "/data"
 
 [[vm]]
   size = "shared-cpu-1x"
