@@ -44,6 +44,8 @@ app.post("/api/auth/totp", (req, res) => {
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   if (!A.verifyTotp(u.totp_secret, code)) { A.bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
   A.clearFail(u.id);
+  // First successful code completes enrolment.
+  if (!u.totp_enrolled) db.prepare("update users set totp_enrolled=1 where id=?").run(u.id);
   audit(u.id, "login", u.id, u.tenant_id);
   ok(res, {
     access_token: A.mintAccess(u), refresh_token: A.mintRefresh(u),
@@ -56,7 +58,9 @@ app.post("/api/auth/enrol", async (req, res) => {
   const u = db.prepare("select * from users where id=?").get(user_id);
   if (!u) return res.status(404).json({ error: "not_found" });
   const secret = A.randomBase32();
-  db.prepare("update users set totp_secret=?, totp_enrolled=1 where id=?").run(secret, u.id);
+  // Store the secret but DON'T mark enrolled yet — enrolment completes only when
+  // the user verifies their first code (so the QR keeps showing until then).
+  db.prepare("update users set totp_secret=? where id=?").run(secret, u.id);
   const uri = A.otpauthUri(u.display_name, secret);
   let qr = null; try { qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 }); } catch (e) {}
   ok(res, { otpauth_uri: uri, secret, qr });
