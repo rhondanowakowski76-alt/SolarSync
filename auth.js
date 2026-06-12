@@ -38,7 +38,9 @@ function verifyTotp(secret, code) {
 function otpauthUri(name, secret) {
   const issuer = encodeURIComponent("SolarSync");
   const label = encodeURIComponent(name);
-  return `otpauth://totp/${issuer}:${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
+  // Explicit standard params (SHA1/6/30) → identical behaviour in Microsoft
+  // Authenticator, Google Authenticator, Authy, 1Password, etc.
+  return `otpauth://totp/${issuer}:${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
 }
 
 // ---------- JWT ----------
