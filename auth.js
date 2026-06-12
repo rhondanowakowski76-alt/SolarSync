@@ -1,8 +1,8 @@
-// SolarSync backend — PIN + TOTP auth (NO email). TOTP verified vs RFC 6238.
+// SolarSync backend — PIN + TOTP auth helpers (NO email). TOTP verified vs RFC 6238.
+// Pure crypto/JWT helpers only — DB writes live in server.js (async).
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { db } = require("./db");
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-change-me";
 const ACCESS_TTL = "15m";
@@ -64,18 +64,11 @@ function requireRole(...roles) {
   return (req, res, next) => roles.includes(req.user.app_role) ? next() : res.status(403).json({ error: "forbidden" });
 }
 
-// ---------- anti-brute-force ----------
+// ---------- anti-brute-force (pure check; DB writes done in server.js) ----------
 function lockedOut(u) { return u.locked_until && new Date(u.locked_until) > new Date(); }
-function bumpFail(u) {
-  const n = (u.failed_attempts || 0) + 1;
-  if (n >= 5) db.prepare("update users set failed_attempts=0, locked_until=? where id=?")
-    .run(new Date(Date.now() + 5 * 60000).toISOString(), u.id);
-  else db.prepare("update users set failed_attempts=? where id=?").run(n, u.id);
-}
-function clearFail(id) { db.prepare("update users set failed_attempts=0, locked_until=null where id=?").run(id); }
 
 module.exports = {
   bcrypt, randomBase32, verifyTotp, otpauthUri,
   mintAccess, mintRefresh, verify, authRequired, requireRole,
-  lockedOut, bumpFail, clearFail, JWT_SECRET,
+  lockedOut, JWT_SECRET,
 };

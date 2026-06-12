@@ -8,10 +8,11 @@
     "seed": "node seed.js"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.2",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.3.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.21.0",
     "qrcode": "^1.5.4",
     "stripe": "^16.8.0"
   }
