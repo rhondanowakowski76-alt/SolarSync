@@ -17,6 +17,7 @@ async function init() {
       connectionString: cs,
       ssl: { rejectUnauthorized: false },
       max: 5,
+      options: "-c search_path=app,public",   // use our own schema (PG15+ locks down public)
     });
   } else {
     const { PGlite } = require("@electric-sql/pglite");
@@ -55,6 +56,9 @@ async function audit(actor_id, action, target, tenant_id, meta = {}) {
 }
 
 async function migrate() {
+  // Create and use a dedicated schema (PostgreSQL 15+ revokes CREATE on public).
+  await _db.query("create schema if not exists app");
+  try { await _db.query("set search_path to app, public"); } catch (e) {}
   const stmts = [
     `create table if not exists resellers (
       id text primary key, name text not null, branding jsonb default '{}', created_at timestamptz default now())`,
