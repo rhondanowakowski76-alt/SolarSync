@@ -9,9 +9,13 @@ let _ready = null;
 async function init() {
   if (process.env.DATABASE_URL) {
     const { Pool } = require("pg");
+    // Strip sslmode from the URL so our explicit ssl config wins. DigitalOcean
+    // databases present a self-signed CA, so we connect over TLS but skip strict
+    // certificate-chain verification (rejectUnauthorized:false).
+    const cs = process.env.DATABASE_URL.replace(/([?&])sslmode=[^&]*/gi, "$1").replace(/[?&]+$/g, "");
     _db = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },   // DO managed PG uses TLS
+      connectionString: cs,
+      ssl: { rejectUnauthorized: false },
       max: 5,
     });
   } else {
