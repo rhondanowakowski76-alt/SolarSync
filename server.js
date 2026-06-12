@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { db, audit, rid } = require("./db");
 const A = require("./auth");
+const QRCode = require("qrcode");
 
 const app = express();
 app.use(express.json({ limit: "12mb" }));   // reports carry embedded photos
@@ -50,13 +51,15 @@ app.post("/api/auth/totp", (req, res) => {
   });
 });
 
-app.post("/api/auth/enrol", (req, res) => {
+app.post("/api/auth/enrol", async (req, res) => {
   const { user_id } = req.body || {};
   const u = db.prepare("select * from users where id=?").get(user_id);
   if (!u) return res.status(404).json({ error: "not_found" });
   const secret = A.randomBase32();
   db.prepare("update users set totp_secret=?, totp_enrolled=1 where id=?").run(secret, u.id);
-  ok(res, { otpauth_uri: A.otpauthUri(u.display_name, secret), secret });
+  const uri = A.otpauthUri(u.display_name, secret);
+  let qr = null; try { qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 }); } catch (e) {}
+  ok(res, { otpauth_uri: uri, secret, qr });
 });
 
 app.post("/api/auth/set-pin", (req, res) => {
