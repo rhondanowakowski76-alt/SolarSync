@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SolarSync CRM — Run your whole solar business in one branded portal</title>
+<meta name="description" content="The compliance & operations platform for Australian solar installers. Quotes, AS/NZS compliance, installs, client portal and payments — all under your brand." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{ --navy:#0F172A; --navy2:#0A122D; --indigo:#6366F2; --emerald:#10B981; --slate:#64748B; --line:#e3e9f0; --bg:#f7f9fc; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',-apple-system,sans-serif;color:#1f2d3d;background:#fff;line-height:1.6;}
+  a{text-decoration:none;color:inherit;}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px;}
+  h1,h2,h3,.logo-txt{font-family:'Montserrat',sans-serif;letter-spacing:-0.5px;}
+  /* header */
+  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:68px;}
+  .logo{display:flex;align-items:center;gap:11px;}
+  .logo-mark{width:38px;height:38px;flex-shrink:0;}
+  .logo-txt{font-weight:800;font-size:21px;}
+  .logo-txt .a{color:#46566a;} .logo-txt .b{color:var(--indigo);} .logo-txt .c{color:#9aa7b4;font-size:13px;font-weight:600;letter-spacing:.1em;margin-left:3px;}
+  .nav-cta{display:flex;align-items:center;gap:10px;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:14px;padding:11px 20px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:'Inter',sans-serif;}
+  .btn-ghost{border-color:var(--line);color:var(--navy);background:#fff;}
+  .btn-ghost:hover{border-color:var(--indigo);color:var(--indigo);}
+  .btn-primary{background:var(--indigo);color:#fff;}
+  .btn-primary:hover{background:#4f46e5;}
+  .btn-lg{padding:15px 30px;font-size:16px;}
+  /* hero */
+  .hero{background:linear-gradient(160deg,var(--navy) 0%,var(--navy2) 100%);color:#fff;padding:84px 0 96px;position:relative;overflow:hidden;}
+  .hero .sun{position:absolute;right:-80px;top:-60px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,242,0.25),transparent 70%);}
+  .eyebrow{color:#a5b4fc;font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12.5px;margin-bottom:18px;}
+  .hero h1{font-size:50px;font-weight:800;line-height:1.08;max-width:780px;}
+  .hero p.sub{font-size:19px;color:#c7d2e0;margin-top:22px;max-width:640px;}
+  .hero-cta{display:flex;gap:14px;margin-top:34px;flex-wrap:wrap;}
+  .hero-points{display:flex;gap:26px;margin-top:30px;flex-wrap:wrap;color:#aebbcb;font-size:14px;}
+  .hero-points span{display:flex;align-items:center;gap:8px;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--emerald);}
+  /* sections */
+  section{padding:78px 0;}
+  .sec-eyebrow{color:var(--indigo);font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-size:12.5px;text-align:center;}
+  .sec-title{font-size:34px;font-weight:800;color:var(--navy);text-align:center;margin-top:10px;}
+  .sec-sub{text-align:center;color:var(--slate);font-size:17px;max-width:620px;margin:14px auto 0;}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:48px;}
+  .card{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:26px;}
+  .card .ic{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;margin-bottom:16px;}
+  .card h3{font-size:17px;font-weight:700;color:var(--navy);margin-bottom:8px;}
+  .card p{color:var(--slate);font-size:14.5px;}
+  /* positioning band */
+  .band{background:var(--bg);}
+  .band .row{display:flex;gap:50px;align-items:center;flex-wrap:wrap;}
+  .band .col{flex:1 1 380px;}
+  .band h2{font-size:30px;color:var(--navy);font-weight:800;}
+  .band p{color:#4b5b6b;font-size:16px;margin-top:16px;}
+  .checks{margin-top:22px;display:flex;flex-direction:column;gap:12px;}
+  .checks li{list-style:none;display:flex;gap:12px;align-items:flex-start;font-size:15px;color:#2a3a4a;}
+  .checks .tick{color:var(--emerald);font-weight:800;flex-shrink:0;}
+  /* pricing */
+  .price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:48px;}
+  .plan{border:1px solid var(--line);border-radius:16px;padding:30px 26px;background:#fff;display:flex;flex-direction:column;}
+  .plan.pop{border:2px solid var(--indigo);box-shadow:0 16px 40px -16px rgba(99,102,242,0.4);position:relative;}
+  .plan .tag{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--indigo);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:999px;letter-spacing:.04em;}
+  .plan h3{font-size:18px;color:var(--navy);font-weight:800;}
+  .plan .amt{font-family:'Montserrat',sans-serif;font-size:40px;font-weight:800;color:var(--navy);margin:12px 0 2px;}
+  .plan .amt small{font-size:15px;color:var(--slate);font-weight:600;}
+  .plan ul{list-style:none;margin:18px 0 24px;display:flex;flex-direction:column;gap:10px;}
+  .plan li{font-size:14px;color:#3a4a5a;display:flex;gap:9px;}
+  .plan li .tick{color:var(--emerald);font-weight:800;}
+  .plan .btn{margin-top:auto;width:100%;}
+  /* cta band */
+  .cta{background:linear-gradient(160deg,var(--navy),var(--navy2));color:#fff;text-align:center;border-radius:20px;padding:60px 30px;margin:0 0 0;}
+  .cta h2{font-size:32px;font-weight:800;}
+  .cta p{color:#c7d2e0;font-size:17px;margin:14px 0 28px;}
+  footer{border-top:1px solid var(--line);padding:34px 0;color:var(--slate);font-size:13.5px;}
+  .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px;align-items:center;}
+  @media(max-width:860px){ .hero h1{font-size:36px;} .grid,.price-grid{grid-template-columns:1fr;} .sec-title,.band h2,.cta h2{font-size:26px;} .logo-txt .c{display:none;} }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <a class="logo" href="/">
+      <svg class="logo-mark" viewBox="0 0 100 100" aria-hidden="true">
+        <defs><radialGradient id="g" cx="42%" cy="34%" r="75%"><stop offset="0%" stop-color="#7FD4FF"/><stop offset="48%" stop-color="#3BA0E6"/><stop offset="100%" stop-color="#060B12"/></radialGradient></defs>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#AEB7C0" stroke-width="6"/>
+        <path d="M14 38 A40 40 0 0 1 86 38" fill="none" stroke="#C9D2DA" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="50" cy="54" r="33" fill="url(#g)"/>
+        <g stroke="#7FD4FF" stroke-width="0.9" opacity="0.5" fill="none"><path d="M22 58 Q50 70 78 58"/><path d="M50 22 L50 86 M38 24 Q34 54 40 84 M62 24 Q66 54 60 84"/></g>
+      </svg>
+      <span class="logo-txt"><span class="a">Solar</span><span class="b">Sync</span><span class="c">CRM</span></span>
+    </a>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="/app">Sign in</a>
+      <a class="btn btn-primary" href="/app">Get started</a>
+    </div>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="sun"></div>
+  <div class="wrap">
+    <div class="eyebrow">Built for Australian solar installers</div>
+    <h1>Run your whole solar business in one branded portal.</h1>
+    <p class="sub">Stop juggling spreadsheets, design tools, email and a filing cabinet of AS/NZS forms. SolarSync CRM handles quotes, compliance, installs, your client portal and payments — all under <strong style="color:#fff">your</strong> brand.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary btn-lg" href="/app">Start now — free branded setup</a>
+      <a class="btn btn-ghost btn-lg" style="background:transparent;border-color:rgba(255,255,255,0.3);color:#fff" href="mailto:hello@solarsynccrm.com.au">Book a demo</a>
+    </div>
+    <div class="hero-points">
+      <span><span class="dot"></span> AS/NZS &amp; SAA compliant</span>
+      <span><span class="dot"></span> 100% white-label</span>
+      <span><span class="dot"></span> No lock-in contract</span>
+      <span><span class="dot"></span> Australian data, Sydney</span>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="sec-eyebrow">Everything after the sale</div>
+    <h2 class="sec-title">One platform for your whole operation</h2>
+    <p class="sec-sub">OpenSolar designs it. SolarSync CRM runs the rest of your business.</p>
+    <div class="grid">
+      <div class="card"><div class="ic" style="background:rgba(99,102,242,0.12);color:#6366F2">📄</div><h3>Pro proposals</h3><p>Branded solar proposals with STC deducted, savings, payback, monthly output and the panel layout on the client's actual rooftop.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(16,185,129,0.12);color:#10B981">✅</div><h3>AS/NZS compliance</h3><p>Grid-connect, off-grid, battery & install-manual reports to AS/NZS 5033 / 4777 / 3000, with SAA sign-off — branded to you.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(250,145,61,0.14);color:#FA913D">🏠</div><h3>Client portal</h3><p>Your customers track their install, view documents and pay invoices online — all under your brand.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(99,102,242,0.12);color:#6366F2">📋</div><h3>Job pipeline</h3><p>Every customer from enquiry to handover in one visual workflow, with photos and on-site forms.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(16,185,129,0.12);color:#10B981">💰</div><h3>Payroll & finance</h3><p>Contractor timesheets, payslips and pay runs with PAYG & super — sync to Xero, MYOB or Reckon.</p></div>
+      <div class="card"><div class="ic" style="background:rgba(250,145,61,0.14);color:#FA913D">🎨</div><h3>Fully white-label</h3><p>Your logo, colours and domain across every portal and document. Your customers never see SolarSync.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap row">
+    <div class="col">
+      <h2>Why Australian installers switch to SolarSync CRM</h2>
+      <p>Most solar software is adapted from overseas and stops at the design. SolarSync is built for the way Australian solar businesses actually run — and it's the only one that's fully white-label.</p>
+    </div>
+    <div class="col">
+      <ul class="checks">
+        <li><span class="tick">✓</span> Purpose-built for AS/NZS compliance &amp; SAA accreditation</li>
+        <li><span class="tick">✓</span> Keep your design tool — we handle everything after it</li>
+        <li><span class="tick">✓</span> Branded client &amp; contractor portals out of the box</li>
+        <li><span class="tick">✓</span> Australian data residency (Sydney) &amp; secure PIN + authenticator login</li>
+        <li><span class="tick">✓</span> White-label option for wholesalers &amp; franchise networks</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-eyebrow">Simple pricing</div>
+    <h2 class="sec-title">Plans from $199/mo. No lock-in.</h2>
+    <p class="sec-sub">All prices ex-GST. Cancel or upgrade anytime.</p>
+    <div class="price-grid">
+      <div class="plan"><h3>Starter</h3><div class="amt">$199<small>/mo</small></div><ul><li><span class="tick">✓</span> 1 white-label portal</li><li><span class="tick">✓</span> 5 contractor seats</li><li><span class="tick">✓</span> Job pipeline &amp; client portal</li><li><span class="tick">✓</span> AS/NZS compliance checklists</li></ul><a class="btn btn-ghost" href="/app">Get started</a></div>
+      <div class="plan pop"><span class="tag">Most popular</span><h3>Growth</h3><div class="amt">$499<small>/mo</small></div><ul><li><span class="tick">✓</span> Everything in Starter</li><li><span class="tick">✓</span> 25 contractor seats</li><li><span class="tick">✓</span> Quoting + PV designer</li><li><span class="tick">✓</span> Financials module</li></ul><a class="btn btn-primary" href="/app">Get started</a></div>
+      <div class="plan"><h3>Scale</h3><div class="amt">$899<small>/mo</small></div><ul><li><span class="tick">✓</span> Everything in Growth</li><li><span class="tick">✓</span> Unlimited seats</li><li><span class="tick">✓</span> Payroll &amp; timesheets</li><li><span class="tick">✓</span> Dedicated success manager</li></ul><a class="btn btn-ghost" href="/app">Get started</a></div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="cta">
+      <h2>See your branded portal in 15 minutes</h2>
+      <p>We'll set up your logo, colours and domain free — book a quick demo or jump straight in.</p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+        <a class="btn btn-primary btn-lg" href="/app">Get started</a>
+        <a class="btn btn-ghost btn-lg" style="background:transparent;border-color:rgba(255,255,255,0.35);color:#fff" href="mailto:hello@solarsynccrm.com.au">Book a demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span>© <span id="yr"></span> SolarSync CRM · Australian solar business platform</span>
+    <span><a href="/app" style="color:var(--indigo);font-weight:600">Sign in</a> &nbsp;·&nbsp; <a href="mailto:hello@solarsynccrm.com.au">hello@solarsynccrm.com.au</a></span>
+  </div>
+</footer>
+<script>document.getElementById("yr").textContent=new Date().getFullYear();</script>
+</body>
+</html>
