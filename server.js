@@ -266,12 +266,16 @@ app.get("/api/health", h(async (req, res) => ok(res, { ok: true, ts: Date.now() 
 
 const BUNDLE = path.join(__dirname, "public", "index.html");
 const LANDING = path.join(__dirname, "public", "landing.html");
+const PRIVACY = path.join(__dirname, "public", "privacy.html");
+const TERMS = path.join(__dirname, "public", "terms.html");
 // Marketing landing page at the root; the app (login) lives at /app and all other routes.
 app.get("/", (req, res) => {
   if (fs.existsSync(LANDING)) return res.sendFile(LANDING);
   if (fs.existsSync(BUNDLE)) return res.sendFile(BUNDLE);
   res.status(200).send("SolarSync CRM");
 });
+app.get("/privacy", (req, res) => { if (fs.existsSync(PRIVACY)) return res.sendFile(PRIVACY); res.redirect("/"); });
+app.get("/terms", (req, res) => { if (fs.existsSync(TERMS)) return res.sendFile(TERMS); res.redirect("/"); });
 app.get("*", (req, res) => {
   if (fs.existsSync(BUNDLE)) return res.sendFile(BUNDLE);
   res.status(200).send("SolarSync API running. Front-end goes at backend/public/index.html");
