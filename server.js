@@ -221,16 +221,32 @@ app.post("/api/invoices/:id/pay-intent", A.authRequired, h(async (req, res) => {
   ok(res, { client_secret: pi.client_secret });
 }));
 
+// Hosted Stripe Checkout — simplest, most secure: redirect the client to Stripe's card page.
+app.post("/api/invoices/:id/checkout", A.authRequired, h(async (req, res) => {
+  const inv = await one("select * from invoices where id=$1", [req.params.id]);
+  if (!inv) return res.status(404).json({ error: "not_found" });
+  if (!stripe) return res.status(503).json({ error: "stripe_not_configured" });
+  const origin = req.headers.origin || (req.headers.host ? "https://" + req.headers.host : "");
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [{ price_data: { currency: "aud", product_data: { name: "Invoice " + (inv.number || inv.id) }, unit_amount: Math.round(Number(inv.amount) * 100) }, quantity: 1 }],
+    metadata: { invoice_id: inv.id, tenant_id: inv.tenant_id, client_id: inv.client_id || "" },
+    success_url: origin + "/app?paid=" + encodeURIComponent(inv.id),
+    cancel_url: origin + "/app?pay=cancelled",
+  });
+  ok(res, { url: session.url });
+}));
+
 app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
   let event = null;
   const sig = req.headers["stripe-signature"];
   const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
   try { event = (stripe && whSecret) ? stripe.webhooks.constructEvent(req.body, sig, whSecret) : JSON.parse(req.body); }
   catch (e) { return res.status(400).send(`bad sig: ${e.message}`); }
-  if (event.type === "payment_intent.succeeded") {
-    const pi = event.data.object;
-    const invId = pi.metadata && pi.metadata.invoice_id;
-    if (invId) { run("update invoices set status='paid', paid_at=now() where id=$1", [invId]).then(() => audit(null, "invoice_paid", invId, pi.metadata.tenant_id)).catch(()=>{}); }
+  if (event.type === "payment_intent.succeeded" || event.type === "checkout.session.completed") {
+    const obj = event.data.object;
+    const invId = obj.metadata && obj.metadata.invoice_id;
+    if (invId) { run("update invoices set status='paid', paid_at=now() where id=$1", [invId]).then(() => audit(null, "invoice_paid", invId, obj.metadata.tenant_id)).catch(()=>{}); }
   }
   res.json({ received: true });
 });
