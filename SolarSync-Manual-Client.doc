@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<title>SolarSync Customer Guide</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 30px;line-height:1.6}
+h1{font-size:26pt;color:#1a3a5c;border-bottom:4px solid #3BA0E6;padding-bottom:10px;margin-top:0}
+h2{font-size:14pt;color:#1a3a5c;margin-top:28px;margin-bottom:6px;border-left:5px solid #3BA0E6;padding-left:12px}
+h3{font-size:11pt;color:#3BA0E6;font-weight:bold;margin-top:16px}
+table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:10pt}
+th{background:#1a3a5c;color:#fff;padding:9px 12px;text-align:left;font-weight:600}
+td{padding:8px 12px;border:1px solid #ccd8e8;vertical-align:top}
+tr:nth-child(even) td{background:#f4f7fb}
+.cover{background:#1a3a5c;color:#fff;padding:40px 40px 30px;margin:-40px -30px 36px}
+.cover h1{color:#fff;border-bottom:2px solid rgba(255,255,255,0.3);font-size:28pt}
+.cover .sub{font-size:13pt;color:#7fb9e8;margin-top:8px}
+.cover .meta{font-size:10pt;color:rgba(255,255,255,0.55);margin-top:20px}
+.note{background:#e8f4fd;border-left:5px solid #3BA0E6;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.warning{background:#fff8e1;border-left:5px solid #F5A623;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.danger{background:#fdecea;border-left:5px solid #d32f2f;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+code{background:#eef2f7;padding:2px 7px;border-radius:4px;font-family:Consolas,monospace;font-size:10pt;color:#1a3a5c}
+.toc{background:#f4f7fb;border:1px solid #ccd8e8;padding:16px 20px;margin-bottom:28px;border-radius:6px}
+.toc h2{border:none;padding:0;margin:0 0 10px;font-size:12pt}
+ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
+.steps{counter-reset:step}
+.steps li{list-style:none;position:relative;padding-left:30px;margin-bottom:8px}
+.steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:1px;background:#3BA0E6;color:#fff;width:20px;height:20px;border-radius:50%;font-size:9pt;font-weight:bold;text-align:center;line-height:20px}
+@media print{.cover{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1>SolarSync<br>Customer Guide</h1>
+  <div class="sub">Your solar system, your portal &mdash; at a glance</div>
+  <div class="meta">Version 2.0 &nbsp;|&nbsp; June 2026 &nbsp;|&nbsp; Issued by your solar installer</div>
+</div>
+<div class="toc"><h2>Contents</h2><ol>
+<li>Welcome</li>
+<li>Logging In</li>
+<li>Home Screen</li>
+<li>My System</li>
+<li>Install Status</li>
+<li>Documents &amp; Owner's Guide</li>
+<li>Messages</li>
+<li>Billing &amp; Payments</li>
+<li>Book a Service</li>
+<li>Settings &amp; Notifications</li>
+<li>Important: QLD Solar Bonus Scheme Warning</li>
+<li>Troubleshooting &amp; FAQ</li>
+</ol></div>
+
+<h2>1. Welcome</h2>
+<p>Your installer has set up this portal so you can track your solar system, pay invoices, view documents, manage warranties and book services &mdash; all in one place. The portal is white-labelled under your installer's brand, so you'll see their name and colours throughout.</p>
+<p>The portal works on any device &mdash; desktop, tablet, or mobile. Your installer's crew uses the same system on-site, so everything is always up to date.</p>
+<div class="note"><strong>One-time setup:</strong> have your phone handy on first login &mdash; you'll be asked to scan a QR code with an authenticator app. After that, sign-in takes about 10 seconds.</div>
+
+<h2>2. Logging In</h2>
+<ol class="steps">
+<li>Open the portal link your installer sent you (SMS or email).</li>
+<li>Enter your <strong>6-digit PIN</strong> on the keypad.</li>
+<li><strong>First time only:</strong> scan the <strong>QR code</strong> shown, using Google Authenticator, Microsoft Authenticator, Authy, or any TOTP app.</li>
+<li>Enter the <strong>6-digit code</strong> from the authenticator app. You're in.</li>
+</ol>
+<p><strong>On future logins</strong> you'll only need your PIN plus the current 6-digit code from your authenticator app.</p>
+<div class="note">Forgot your PIN, or replaced your phone? Contact your installer &mdash; they can reset your PIN and re-issue the QR code. For security, they cannot tell you what your PIN was; they can only set a new one.</div>
+
+<h2>3. Home Screen</h2>
+<p>The home screen gives you the key numbers at a glance and highlights anything that needs your attention.</p>
+
+<h3>Live tiles</h3>
+<ul>
+<li><strong>Today so far</strong> &mdash; kWh generated today and estimated dollar savings</li>
+<li><strong>This Month / Lifetime</strong> &mdash; cumulative generation and savings since switch-on</li>
+<li><strong>CO&#8322; Offset</strong> &mdash; your lifetime environmental impact in kilograms</li>
+<li><strong>Next Service</strong> &mdash; date of your next scheduled panel clean, inspection or visit</li>
+<li><strong>Install Progress gauge</strong> &mdash; visual indicator of which lifecycle stage you're at (Enquiry &rarr; Invoiced)</li>
+<li><strong>Your Crew</strong> &mdash; photo and name of the install crew assigned to you, with a one-tap message button</li>
+</ul>
+
+<h3>Underperformance alerts</h3>
+<p>If your system generates significantly less than expected (typically below 70% of forecast for the day), a yellow banner appears at the top of the home screen explaining the likely cause &mdash; usually heavy cloud, shading, soiling, or a panel/string fault. The banner includes a one-tap <strong>Book Inspection</strong> button.</p>
+<div class="note"><strong>Don't panic on cloudy days</strong> &mdash; the alert distinguishes weather from actual faults. A persistent alert across multiple clear days is a real signal worth booking on; a one-off cloudy-day alert is not.</div>
+
+<h3>Self-consumption pro tip</h3>
+<p>The home screen displays your current self-consumption rate (the % of solar energy you use directly vs. exporting). Running large appliances &mdash; pool pump, dishwasher, washing machine, EV charging &mdash; <strong>before 3pm</strong> can lift this from ~62% to ~75%, materially reducing your power bill. The tip card shows the savings figure for your specific system.</p>
+
+<h3>Solar in Your Street &amp; Referrals</h3>
+<p>An anonymised map shows solar adoption in your neighbourhood (no addresses, just suburb-level dots). After you complete an install and rate it 4 stars or higher, a <strong>Refer a Neighbour</strong> button appears. The flow is:</p>
+<ol class="steps">
+<li>Tap <strong>Refer a Neighbour</strong>.</li>
+<li>Enter your neighbour's name and email (or phone).</li>
+<li>An invite is sent with a unique referral code linked to your account.</li>
+<li>When they sign their quote, <strong>you receive a $200 bill credit</strong> applied to your next invoice or paid as a direct deposit.</li>
+</ol>
+<p>You can refer as many neighbours as you like; there's no cap on credits earned.</p>
+
+<h3>Satisfaction rating</h3>
+<p>After your install is marked complete, a star-rating card appears on the home screen. Your rating is shared privately with your installer (and helps trigger the referral flow). You can also leave a written comment &mdash; this never appears publicly without your written consent.</p>
+
+<h2>4. My System</h2>
+<p>Navigate to <strong>My System</strong> for detailed generation data, system health, equipment information and VPP options.</p>
+
+<h3>Generation chart</h3>
+<p>Shows 12 months of monthly kWh production as a bar chart. Summary figures below the chart show total generation, bill savings, feed-in credit earned, and CO&#8322; avoided for the year.</p>
+
+<h3>System health gauge</h3>
+<p>Displays overall performance as a percentage (e.g. <em>96% &mdash; all strings within expected range &middot; last sync 4 min ago</em>). All strings are monitored continuously. If any drop below expected range, your installer is notified automatically &mdash; you don't need to call them.</p>
+<p><strong>If the gauge sits below 85%:</strong> a "Book diagnostic" button appears alongside the gauge. Tap it to send a structured fault report to your installer with the relevant string data already attached.</p>
+
+<h3>Components</h3>
+<p>Panel model, inverter model, battery (if installed) and warranty expiry dates are listed here for your records. Each component has a <strong>View warranty</strong> button that opens the PDF directly.</p>
+
+<h3>VPP Eligibility</h3>
+<p>If you have a battery, this section lists Virtual Power Plant programs you're eligible for in your state. Currently supported (subject to your battery brand and retailer):</p>
+<table>
+<tr><th>VPP Program</th><th>Best for</th><th>Typical benefit</th></tr>
+<tr><td>AGL VPP</td><td>AGL customers, Tesla Powerwall / sonnenBatterie</td><td>$280&ndash;$400 /yr credit + bill discount</td></tr>
+<tr><td>Origin Loop</td><td>Origin customers, multi-brand battery</td><td>$300/yr sign-up + per-event credits</td></tr>
+<tr><td>Amber Electric</td><td>Customers willing to take wholesale price exposure</td><td>Highest upside in summer; variable risk</td></tr>
+<tr><td>Energy Locals</td><td>NSW &amp; QLD, broad brand support</td><td>Flat $200&ndash;$350/yr</td></tr>
+<tr><td>Reposit Power</td><td>Tech-savvy users, multi-brand</td><td>Per-event payments, variable</td></tr>
+<tr><td>Tesla VPP</td><td>Powerwall 2 / 3 only, SA &amp; VIC priority</td><td>$300&ndash;$500/yr in eligible regions</td></tr>
+</table>
+<p>Select your battery brand from the dropdown to filter the list to programs you can actually join. Tap <strong>Enrol</strong> on any program to open the provider's signup flow in a new tab. Enrolment is handled directly with the VPP provider; SolarSync passes them your basic details to pre-fill the form (with your consent).</p>
+<div class="warning"><strong>QLD customers on Tariff 9900:</strong> joining a VPP requires a battery, and a battery will void your 44&cent;/kWh feed-in tariff. See Section 11 before enrolling.</div>
+
+<h3>Carbon Impact</h3>
+<p>Shows your lifetime CO&#8322; avoided, plus equivalents: trees planted, litres of petrol not burned, and car kilometres avoided. Use the <strong>Share</strong> button to copy a friendly summary card to clipboard for socials or to send to friends.</p>
+
+<h2>5. Install Status</h2>
+<p>Navigate to <strong>Install Status</strong> to track exactly where your job is in the process.</p>
+<table>
+<tr><th>Stage</th><th>What it means</th></tr>
+<tr><td>Enquiry</td><td>Initial contact received &mdash; quote being prepared</td></tr>
+<tr><td>Advised</td><td>Your installer has walked you through the proposal</td></tr>
+<tr><td>Deposit paid</td><td>Deposit received &mdash; install date being confirmed</td></tr>
+<tr><td>Scheduled</td><td>Install date confirmed with your crew</td></tr>
+<tr><td>Installed</td><td>System live and generating power</td></tr>
+<tr><td>Manuals issued</td><td>Handover pack, warranties and monitoring login sent to you</td></tr>
+<tr><td>Invoiced</td><td>Final invoice issued &mdash; job fully closed</td></tr>
+</table>
+<p>The <strong>Recent updates</strong> panel shows a timestamped log of every action taken on your job &mdash; quote sent, payment received, crew dispatched, panels lifted, inverter commissioned, paperwork lodged. The <strong>What happens next</strong> panel shows upcoming stages and the typical timing between them.</p>
+
+<h2>6. Documents &amp; Owner's Guide</h2>
+<p>Navigate to <strong>Documents</strong> to access all your install paperwork.</p>
+
+<h3>Documents library</h3>
+<ul>
+<li><strong>Signed quote</strong> &mdash; your accepted quote with full system specification</li>
+<li><strong>Invoices</strong> &mdash; deposit and final balance invoices</li>
+<li><strong>Site plan &amp; roof layout</strong> &mdash; finalised array design with panel positions</li>
+<li><strong>Solar manual &amp; handover pack</strong> &mdash; issued 1&ndash;2 days after final commissioning</li>
+<li><strong>SAA Accreditation Certificate</strong> &mdash; your installer's Clean Energy Council accreditation</li>
+<li><strong>Electrical Safety Certificate</strong> &mdash; required by your electricity retailer to connect to the grid</li>
+<li><strong>Panel and inverter warranties</strong> &mdash; downloadable PDF copies</li>
+</ul>
+<p>Documents marked <strong>Pending</strong> will be available after commissioning is complete (typically 3&ndash;5 business days after your install date).</p>
+
+<h3>Insurance Documentation Pack</h3>
+<p>Many home insurers now require proof of compliant solar installation. Click <strong>Download Insurance Pack (PDF)</strong> to generate a single document containing your system specs, SAA accreditation, safety certificate, installer licence and workmanship warranty. You can also click <strong>Email to Insurer</strong> to send it directly &mdash; just enter your insurer's email address.</p>
+
+<h3>Service &amp; Compliance Reports</h3>
+<p>A separate panel lists service reports your installer has issued (panel cleans, performance tests, annual inspections). Each row has <strong>View</strong> and <strong>Download</strong> buttons. <strong>View</strong> opens a preview modal so you can read it without saving.</p>
+<div class="note">Some reports may be marked <strong>Locked until final payment</strong> &mdash; this is your installer's policy and clears automatically when the invoice is settled.</div>
+
+<h3>Owner's Guide</h3>
+<p>The <strong>Owner's Guide</strong> button opens an 8-section interactive guide covering:</p>
+<ol>
+<li><strong>How your system works</strong> &mdash; sun &rarr; panels &rarr; inverter &rarr; home &rarr; grid, with diagrams</li>
+<li><strong>Your components</strong> &mdash; specs for the exact panels, inverter and battery on your roof</li>
+<li><strong>Monitoring</strong> &mdash; how to read your inverter display and the portal generation chart</li>
+<li><strong>Maintenance schedule</strong> &mdash; visual inspection (monthly), professional clean (3&ndash;5 years), electrical check (5 years)</li>
+<li><strong>Safety</strong> &mdash; what to do in a fire, storm or grid outage; isolators and their location</li>
+<li><strong>Troubleshooting</strong> &mdash; common issues and first steps (covered also in Section 12 below)</li>
+<li><strong>Warranties</strong> &mdash; what's covered, for how long, and how to claim</li>
+<li><strong>Who to call</strong> &mdash; installer, manufacturer, retailer, electricity distributor, emergency</li>
+</ol>
+<p>Tap <strong>Download as PDF</strong> to save the whole guide for offline use &mdash; useful to keep on your phone or print for the kitchen drawer.</p>
+
+<h2>7. Messages</h2>
+<p>Navigate to <strong>Messages</strong> to chat directly with your install crew. Messages are delivered in real time and your crew can respond from their field app. Use this for:</p>
+<ul>
+<li>Questions about your install progress</li>
+<li>Arranging site access on install day (gate codes, dog-in-yard, parking)</li>
+<li>Reporting an issue after installation</li>
+<li>Following up on documents or warranties</li>
+<li>Asking for advice on appliance scheduling, battery settings, etc.</li>
+</ul>
+<p>Photos and short videos can be attached &mdash; useful for showing your crew an error light, a noise, or a roof concern. There's no character limit.</p>
+<div class="note"><strong>For genuine emergencies</strong> (sparks, smoke, water ingress around the inverter): turn off the AC isolator and the DC isolator, then call your installer's after-hours number listed in the Owner's Guide &rarr; "Who to call". Don't rely on a message getting read in time.</div>
+
+<h2>8. Billing &amp; Payments</h2>
+<p>Navigate to <strong>Billing</strong> to view and pay your invoices.</p>
+
+<h3>Understanding your invoice</h3>
+<p>Each invoice shows the gross system price, the <strong>STC rebate</strong> applied, your nett amount payable, and any deposit already paid. The STC (Small-scale Technology Certificate) rebate is a federal subsidy &mdash; typically $1,300&ndash;$2,800 depending on your system size and location &mdash; that your installer claims on your behalf and discounts off your invoice automatically. You don't need to apply for it.</p>
+
+<h3>Paying an invoice</h3>
+<ol class="steps">
+<li>Click <strong>Pay Now</strong> on the outstanding invoice.</li>
+<li>Enter your card details (Visa, Mastercard, Amex accepted on most plans).</li>
+<li>Click <strong>Pay $X now</strong>. Payment is processed immediately via Stripe.</li>
+<li>The invoice status updates to <em>Paid</em> instantly and a tax receipt is emailed to you.</li>
+</ol>
+
+<h3>Payment methods</h3>
+<p>Tap <strong>Add payment method</strong> to save a card for future invoices and service bookings. Cards are stored securely with Stripe; SolarSync does not see or store card numbers.</p>
+
+<h3>Feed-in Tariff Comparison</h3>
+<p>The billing screen shows a comparison of current retailer feed-in rates for your state. Each retailer row has a <strong>Compare</strong> button that opens that retailer's solar plans page in a new tab so you can review the full plan terms before switching.</p>
+<div class="warning"><strong>QLD Solar Bonus Scheme (Tariff 9900) customers:</strong> your current 44&cent;/kWh rate is grandfathered and far exceeds any standard retailer rate. Do NOT switch retailers &mdash; you would lose this rate permanently. See Section 11.</div>
+
+<h3>Brighte Finance &mdash; 3-step application</h3>
+<p>If you need to finance your system or an upgrade (battery, EV charger, extra panels), click <strong>Apply for Brighte Finance</strong>. The wizard takes about 2 minutes:</p>
+<ol class="steps">
+<li><strong>Loan amount &amp; plan type</strong> &mdash; choose Interest-Free (6, 12, 18 or 24 months, zero interest), Green Loan (6.99% p.a., 1&ndash;7 years), or BNPL (4 fortnightly payments).</li>
+<li><strong>Term &amp; repayments</strong> &mdash; drag the term slider to see your monthly repayment update live. Compare options side-by-side before committing.</li>
+<li><strong>Soft credit check</strong> &mdash; enter name, DOB, income range and existing debts. This is a soft inquiry &mdash; it does <strong>not</strong> affect your credit score. You get an instant pre-approval decision.</li>
+</ol>
+<p>Once pre-approved, Brighte sends a contract via email. Funds are paid directly to your installer; you repay Brighte by direct debit.</p>
+
+<h2>9. Book a Service</h2>
+<p>Navigate to <strong>Book a Service</strong> to request an appointment or quote a system upgrade.</p>
+<table>
+<tr><th>Service type</th><th>Price guide</th><th>What's included</th></tr>
+<tr><td>Panel Cleaning</td><td>$220</td><td>Soft-wash clean of all panels (&sim;2 hrs on-site)</td></tr>
+<tr><td>Performance Test</td><td>$180</td><td>Full string test, inverter check, written output report</td></tr>
+<tr><td>Health Inspection</td><td>Included annually</td><td>Visual &amp; electrical safety inspection</td></tr>
+<tr><td>Add a Battery</td><td>Quote required</td><td>Grid-connect, off-grid, or AC-coupled storage</td></tr>
+<tr><td>EV Charger</td><td>Quote required</td><td>Smart solar EV charger &mdash; Zappi, Tesla or Wallbox</td></tr>
+<tr><td>Hot Water Diverter</td><td>From $390</td><td>Divert excess solar to your hot water system</td></tr>
+<tr><td>Changeover Switch</td><td>Quote required</td><td>Manual or automatic transfer switch for generator/backup</td></tr>
+</table>
+
+<h3>Booking a fixed-price service (clean, test, inspection)</h3>
+<ol class="steps">
+<li>Choose the service type.</li>
+<li>Pick an available date from the 30-day calendar. Available days are highlighted; unavailable days are greyed out.</li>
+<li>Pick a time slot: 9:00 AM, 11:30 AM, or 1:30 PM.</li>
+<li>Review the booking summary and click <strong>Confirm Booking</strong>.</li>
+<li>You'll see a confirmation screen and receive an email/SMS receipt. Your installer messages you the day before with the crew's arrival time.</li>
+</ol>
+
+<h3>Battery quote wizard</h3>
+<p>Selecting <strong>Add a Battery</strong> opens a 6-question wizard so your installer can recommend the right product:</p>
+<ol class="steps">
+<li><strong>Feed-in tariff check</strong> &mdash; "Are you on the QLD Solar Bonus Scheme (44&cent;/kWh)?" Yes / No / Unsure. If yes, the SBS warning modal (Section 11) is shown immediately with the dollar impact &mdash; you can stop here or proceed informed.</li>
+<li><strong>Inverter type</strong> &mdash; Hybrid / Standard string / Unsure. If standard, you'll see an AC-coupling explainer (an extra battery inverter is needed; cost is included in the quote).</li>
+<li><strong>Goal</strong> &mdash; Bill savings / Blackout backup / Both / Off-grid.</li>
+<li><strong>Backup scope</strong> (if backup chosen) &mdash; Essentials only (fridge, lights, internet, a few power points) or Whole-home (every circuit).</li>
+<li><strong>Budget range</strong> &mdash; under $8k / $8&ndash;15k / $15&ndash;25k / $25k+ / open.</li>
+<li><strong>Brand &amp; chemistry preference</strong> &mdash; Tesla Powerwall, sonnen, BYD, Alpha-ESS, LG, Sungrow, Goodwe, or "installer's recommendation". If <em>Off-grid</em> was chosen in Q3, the brand list switches to off-grid&ndash;capable products and you'll be asked about preferred chemistry (LFP vs NMC).</li>
+</ol>
+<p>The wizard submits a structured quote request. Your installer typically responds within 2 business days.</p>
+
+<h3>EV charger enquiry</h3>
+<p>2 questions: <strong>supply type</strong> (single-phase / three-phase / unsure) and <strong>priority</strong> (solar-first charging / fastest charging / smartest scheduling / unsure). Submitted as a quote request.</p>
+
+<h3>Hot water diverter enquiry</h3>
+<p>2 questions: <strong>preferred control</strong> (divert excess solar / time-based / both) and <strong>hot water system type</strong> (resistive electric / heat pump / gas-boost). Some HWS types cost more to integrate; the quote reflects this.</p>
+
+<h3>Changeover switch enquiry</h3>
+<p>2 questions: <strong>switch between</strong> (grid &harr; generator / grid &harr; battery / grid &harr; solar) and <strong>operation</strong> (manual / automatic). Required for legal generator backup in most states.</p>
+
+<h2>10. Settings &amp; Notifications</h2>
+<p>Navigate to <strong>Settings</strong> to manage your account.</p>
+
+<h3>Profile</h3>
+<p>Update your name, email, phone and service address. Changing your service address may affect VPP eligibility, FiT rates and warranty &mdash; your installer is notified automatically.</p>
+
+<h3>Notifications</h3>
+<p>Each channel (Email, SMS, Push) can be toggled independently for these event types:</p>
+<ul>
+<li><strong>Job updates</strong> &mdash; quote sent, deposit received, install scheduled, install complete, paperwork lodged</li>
+<li><strong>Invoices</strong> &mdash; new invoice issued, payment reminder (7 days then 1 day before due), receipt</li>
+<li><strong>Service bookings</strong> &mdash; booking confirmed, day-before reminder, crew on the way</li>
+<li><strong>Performance alerts</strong> &mdash; underperformance alerts (Section 3) and string fault notifications</li>
+<li><strong>Weekly summary</strong> &mdash; Sunday evening recap of generation, savings and CO&#8322; for the week</li>
+<li><strong>Promotions</strong> &mdash; battery deals, VPP openings, government rebate changes (off by default)</li>
+</ul>
+
+<h3>Security</h3>
+<ul>
+<li><strong>Two-factor authentication</strong> &mdash; always active, cannot be disabled. This protects your install records, invoices and payment methods.</li>
+<li><strong>Change PIN</strong> &mdash; sets a new 6-digit PIN immediately. You'll need to log in again on other devices.</li>
+<li><strong>Reset authenticator</strong> &mdash; generates a new QR code if you've replaced your phone. The old code stops working.</li>
+<li><strong>Active sessions</strong> &mdash; shows devices currently signed in. Tap <strong>Sign out</strong> next to any to revoke.</li>
+</ul>
+
+<h3>Sign out</h3>
+<p>Returns you to the login screen immediately and clears your session token. Your data is safe; signing back in restores everything.</p>
+
+<h2>11. Important: QLD Solar Bonus Scheme Warning</h2>
+<div class="danger">
+<strong>This section is critical if your electricity bill shows a 44&cent;/kWh feed-in rate (Tariff 9900).</strong>
+<p>The Queensland Solar Bonus Scheme (SBS) pays an exceptional 44&cent;/kWh for solar energy exported to the grid. This rate is grandfathered &mdash; it is not available to new systems and will not be offered again. The scheme closes on <strong>1 July 2028</strong>.</p>
+<p><strong>Adding a battery, an EV charger using export-throttling, an inverter upgrade, or expanding system capacity beyond your originally-approved size will permanently void your SBS eligibility.</strong> Your feed-in rate would drop from 44&cent; to approximately 6&ndash;10&cent;/kWh &mdash; a reduction of around <strong>$1,400&ndash;$1,600 per year</strong> in feed-in credits for a typical 6.6 kW system.</p>
+<p>Before proceeding with any of the above, discuss the financial trade-off with your installer. In many cases, keeping the 44&cent; tariff until the scheme ends in July 2028 is the better financial decision &mdash; even if you've wanted a battery for years.</p>
+<p><strong>What is safe:</strong> panel cleaning, performance testing, like-for-like inverter replacement after a fault, panel replacement after warranty claim, hot water diverter (does not export-throttle).</p>
+<p><strong>What voids SBS:</strong> any battery, any system size increase, any change that requires you to re-apply for connection.</p>
+</div>
+
+<h2>12. Troubleshooting &amp; FAQ</h2>
+
+<h3>My system isn't generating anything today</h3>
+<ol>
+<li>Check your inverter display &mdash; is there a fault code or red light?</li>
+<li>Check your switchboard &mdash; has the solar isolator tripped? If so, do <strong>not</strong> reset it more than once; book a diagnostic.</li>
+<li>Check the home screen for an underperformance alert &mdash; this often explains it.</li>
+<li>If none of the above, send a message to your crew with a photo of the inverter display.</li>
+</ol>
+
+<h3>The portal says I generated $4 today &mdash; my bill went up?</h3>
+<p>Solar reduces your <strong>imported</strong> power and earns you a feed-in credit for <strong>exported</strong> power. If you used more total electricity than usual (heat-pump, EV, summer aircon), your bill can rise even with solar producing well. Open <strong>My System &rarr; Self-consumption</strong> to see where your solar energy went.</p>
+
+<h3>My inverter is making noise</h3>
+<p>A faint hum or fan noise during peak generation is normal. A loud buzzing, clicking, or burning smell is not &mdash; turn off the AC isolator and message your crew immediately with a video.</p>
+
+<h3>There's a power outage in my street &mdash; will my solar still work?</h3>
+<p>By law, grid-tied solar inverters shut down during a grid outage for safety (so they don't electrify the lines technicians are working on). If you have a <strong>battery with backup capability</strong> wired through a changeover switch, your essentials (or whole home) will continue to run. You can check this in Owner's Guide &rarr; Safety.</p>
+
+<h3>How do I make a warranty claim?</h3>
+<p>Open <strong>My System &rarr; Components</strong>, tap the affected component, then <strong>Start warranty claim</strong>. The form pre-fills with your system details. Your installer typically handles the manufacturer paperwork on your behalf at no charge.</p>
+
+<h3>How do I download my generation data for tax / strata?</h3>
+<p>Open <strong>My System &rarr; Generation chart</strong>, tap the &hellip; menu in the top right, then <strong>Export CSV</strong>. You can choose a date range up to 5 years.</p>
+
+<h3>Can I share my account with my partner / family?</h3>
+<p>Yes &mdash; ask your installer to add a second account holder. Each person gets their own PIN and authenticator setup. Both can view everything, but only the primary account holder can change payment methods.</p>
+
+<h3>What happens to my account if I sell the house?</h3>
+<p>Send a message to your installer with the settlement date. They'll transfer the system records to the new owner's account and close yours. The 25-year panel warranty and 10-year workmanship warranty transfer with the property automatically.</p>
+
+<p style="margin-top:40px;color:#888;font-size:9pt;border-top:1px solid #e0e0e0;padding-top:12px;">
+SolarSync Customer Guide &middot; Version 2.0 &middot; June 2026 &middot; Issued by your solar installer<br>
+&copy; 2026 SolarSync. For support, contact your installer directly via the Messages screen.
+</p>
+</body></html>
