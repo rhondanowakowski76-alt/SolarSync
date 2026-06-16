@@ -104,6 +104,20 @@ async function migrate() {
     `create table if not exists audit_log (
       id text primary key, actor_id text, action text not null, target text, tenant_id text,
       meta jsonb default '{}', created_at timestamptz default now())`,
+    `create table if not exists beta_testers (
+      id text primary key,
+      issued_by text,
+      name text not null,
+      email text,
+      scope text default 'tenant,contractor,client',
+      plan text default 'Scale',
+      notes text,
+      issued_at timestamptz default now(),
+      expires_at timestamptz,
+      revoked boolean default false,
+      revoked_at timestamptz,
+      last_seen timestamptz,
+      use_count int default 0)`,
   ];
   for (const s of stmts) await _db.query(s);
 }

@@ -260,6 +260,116 @@ app.post("/api/invoices/:id/mark-paid", A.authRequired, A.requireRole("tenant_ad
 }));
 
 // ============================================================
+// BETA TESTER ACCESS — issue / list / revoke / restore / delete / redeem
+// Tester magic-link tokens are signed JWTs (HS256, JWT_SECRET).
+// Server-side revocation: redeem() checks beta_testers.revoked before
+// minting an access token, so even a still-validly-signed JWT stops
+// working the moment you flip the flag.
+// ============================================================
+const jwt = require("jsonwebtoken");
+function _makeId(len = 14) {
+  // No I/O/0/1 — display-friendly + URL-safe.
+  const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const b = require("crypto").randomBytes(len);
+  let s = ""; for (let i = 0; i < len; i++) s += a[b[i] & 31];
+  return s;
+}
+function _testerOrigin(req) {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host  = req.headers["x-forwarded-host"]  || req.headers.host;
+  return `${proto}://${host}`;
+}
+function _testerLink(req, jwtToken) {
+  return `${_testerOrigin(req)}/app?tester=${encodeURIComponent(jwtToken)}`;
+}
+
+// Issue — reseller only
+app.post("/api/testers/issue", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const { name, email, duration_days, notes } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: "name_required" });
+  const id = _makeId();
+  const now = new Date();
+  const validDurations = { "30": 30, "60": 60, "90": 90 };
+  const days = (duration_days === "never" || duration_days === null) ? null : (validDurations[String(duration_days)] || 30);
+  const expiresAt = days === null ? null : new Date(now.getTime() + days * 24 * 3600 * 1000);
+  const finalEmail = (email && String(email).trim()) || (`tester+${id.toLowerCase().slice(0,8)}@solarsync.demo`);
+  await run(
+    `insert into beta_testers (id, issued_by, name, email, scope, plan, notes, issued_at, expires_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, req.user.sub, String(name).trim(), finalEmail, "tenant,contractor,client", "Scale", notes ? String(notes).trim() : null, now, expiresAt]
+  );
+  // Sign JWT with the same secret used for normal auth.
+  const expSec = expiresAt ? Math.floor(expiresAt.getTime() / 1000) : Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365 * 10;
+  const token = jwt.sign({ typ: "tester", id, name: String(name).trim(), email: finalEmail, scope: ["tenant","contractor","client"], exp: expSec }, process.env.JWT_SECRET || "dev-only-change-me");
+  await audit(req.user.sub, "tester_issue", id, null, { name, email: finalEmail, expiresAt });
+  ok(res, {
+    id, name: String(name).trim(), email: finalEmail, plan: "Scale",
+    issued_at: now.toISOString(), expires_at: expiresAt ? expiresAt.toISOString() : null,
+    notes: notes ? String(notes).trim() : null,
+    scope: ["tenant","contractor","client"], revoked: false,
+    token, link: _testerLink(req, token),
+  });
+}));
+
+// List — reseller only
+app.get("/api/testers", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const r = await rows(`select id, name, email, scope, plan, notes, issued_at, expires_at, revoked, revoked_at, last_seen, use_count from beta_testers order by issued_at desc`);
+  ok(res, r);
+}));
+
+// Revoke — reseller only
+app.post("/api/testers/:id/revoke", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const r = await one(`select id from beta_testers where id=$1`, [req.params.id]);
+  if (!r) return res.status(404).json({ error: "not_found" });
+  await run(`update beta_testers set revoked=true, revoked_at=$1 where id=$2`, [new Date(), req.params.id]);
+  await audit(req.user.sub, "tester_revoke", req.params.id, null);
+  ok(res, { ok: true });
+}));
+
+// Restore — reseller only
+app.post("/api/testers/:id/restore", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  await run(`update beta_testers set revoked=false, revoked_at=null where id=$1`, [req.params.id]);
+  await audit(req.user.sub, "tester_restore", req.params.id, null);
+  ok(res, { ok: true });
+}));
+
+// Delete — reseller only
+app.delete("/api/testers/:id", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  await run(`delete from beta_testers where id=$1`, [req.params.id]);
+  await audit(req.user.sub, "tester_delete", req.params.id, null);
+  ok(res, { ok: true });
+}));
+
+// Redeem — PUBLIC. Tester clicks the magic link → portal POSTs the token here.
+// We verify JWT signature + DB state (revoked / expired) then mint a regular
+// access token for a synthetic tenant_admin user pointing at a demo tenant.
+app.post("/api/testers/redeem", h(async (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: "token_required" });
+  let p;
+  try { p = jwt.verify(token, process.env.JWT_SECRET || "dev-only-change-me"); }
+  catch (e) { return res.status(401).json({ error: "invalid_token" }); }
+  if (p.typ !== "tester" || !p.id) return res.status(401).json({ error: "invalid_token" });
+  const row = await one(`select * from beta_testers where id=$1`, [p.id]);
+  if (!row) return res.status(404).json({ error: "not_found" });
+  if (row.revoked) return res.status(403).json({ error: "revoked" });
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return res.status(403).json({ error: "expired" });
+  await run(`update beta_testers set last_seen=$1, use_count=use_count+1 where id=$2`, [new Date(), p.id]);
+  // Synthetic user — never persisted. tenant_id points at the demo tenant.
+  const syntheticUser = {
+    id: `tester-${p.id}`, tenant_id: "tenant-helios", app_role: "tenant_admin",
+    display_name: p.name || "Beta Tester",
+  };
+  const accessToken  = A.mintAccess(syntheticUser);
+  const refreshToken = A.mintRefresh(syntheticUser);
+  await audit(syntheticUser.id, "tester_redeem", p.id, syntheticUser.tenant_id);
+  ok(res, {
+    access_token: accessToken, refresh_token: refreshToken,
+    user: { id: syntheticUser.id, display_name: syntheticUser.display_name, app_role: syntheticUser.app_role, tenant_id: syntheticUser.tenant_id, is_tester: true },
+    tester: { id: row.id, name: row.name, email: row.email, plan: row.plan, expires_at: row.expires_at, scope: (row.scope || "tenant,contractor,client").split(",") },
+  });
+}));
+
+// ============================================================
 // Health + serve the front-end
 // ============================================================
 app.get("/api/health", h(async (req, res) => ok(res, { ok: true, ts: Date.now() })));
