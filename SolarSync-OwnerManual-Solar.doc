@@ -75,7 +75,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 </ol></div>
 
 <h2>1. About this manual</h2>
-<p>This manual is your reference document for owning and operating your solar system. It is issued at the time of system handover by <span class="fill">[INSTALLER COMPANY NAME]</span> in accordance with Clean Energy Council (CEC) Code of Conduct and AS/NZS 5033 requirements.</p>
+<p>This manual is your reference document for owning and operating your solar system. It is issued at the time of system handover by <span class="fill">[INSTALLER COMPANY NAME]</span> in accordance with the Solar Accreditation Australia (SAA) installer accreditation requirements and AS/NZS 5033.</p>
 <p>Keep this manual in a safe place &mdash; you will need it for insurance claims, warranty claims, when selling your house, when the network distributor visits, and when any future contractor works on your system. A digital copy is also available in your customer portal under <strong>Documents</strong>.</p>
 <div class="warning">If your system is grid-connected, you should also have received the companion document <strong>"Grid-Connect Solar Owner's Manual"</strong> covering your network connection, anti-islanding behaviour, feed-in tariff and retailer obligations. If you did not receive this, contact your installer.</div>
 
@@ -93,7 +93,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <tr><td>Battery (if any)</td><td><span class="fill">[BRAND] [MODEL] [kWh] / N/A</span></td></tr>
 <tr><td>Install date</td><td><span class="fill">[DD MMM YYYY]</span></td></tr>
 <tr><td>Commissioning date</td><td><span class="fill">[DD MMM YYYY]</span></td></tr>
-<tr><td>Lead installer (CEC#)</td><td><span class="fill">[NAME] (#[CEC ACCREDITATION NUMBER])</span></td></tr>
+<tr><td>Lead installer (SAA#)</td><td><span class="fill">[NAME] (#[SAA ACCREDITATION NUMBER])</span></td></tr>
 <tr><td>Lead electrician (licence#)</td><td><span class="fill">[NAME] (#[ELECTRICAL LICENCE])</span></td></tr>
 <tr><td>Job reference</td><td><span class="fill">[JOB#]</span></td></tr>
 </table>
@@ -283,7 +283,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <tr><td>Inverter</td><td><span class="fill">[YEARS]</span></td><td>N/A</td><td>Manufacturer (via installer)</td></tr>
 <tr><td>Battery</td><td><span class="fill">[YEARS] / [CYCLES]</span></td><td><span class="fill">[%] at end</span></td><td>Manufacturer (via installer)</td></tr>
 <tr><td>Mounting system</td><td><span class="fill">[YEARS]</span></td><td>N/A</td><td>Manufacturer (via installer)</td></tr>
-<tr><td>Installation workmanship</td><td>5 years minimum (CEC Code)</td><td>N/A</td><td><span class="fill">[INSTALLER COMPANY NAME]</span></td></tr>
+<tr><td>Installation workmanship</td><td>5 years minimum (SAA Code)</td><td>N/A</td><td><span class="fill">[INSTALLER COMPANY NAME]</span></td></tr>
 <tr><td>Whole-of-system performance</td><td><span class="fill">[YEARS, if offered]</span></td><td><span class="fill">[YEARS]</span></td><td><span class="fill">[INSTALLER COMPANY NAME]</span></td></tr>
 </table>
 
@@ -302,7 +302,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <ul>
 <li>System size in kW (DC and AC)</li>
 <li>Install date and installer details</li>
-<li>That the system is CEC-compliant and installed by a CEC-accredited installer</li>
+<li>That the system is installed by an SAA-accredited installer using CEC-approved panels, inverter and (if fitted) battery</li>
 <li>Whether you have a battery, and if so, its make/model/capacity</li>
 </ul>
 <p>Your customer portal contains an <strong>Insurance Documentation Pack</strong> button under Documents &mdash; this generates a single PDF you can email straight to your insurer.</p>
@@ -349,7 +349,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <p>Solar panels are recyclable. At end-of-life (25+ years) or if a panel is damaged:</p>
 <ul>
 <li>Do not put panels in household waste &mdash; they contain glass, aluminium and small amounts of silver and lead.</li>
-<li>Contact your installer or a CEC-accredited recycler. Many councils now offer drop-off points.</li>
+<li>Contact your installer or a licensed solar-panel recycler. Many councils now offer drop-off points; ask your installer for current local options.</li>
 <li>Batteries <strong>must</strong> be returned to a licensed lithium-battery recycler &mdash; never to general waste or scrap metal. Battery fires in landfill are a serious problem.</li>
 <li>Inverters can usually be returned to the manufacturer or to e-waste recycling.</li>
 </ul>
@@ -366,21 +366,21 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <tr><td>Electricity retailer</td><td>Bill, feed-in tariff, plan changes</td><td><span class="fill">[RETAILER NAME &amp; PHONE]</span></td></tr>
 <tr><td>Network distributor (DNSP)</td><td>Grid outages, connection issues, voltage problems</td><td><span class="fill">[DNSP NAME &amp; PHONE]</span></td></tr>
 <tr><td>Energy &amp; Water Ombudsman</td><td>Unresolved retailer or distributor disputes</td><td><span class="fill">[STATE EWO PHONE]</span></td></tr>
-<tr><td>CEC Code of Conduct</td><td>Unresolved installer disputes</td><td>1300 002 882 &middot; complaints@cleanenergycouncil.org.au</td></tr>
+<tr><td>Solar Accreditation Australia (SAA)</td><td>Unresolved installer accreditation / workmanship disputes</td><td>complaints@solaraccreditation.com.au</td></tr>
 </table>
 
 <h2>20. Glossary</h2>
 <ul>
 <li><strong>AC (alternating current)</strong> &mdash; the type of electricity used in your home and on the grid.</li>
 <li><strong>AS/NZS 5033</strong> &mdash; Australian/New Zealand standard for the installation of PV arrays.</li>
-<li><strong>CEC</strong> &mdash; Clean Energy Council. The industry body that accredits installers and sets the code of conduct.</li>
+<li><strong>CEC</strong> &mdash; Clean Energy Council. The industry body that maintains the lists of approved PV modules, inverters and batteries that installers must use. (Note: CEC previously also handled installer accreditation; that role moved to SAA in late 2023.)</li>
 <li><strong>CES / COES</strong> &mdash; Certificate of Electrical Safety. Issued by the electrician at install completion.</li>
 <li><strong>DC (direct current)</strong> &mdash; the type of electricity solar panels produce. Converted to AC by the inverter.</li>
 <li><strong>DNSP</strong> &mdash; Distribution Network Service Provider. The company that owns and maintains the poles and wires in your street. Different to your retailer.</li>
 <li><strong>Feed-in tariff (FiT)</strong> &mdash; the per-kWh rate your retailer pays for solar energy you export to the grid.</li>
 <li><strong>Inverter</strong> &mdash; converts DC from the panels into AC for your home.</li>
 <li><strong>kW vs kWh</strong> &mdash; kW is power (rate); kWh is energy (amount). A 6 kW system running flat-out for one hour produces 6 kWh.</li>
-<li><strong>SAA</strong> &mdash; Solar Accreditation Australia. (Formerly CEC accreditation.)</li>
+<li><strong>SAA</strong> &mdash; Solar Accreditation Australia. The body that accredits solar installers and designers. Took over installer accreditation from the CEC in late 2023.</li>
 <li><strong>STC</strong> &mdash; Small-scale Technology Certificate. Federal subsidy claimed by your installer at install and discounted off your invoice.</li>
 <li><strong>String</strong> &mdash; a series-connected group of panels wired to one input of the inverter. Most home systems have 1&ndash;3 strings.</li>
 <li><strong>VPP</strong> &mdash; Virtual Power Plant. A program (typically by a retailer) that orchestrates many home batteries to act like a single grid-scale generator. You're paid to participate.</li>

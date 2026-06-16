@@ -41,7 +41,7 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <strong>TEMPLATE INSTRUCTIONS &mdash; for the installer:</strong>
 <ul>
 <li>This document is the <strong>companion</strong> to the Solar System Owner's Manual. Issue both at handover.</li>
-<li>This document is required by the CEC Code of Conduct (clause 1.5) for all grid-connected installations.</li>
+<li>This document is required under the Solar Accreditation Australia (SAA) installer accreditation requirements for all grid-connected installations.</li>
 <li>Edit in Microsoft Word. Replace every <span class="fill">[PLACEHOLDER]</span> with the customer-specific value. State-specific sections (QLD SBS, SA Smart Export, Victoria voltage rules etc.) should be deleted if not applicable.</li>
 <li>Delete this purple instruction box before issuing.</li>
 </ul>
@@ -279,13 +279,13 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 <p>Your installer should have provided the following documents at commissioning. Keep all of them with this manual.</p>
 <ul>
 <li><strong>Certificate of Electrical Safety (CES / COES)</strong> &mdash; issued by the licensed electrician on completion. Required by your retailer to switch the system on.</li>
-<li><strong>SAA (Solar Accreditation Australia, formerly CEC) Accreditation Certificate</strong> &mdash; proof your installer is accredited.</li>
+<li><strong>SAA Accreditation Certificate</strong> &mdash; proof from Solar Accreditation Australia that your installer is currently accredited.</li>
 <li><strong>DNSP Connection Approval letter</strong> &mdash; from the network operator, approving your specific system.</li>
 <li><strong>STC Compliance Documentation</strong> &mdash; the STC declaration and assignment.</li>
 <li><strong>Inverter Commissioning Report</strong> &mdash; record of test values at switch-on (open-circuit voltage, short-circuit current per string, insulation resistance, grid voltage at connection).</li>
 <li><strong>Single Line Diagram</strong> &mdash; a circuit schematic of your specific install.</li>
 <li><strong>Site Plan / Array Layout</strong> &mdash; aerial sketch showing panel positions on the roof.</li>
-<li><strong>Compliance with AS/NZS 4777, 5033 and 3000</strong> &mdash; usually combined into the CEC Solar Installation Certificate.</li>
+<li><strong>Compliance with AS/NZS 4777, 5033 and 3000</strong> &mdash; usually combined into the SAA Solar Installation Compliance Certificate. (The panels, inverter and battery used must be drawn from the CEC Approved Products lists.)</li>
 </ul>
 <p>All of these are also stored in your customer portal under <strong>Documents</strong> and can be downloaded at any time.</p>
 
@@ -309,6 +309,6 @@ ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
 
 <p style="margin-top:40px;color:#888;font-size:9pt;border-top:1px solid #e0e0e0;padding-top:12px;">
 Grid-Connect Solar Owner's Manual &middot; Template v1.0 &middot; June 2026 &middot; Issued by <span class="fill">[INSTALLER COMPANY NAME]</span><br>
-Powered by SolarSync. Required under CEC Code of Conduct clause 1.5. Retain for the life of the system and transfer with the property at sale.
+Powered by SolarSync. Required under SAA installer accreditation requirements. Retain for the life of the system and transfer with the property at sale.
 </p>
 </body></html>
