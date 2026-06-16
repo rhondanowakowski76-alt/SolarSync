@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<title>Grid-Connect Solar Owner's Manual</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 30px;line-height:1.6}
+h1{font-size:26pt;color:#1a3a5c;border-bottom:4px solid #3BA0E6;padding-bottom:10px;margin-top:0}
+h2{font-size:14pt;color:#1a3a5c;margin-top:28px;margin-bottom:6px;border-left:5px solid #3BA0E6;padding-left:12px}
+h3{font-size:11pt;color:#3BA0E6;font-weight:bold;margin-top:16px}
+table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:10pt}
+th{background:#1a3a5c;color:#fff;padding:9px 12px;text-align:left;font-weight:600}
+td{padding:8px 12px;border:1px solid #ccd8e8;vertical-align:top}
+tr:nth-child(even) td{background:#f4f7fb}
+.cover{background:#1a3a5c;color:#fff;padding:40px 40px 30px;margin:-40px -30px 36px}
+.cover h1{color:#fff;border-bottom:2px solid rgba(255,255,255,0.3);font-size:28pt}
+.cover .sub{font-size:13pt;color:#7fb9e8;margin-top:8px}
+.cover .meta{font-size:10pt;color:rgba(255,255,255,0.55);margin-top:20px}
+.note{background:#e8f4fd;border-left:5px solid #3BA0E6;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.warning{background:#fff8e1;border-left:5px solid #F5A623;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.danger{background:#fdecea;border-left:5px solid #d32f2f;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.fill{background:#fffbe6;border:1px dashed #d4a017;padding:1px 6px;color:#7a5a00;font-weight:600;border-radius:3px}
+.tplnote{background:#f0eaff;border-left:5px solid #6b46c1;padding:10px 14px;margin:14px 0;font-size:10pt;color:#3d2570;border-radius:0 6px 6px 0}
+code{background:#eef2f7;padding:2px 7px;border-radius:4px;font-family:Consolas,monospace;font-size:10pt;color:#1a3a5c}
+.toc{background:#f4f7fb;border:1px solid #ccd8e8;padding:16px 20px;margin-bottom:28px;border-radius:6px}
+.toc h2{border:none;padding:0;margin:0 0 10px;font-size:12pt}
+ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
+@media print{.cover{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1>Grid-Connect Solar<br>Owner's Manual</h1>
+  <div class="sub">Network connection, anti-islanding, feed-in tariff and retailer obligations</div>
+  <div class="meta">Template version 1.0 &nbsp;|&nbsp; June 2026 &nbsp;|&nbsp; Issued by <span class="fill">[INSTALLER COMPANY NAME]</span></div>
+</div>
+
+<div class="tplnote">
+<strong>TEMPLATE INSTRUCTIONS &mdash; for the installer:</strong>
+<ul>
+<li>This document is the <strong>companion</strong> to the Solar System Owner's Manual. Issue both at handover.</li>
+<li>This document is required by the CEC Code of Conduct (clause 1.5) for all grid-connected installations.</li>
+<li>Edit in Microsoft Word. Replace every <span class="fill">[PLACEHOLDER]</span> with the customer-specific value. State-specific sections (QLD SBS, SA Smart Export, Victoria voltage rules etc.) should be deleted if not applicable.</li>
+<li>Delete this purple instruction box before issuing.</li>
+</ul>
+</div>
+
+<div class="toc"><h2>Contents</h2><ol>
+<li>About this manual</li>
+<li>Your network connection at a glance</li>
+<li>How a grid-connect system works</li>
+<li>Your connection agreement &mdash; DNSP</li>
+<li>Your retail agreement &mdash; electricity retailer</li>
+<li>Your meter</li>
+<li>Anti-islanding &mdash; what happens during a grid outage</li>
+<li>Feed-in tariff &mdash; how you get paid for export</li>
+<li>Export limits &amp; dynamic export</li>
+<li>Voltage &amp; power-quality response (Volt-watt, Volt-var)</li>
+<li>Inverter standards &mdash; AS/NZS 4777.2</li>
+<li>What to do if your inverter trips on grid voltage</li>
+<li>Changing retailers</li>
+<li>Notifying your retailer &amp; DNSP &mdash; obligations</li>
+<li>State-specific notes</li>
+<li>Compliance documents you should keep</li>
+<li>Glossary &mdash; grid-connect terms</li>
+</ol></div>
+
+<h2>1. About this manual</h2>
+<p>This manual covers everything specific to your <strong>grid connection</strong> &mdash; the agreement between you, your electricity retailer, and the network operator that owns the poles and wires.</p>
+<p>It is a companion to the <strong>Solar System Owner's Manual</strong>, which covers the physical equipment. Read both. Keep both with the house.</p>
+<div class="warning"><strong>Off-grid (stand-alone) systems do not need this manual.</strong> If your system is not connected to the grid, the contents below do not apply &mdash; you can discard this document.</div>
+
+<h2>2. Your network connection at a glance</h2>
+<table>
+<tr><th>Field</th><th>Detail</th></tr>
+<tr><td>Customer name (account holder)</td><td><span class="fill">[CUSTOMER NAME]</span></td></tr>
+<tr><td>Connection address</td><td><span class="fill">[ADDRESS]</span></td></tr>
+<tr><td>National Meter Identifier (NMI)</td><td><span class="fill">[NMI &mdash; 10/11 chars]</span></td></tr>
+<tr><td>Electricity retailer</td><td><span class="fill">[RETAILER NAME]</span></td></tr>
+<tr><td>Network distributor (DNSP)</td><td><span class="fill">[DNSP NAME &mdash; e.g. Energex, Ausgrid, SAPN]</span></td></tr>
+<tr><td>Supply type</td><td><span class="fill">[Single-phase / Three-phase]</span></td></tr>
+<tr><td>Approved inverter capacity (AC)</td><td><span class="fill">[X.X] kW</span></td></tr>
+<tr><td>Approved export limit</td><td><span class="fill">[X.X] kW</span> &nbsp;or&nbsp; <span class="fill">[Dynamic / Zero-export]</span></td></tr>
+<tr><td>Connection approval reference</td><td><span class="fill">[DNSP APPROVAL REF#]</span></td></tr>
+<tr><td>Connection approval date</td><td><span class="fill">[DD MMM YYYY]</span></td></tr>
+<tr><td>Feed-in tariff rate (at install)</td><td><span class="fill">[X.X] &cent;/kWh</span></td></tr>
+<tr><td>Special tariff (if any)</td><td><span class="fill">[e.g. QLD Tariff 9900 (44&cent;) / NSW SBS / None]</span></td></tr>
+<tr><td>Bi-directional meter installed?</td><td><span class="fill">[Yes &mdash; smart meter / Yes &mdash; legacy bi-directional / Pending]</span></td></tr>
+</table>
+
+<h2>3. How a grid-connect system works</h2>
+<p>A grid-connect system has three players:</p>
+<ol>
+<li><strong>You</strong> &mdash; you own the panels and inverter on your roof.</li>
+<li><strong>The retailer</strong> &mdash; the company that sends you a bill and pays you for solar exports. You can switch retailers at any time.</li>
+<li><strong>The distributor (DNSP)</strong> &mdash; the company that owns the poles and wires in your street. You cannot choose your DNSP &mdash; it depends on your postcode. The DNSP approves your connection and sets the technical rules your inverter must follow.</li>
+</ol>
+<p>Your inverter is constantly negotiating with the grid &mdash; matching voltage and frequency, exporting surplus power, and shutting down instantly if the grid goes off (see Section 7 below). All of this happens automatically.</p>
+
+<h2>4. Your connection agreement &mdash; DNSP</h2>
+<p>Before your system was switched on, your installer applied to <span class="fill">[DNSP NAME]</span> for permission to connect. That approval has conditions attached, including:</p>
+<ul>
+<li>The maximum AC capacity your inverter can have (approved: <span class="fill">[X.X] kW</span>)</li>
+<li>The maximum amount you can export to the grid (approved: <span class="fill">[X.X] kW</span> &nbsp;or&nbsp; <span class="fill">[dynamic, see Section 9]</span>)</li>
+<li>The inverter must comply with AS/NZS 4777.2 (the inverter standard &mdash; see Section 11)</li>
+<li>The inverter must have anti-islanding (it must shut off during a grid outage &mdash; see Section 7)</li>
+<li>The DNSP can change the rules in future and your inverter must respond accordingly</li>
+</ul>
+
+<div class="warning"><strong>Do not modify your system without notifying the DNSP.</strong> Changing the inverter size, adding panels beyond the approved capacity, or adding a battery (in most jurisdictions) requires a new application. Doing this without approval can result in your connection being disconnected and your feed-in tariff cancelled.</div>
+
+<h3>What requires a new DNSP application</h3>
+<ul>
+<li>Increasing inverter AC rating</li>
+<li>Increasing panel DC capacity beyond the approved DC:AC ratio</li>
+<li>Adding a battery (most states)</li>
+<li>Adding a second inverter</li>
+<li>Changing from single-phase to three-phase</li>
+<li>Adding an EV charger with vehicle-to-grid export</li>
+</ul>
+
+<h3>What does not require a new DNSP application</h3>
+<ul>
+<li>Replacing the inverter with an equivalent like-for-like unit (same rating, same AS/NZS 4777.2 compliance)</li>
+<li>Replacing panels with equivalent same-rating panels after warranty failure</li>
+<li>Cleaning, testing, maintenance</li>
+</ul>
+
+<h2>5. Your retail agreement &mdash; electricity retailer</h2>
+<p>Your retailer sends you the bill. They are the company you pay (or who pays you, depending on the month). At install time, you should have:</p>
+<ol>
+<li>Notified your retailer that solar was installed</li>
+<li>Selected a solar feed-in tariff plan</li>
+<li>Confirmed that bi-directional metering is in place (Section 6)</li>
+</ol>
+<p>Your retailer at handover: <span class="fill">[RETAILER NAME]</span>. Feed-in tariff at handover: <span class="fill">[X.X] &cent;/kWh</span>.</p>
+<div class="note"><strong>You can switch retailers at any time.</strong> See Section 13. Feed-in rates change &mdash; what's competitive today may not be in 12 months.</div>
+
+<h2>6. Your meter</h2>
+<p>To be paid for solar exports, you need a meter that can measure energy flowing both directions &mdash; out of the grid (import) and into the grid (export). Three meter types exist:</p>
+<table>
+<tr><th>Meter type</th><th>What it does</th><th>What you have</th></tr>
+<tr><td>Accumulation meter (single direction)</td><td>Measures import only. Will not pay you for solar. <strong>Must be upgraded.</strong></td><td><span class="fill">[Yes / No]</span></td></tr>
+<tr><td>Bi-directional / interval meter</td><td>Measures both directions in 15- or 30-minute blocks. Read manually by the retailer.</td><td><span class="fill">[Yes / No]</span></td></tr>
+<tr><td>Smart meter</td><td>Bi-directional, transmits readings remotely. Required in Victoria; growing elsewhere.</td><td><span class="fill">[Yes / No]</span></td></tr>
+</table>
+<p>Your meter at handover: <span class="fill">[METER TYPE]</span>. If a meter upgrade is still pending, you may see <strong>$0 feed-in credit</strong> on your bill until the upgrade is completed by your retailer.</p>
+
+<h2>7. Anti-islanding &mdash; what happens during a grid outage</h2>
+<div class="danger">
+<strong>This is the most important section in this manual. Read it carefully.</strong>
+<p>All grid-connect inverters in Australia <strong>must</strong>, by law (AS/NZS 4777.2), shut down within 2 seconds when the grid goes off. This is called <strong>anti-islanding protection</strong>.</p>
+<p>Why? Because if your solar kept running during a blackout, you would energise the power lines outside your house &mdash; while line workers were trying to repair them. People have died from this elsewhere in the world. Anti-islanding exists to protect those workers.</p>
+</div>
+
+<h3>What this means for you</h3>
+<ul>
+<li><strong>During a grid blackout, your solar system stops working &mdash; even if the sun is shining.</strong> Your home goes dark like everyone else's.</li>
+<li>When the grid comes back, your inverter waits a further <strong>60&ndash;300 seconds</strong> (varies by inverter and DNSP setting) to confirm the grid is stable, then re-connects automatically.</li>
+<li>You do not need to do anything &mdash; the inverter handles it.</li>
+</ul>
+
+<h3>If you have a battery with backup capability</h3>
+<p>A battery with a <strong>changeover switch</strong> can disconnect your home from the grid during an outage, then power your essential circuits (or whole home) from the battery. Your solar can also keep charging the battery during the outage. This is called <strong>islanded mode</strong> and is the only way to have power during a blackout with a grid-connect system.</p>
+<p>Your system: <span class="fill">[Has backup capability via [BRAND] battery / Does not have backup capability &mdash; no battery / Has battery but not configured for backup]</span>.</p>
+
+<h2>8. Feed-in tariff &mdash; how you get paid for export</h2>
+<p>When your solar produces more than your home is using, the surplus flows out to the grid. Your retailer pays you a per-kWh rate for that surplus &mdash; the <strong>feed-in tariff (FiT)</strong>.</p>
+
+<h3>How FiT is paid</h3>
+<ul>
+<li>FiT appears as a credit on your electricity bill (not a cash payment to your bank).</li>
+<li>If your FiT credit exceeds your import charge in a billing period, the credit rolls over to the next bill (or is paid out annually, depending on the retailer).</li>
+<li>FiT is set by the retailer, not the government &mdash; rates vary between retailers and change over time.</li>
+</ul>
+
+<h3>Time-varying FiT</h3>
+<p>Some retailers now pay <strong>different rates at different times of day</strong> &mdash; for example, higher in the morning peak (6&ndash;9am) and lower at solar midday when the grid is saturated. Some even pay zero (or charge a fee) for export between 11am&ndash;2pm. Check your retailer's current plan terms.</p>
+
+<h3>What you receive at handover</h3>
+<p>Your FiT at handover: <span class="fill">[X.X] &cent;/kWh</span>, paid by <span class="fill">[RETAILER]</span>.</p>
+
+<h2>9. Export limits &amp; dynamic export</h2>
+<p>DNSPs limit how much power you can push back into the grid, because grid hardware was designed for power to flow <em>to</em> homes, not from them. There are three regimes you might be on:</p>
+
+<table>
+<tr><th>Export regime</th><th>What it means</th><th>Your impact</th></tr>
+<tr><td>Fixed export limit (e.g. 5 kW)</td><td>Your inverter is set to never export more than 5 kW, even if the panels can produce more. Excess is "clipped" &mdash; lost.</td><td>Most common for standard systems.</td></tr>
+<tr><td>Zero export (zero-feed-in)</td><td>You cannot export to the grid at all. Only useful for self-consumption.</td><td>Common in network-constrained areas.</td></tr>
+<tr><td>Dynamic export</td><td>The DNSP tells your inverter in real time how much it's allowed to export &mdash; from 0% to 100% depending on grid conditions. Requires an internet-connected inverter that supports CSIP-AUS.</td><td>Now mandatory for new systems in SA, ACT and Vic in some areas.</td></tr>
+</table>
+
+<p>Your system: <span class="fill">[Fixed [X] kW export limit / Zero-export / Dynamic export (CSIP-AUS)]</span>.</p>
+
+<h2>10. Voltage &amp; power-quality response (Volt-watt, Volt-var)</h2>
+<p>If too many homes in your street are exporting solar at the same time, the local voltage rises. To prevent damage, AS/NZS 4777.2 requires your inverter to <strong>reduce its output as the voltage rises</strong>. This is called <strong>Volt-watt response</strong>.</p>
+<p>Your inverter may also do <strong>Volt-var response</strong> &mdash; subtly adjusting reactive power to help support the local voltage without losing energy output.</p>
+
+<div class="note"><strong>What you'll notice:</strong> on hot sunny days in solar-dense suburbs, you may see your inverter producing less than its rated power even though the sun is fine. This is not a fault &mdash; it's the inverter responding to high local grid voltage as the standard requires.</div>
+
+<h3>If voltage problems are chronic</h3>
+<p>If you regularly see voltage above 253V on your inverter display (the safe upper limit), the local network has a problem the DNSP needs to fix. Contact <span class="fill">[DNSP PHONE]</span> with the dates and times. They are obligated to investigate.</p>
+
+<h2>11. Inverter standards &mdash; AS/NZS 4777.2</h2>
+<p>Your inverter is certified to AS/NZS 4777.2:<span class="fill">[YEAR &mdash; 2020 or 2024]</span>. This standard covers:</p>
+<ul>
+<li>Anti-islanding (Section 7)</li>
+<li>Voltage and frequency response (Section 10)</li>
+<li>Power-quality limits (harmonics, DC injection)</li>
+<li>Remote disconnection capability</li>
+<li>Country-of-installation settings (Australia A / Australia B / Australia C, depending on your DNSP)</li>
+</ul>
+<p>Your inverter region setting: <span class="fill">[Region A / B / C &mdash; per DNSP requirement]</span>. This setting was applied at commissioning and should not be changed.</p>
+
+<h2>12. What to do if your inverter trips on grid voltage</h2>
+<p>You may notice the inverter trip off and reset itself once or twice a day during peak solar hours, especially in summer. This usually means local voltage rose above the threshold.</p>
+
+<table>
+<tr><th>What you see</th><th>What it likely means</th><th>What to do</th></tr>
+<tr><td>1 trip per day, reconnects in 60&ndash;300 seconds</td><td>Normal Volt-watt response and brief over-voltage</td><td>Nothing. This is the system protecting itself.</td></tr>
+<tr><td>Several trips per day, every day</td><td>Local grid over-voltage problem</td><td>Report to DNSP &mdash; <span class="fill">[DNSP PHONE]</span>. Provide dates/times.</td></tr>
+<tr><td>Trips and refuses to reconnect</td><td>Inverter fault or extended grid problem</td><td>Call installer.</td></tr>
+<tr><td>Trips and you also see lights flicker</td><td>Wiring problem or grid problem</td><td>Call DNSP same-day.</td></tr>
+</table>
+
+<h2>13. Changing retailers</h2>
+<p>You can change electricity retailer at any time. There is no penalty for switching when you have solar (unlike some old contracts). To switch:</p>
+<ol>
+<li>Compare retailers using <a href="https://www.energymadeeasy.gov.au">EnergyMadeEasy.gov.au</a> (federal) or <a href="https://www.victorianenergysaver.vic.gov.au">VictorianEnergySaver.vic.gov.au</a> (Vic).</li>
+<li>Compare both the import rate (c/kWh) <em>and</em> the feed-in tariff. A high import rate with a great FiT can be worse than a moderate import rate with a moderate FiT.</li>
+<li>Sign up with the new retailer &mdash; they handle the switch with your old retailer and the DNSP. You do not need to cancel separately.</li>
+<li>The switch takes 2&ndash;6 weeks. Your supply does not interrupt.</li>
+</ol>
+<div class="warning"><strong>If you are on a special grandfathered FiT (e.g. QLD Tariff 9900 at 44&cent;/kWh, or NSW Solar Bonus Scheme), switching retailers will permanently cancel that tariff.</strong> Confirm with the new retailer before switching. See Section 15.</div>
+
+<h2>14. Notifying your retailer &amp; DNSP &mdash; obligations</h2>
+<p>You are legally required to notify your retailer and DNSP of certain events:</p>
+<table>
+<tr><th>Event</th><th>Notify</th><th>When</th></tr>
+<tr><td>System installed</td><td>Retailer &amp; DNSP</td><td>At commissioning (your installer does this on your behalf)</td></tr>
+<tr><td>You sell the house</td><td>Retailer</td><td>Before settlement &mdash; final read</td></tr>
+<tr><td>You add a battery</td><td>DNSP (new application)</td><td>Before installation</td></tr>
+<tr><td>You add more panels or change inverter rating</td><td>DNSP (new application)</td><td>Before installation</td></tr>
+<tr><td>Inverter replaced with same-rating equivalent</td><td>DNSP (notification only)</td><td>Within 14 days of replacement</td></tr>
+<tr><td>System decommissioned</td><td>Retailer &amp; DNSP</td><td>Before decommissioning</td></tr>
+</table>
+
+<h2>15. State-specific notes</h2>
+
+<h3>Queensland &mdash; Solar Bonus Scheme</h3>
+<div class="danger">
+<strong>If your electricity bill shows Tariff 9900 at 44&cent;/kWh, this applies to you.</strong>
+<p>The QLD Solar Bonus Scheme pays 44&cent;/kWh for solar exports. It is grandfathered &mdash; not available to new customers, and not transferable. The scheme <strong>closes 1 July 2028</strong>.</p>
+<p><strong>Adding a battery, increasing system size, replacing the inverter with a different rating, or moving house all permanently void this tariff.</strong> The replacement rate is 6&ndash;10&cent;/kWh &mdash; roughly $1,400&ndash;$1,600/year less for a typical 6.6 kW system.</p>
+<p>Discuss any system change with your installer before proceeding.</p>
+</div>
+
+<h3>NSW &mdash; Solar Bonus Scheme</h3>
+<p>The NSW SBS at 60&cent;/kWh (Tariff A) and 20&cent;/kWh (Tariff B) ended <strong>31 December 2016</strong>. If you were on it, you are now on a standard retailer FiT.</p>
+
+<h3>Victoria &mdash; voltage and smart meters</h3>
+<p>All Vic homes have smart meters as standard. The minimum FiT is set annually by the Essential Services Commission &mdash; check current rate at <code>esc.vic.gov.au</code>. Vic also enforces inverter region settings particularly strictly.</p>
+
+<h3>South Australia &mdash; Smart Export, dynamic export, off switches</h3>
+<p>SA has the highest solar penetration in the country. New systems are required to support <strong>dynamic export</strong> and <strong>remote disconnect</strong> &mdash; SAPN (the DNSP) can switch your system off remotely during grid emergencies (very rare but legal). This is called the "solar emergency back-stop" and applies to systems installed after Sept 2020.</p>
+
+<h3>ACT &mdash; dynamic export</h3>
+<p>Evoenergy has rolled out dynamic export. Your inverter must report to the network in real time.</p>
+
+<h3>WA &mdash; emergency solar management</h3>
+<p>Western Power can remotely curtail solar export during minimum-demand emergencies. Your system supports this if installed after Feb 2022.</p>
+
+<h3>TAS, NT &mdash; standard rules apply</h3>
+<p>FiT rates and connection rules vary &mdash; check with your retailer and Aurora Energy / Jacana Energy respectively.</p>
+
+<h2>16. Compliance documents you should keep</h2>
+<p>Your installer should have provided the following documents at commissioning. Keep all of them with this manual.</p>
+<ul>
+<li><strong>Certificate of Electrical Safety (CES / COES)</strong> &mdash; issued by the licensed electrician on completion. Required by your retailer to switch the system on.</li>
+<li><strong>SAA (Solar Accreditation Australia, formerly CEC) Accreditation Certificate</strong> &mdash; proof your installer is accredited.</li>
+<li><strong>DNSP Connection Approval letter</strong> &mdash; from the network operator, approving your specific system.</li>
+<li><strong>STC Compliance Documentation</strong> &mdash; the STC declaration and assignment.</li>
+<li><strong>Inverter Commissioning Report</strong> &mdash; record of test values at switch-on (open-circuit voltage, short-circuit current per string, insulation resistance, grid voltage at connection).</li>
+<li><strong>Single Line Diagram</strong> &mdash; a circuit schematic of your specific install.</li>
+<li><strong>Site Plan / Array Layout</strong> &mdash; aerial sketch showing panel positions on the roof.</li>
+<li><strong>Compliance with AS/NZS 4777, 5033 and 3000</strong> &mdash; usually combined into the CEC Solar Installation Certificate.</li>
+</ul>
+<p>All of these are also stored in your customer portal under <strong>Documents</strong> and can be downloaded at any time.</p>
+
+<h2>17. Glossary &mdash; grid-connect terms</h2>
+<ul>
+<li><strong>Anti-islanding</strong> &mdash; mandatory inverter behaviour: shut down within 2 seconds when the grid is lost, to protect line workers. See Section 7.</li>
+<li><strong>AS/NZS 4777.2</strong> &mdash; the Australian/New Zealand standard that grid-connect inverters must comply with.</li>
+<li><strong>CSIP-AUS</strong> &mdash; Common Smart Inverter Profile (Australia). The protocol DNSPs use to talk to your inverter for dynamic export.</li>
+<li><strong>Dynamic export</strong> &mdash; an export regime where the DNSP tells your inverter how much it can export in real time.</li>
+<li><strong>DNSP</strong> &mdash; Distribution Network Service Provider. Owns the poles and wires.</li>
+<li><strong>Export limit</strong> &mdash; the maximum power your inverter is allowed to send back to the grid.</li>
+<li><strong>Feed-in tariff (FiT)</strong> &mdash; the per-kWh rate your retailer pays for exported energy.</li>
+<li><strong>NMI</strong> &mdash; National Meter Identifier. A unique 10- or 11-character code that identifies your supply point. Always on your bill.</li>
+<li><strong>Off-grid / stand-alone</strong> &mdash; a system not connected to the grid at all. This manual does not apply to off-grid systems.</li>
+<li><strong>Region A / B / C</strong> &mdash; AS/NZS 4777.2 setting that determines how aggressively your inverter responds to voltage and frequency disturbances. Set by your DNSP.</li>
+<li><strong>Retailer</strong> &mdash; the company that bills you for electricity. You choose your retailer; you can switch any time.</li>
+<li><strong>Volt-watt</strong> &mdash; inverter reducing its real-power output as local voltage rises.</li>
+<li><strong>Volt-var</strong> &mdash; inverter adjusting reactive power to help support grid voltage.</li>
+<li><strong>Zero-export</strong> &mdash; inverter is configured to never export to the grid. Excess solar is clipped to zero export.</li>
+</ul>
+
+<p style="margin-top:40px;color:#888;font-size:9pt;border-top:1px solid #e0e0e0;padding-top:12px;">
+Grid-Connect Solar Owner's Manual &middot; Template v1.0 &middot; June 2026 &middot; Issued by <span class="fill">[INSTALLER COMPANY NAME]</span><br>
+Powered by SolarSync. Required under CEC Code of Conduct clause 1.5. Retain for the life of the system and transfer with the property at sale.
+</p>
+</body></html>
