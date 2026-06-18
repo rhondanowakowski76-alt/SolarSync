@@ -26,7 +26,7 @@ async function seed() {
   await run("insert into clients (id,tenant_id,user_id,name,site_address,install_status) values ($1,$2,$3,$4,$5,$6)",
     ["c-adam", TID, "u-client", "Adam Smith", "42 Solar Ave, Brisbane QLD 4000", "installed"]);
 
-  for (const [k,n,p] of [["compliance-suite","Compliance Reports Suite",69],["vpp","VPP Enrollment Assistant",49]])
+  for (const [k,n,p] of [["compliance-suite","Compliance Reports Suite",69],["vpp","VPP Enrollment Assistant",49],["document-library","Document Library",29]])
     await run("insert into addons (key,name,price) values ($1,$2,$3)", [k,n,p]);
   await run("insert into tester_tokens (token,scope,active) values ($1,$2,true)", ["TESTER-2026","compliance"]);
 

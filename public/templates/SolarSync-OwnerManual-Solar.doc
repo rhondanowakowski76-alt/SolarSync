@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<title>Solar System Owner's Manual</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 30px;line-height:1.6}
+h1{font-size:26pt;color:#1a3a5c;border-bottom:4px solid #3BA0E6;padding-bottom:10px;margin-top:0}
+h2{font-size:14pt;color:#1a3a5c;margin-top:28px;margin-bottom:6px;border-left:5px solid #3BA0E6;padding-left:12px}
+h3{font-size:11pt;color:#3BA0E6;font-weight:bold;margin-top:16px}
+table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:10pt}
+th{background:#1a3a5c;color:#fff;padding:9px 12px;text-align:left;font-weight:600}
+td{padding:8px 12px;border:1px solid #ccd8e8;vertical-align:top}
+tr:nth-child(even) td{background:#f4f7fb}
+.cover{background:#1a3a5c;color:#fff;padding:40px 40px 30px;margin:-40px -30px 36px}
+.cover h1{color:#fff;border-bottom:2px solid rgba(255,255,255,0.3);font-size:28pt}
+.cover .sub{font-size:13pt;color:#7fb9e8;margin-top:8px}
+.cover .meta{font-size:10pt;color:rgba(255,255,255,0.55);margin-top:20px}
+.note{background:#e8f4fd;border-left:5px solid #3BA0E6;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.warning{background:#fff8e1;border-left:5px solid #F5A623;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.danger{background:#fdecea;border-left:5px solid #d32f2f;padding:10px 14px;margin:14px 0;border-radius:0 6px 6px 0}
+.fill{background:#fffbe6;border:1px dashed #d4a017;padding:1px 6px;color:#7a5a00;font-weight:600;border-radius:3px}
+.tplnote{background:#f0eaff;border-left:5px solid #6b46c1;padding:10px 14px;margin:14px 0;font-size:10pt;color:#3d2570;border-radius:0 6px 6px 0}
+code{background:#eef2f7;padding:2px 7px;border-radius:4px;font-family:Consolas,monospace;font-size:10pt;color:#1a3a5c}
+.toc{background:#f4f7fb;border:1px solid #ccd8e8;padding:16px 20px;margin-bottom:28px;border-radius:6px}
+.toc h2{border:none;padding:0;margin:0 0 10px;font-size:12pt}
+ul,ol{margin:6px 0 12px;padding-left:22px}li{margin-bottom:4px}
+.qr{display:inline-block;background:#f4f7fb;border:1px solid #ccd8e8;padding:8px 14px;margin:6px 4px 6px 0;border-radius:6px;font-size:10pt}
+@media print{.cover{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1>Solar System<br>Owner's Manual</h1>
+  <div class="sub">Issued by <span class="fill">[INSTALLER COMPANY NAME]</span> on system handover</div>
+  <div class="meta">Template version 1.0 &nbsp;|&nbsp; June 2026 &nbsp;|&nbsp; Tenant-editable in Microsoft Word</div>
+</div>
+
+<div class="tplnote">
+<strong>TEMPLATE INSTRUCTIONS &mdash; for the installer:</strong>
+<ul>
+<li>This is a Word document. Open in Microsoft Word and edit normally. Save as <code>.docx</code> after editing if your customer needs the modern format, or keep as <code>.doc</code> for compatibility.</li>
+<li>Every yellow-highlighted field marked <span class="fill">[LIKE THIS]</span> is a placeholder &mdash; replace it with the customer-specific value before issuing.</li>
+<li>Sections in purple boxes (like this one) are instructions for you and <strong>should be deleted before issuing</strong> the document to the customer.</li>
+<li>Replace the cover with your own logo. Update the colour palette in the <code>&lt;style&gt;</code> block if you want full white-label branding.</li>
+<li>Delete sections that do not apply (e.g. delete the Battery section if the customer has no battery).</li>
+<li>Hand the final document to the customer at commissioning &mdash; printed in a folder, on USB, and uploaded to their portal Documents library.</li>
+</ul>
+</div>
+
+<div class="toc"><h2>Contents</h2><ol>
+<li>About this manual</li>
+<li>Your system at a glance</li>
+<li>How your solar system works</li>
+<li>Your components</li>
+<li>Daily operation &mdash; what to expect</li>
+<li>Reading your inverter</li>
+<li>Monitoring your system</li>
+<li>Maintenance schedule</li>
+<li>Cleaning your panels</li>
+<li>Safety &mdash; isolators &amp; emergency procedures</li>
+<li>Fault codes &amp; common issues</li>
+<li>Battery (if installed)</li>
+<li>Warranties</li>
+<li>Insurance</li>
+<li>STC rebate &amp; tax records</li>
+<li>Adding to your system</li>
+<li>Selling your home</li>
+<li>End-of-life &amp; disposal</li>
+<li>Who to call &mdash; emergency directory</li>
+<li>Glossary</li>
+<li>Quick reference card</li>
+</ol></div>
+
+<h2>1. About this manual</h2>
+<p>This manual is your reference document for owning and operating your solar system. It is issued at the time of system handover by <span class="fill">[INSTALLER COMPANY NAME]</span> in accordance with the Solar Accreditation Australia (SAA) installer accreditation requirements and AS/NZS 5033.</p>
+<p>Keep this manual in a safe place &mdash; you will need it for insurance claims, warranty claims, when selling your house, when the network distributor visits, and when any future contractor works on your system. A digital copy is also available in your customer portal under <strong>Documents</strong>.</p>
+<div class="warning">If your system is grid-connected, you should also have received the companion document <strong>"Grid-Connect Solar Owner's Manual"</strong> covering your network connection, anti-islanding behaviour, feed-in tariff and retailer obligations. If you did not receive this, contact your installer.</div>
+
+<h2>2. Your system at a glance</h2>
+<table>
+<tr><th>Field</th><th>Detail</th></tr>
+<tr><td>Customer name</td><td><span class="fill">[CUSTOMER NAME]</span></td></tr>
+<tr><td>Install address</td><td><span class="fill">[INSTALL ADDRESS]</span></td></tr>
+<tr><td>System size (DC)</td><td><span class="fill">[X.X] kW</span></td></tr>
+<tr><td>System size (AC, inverter rating)</td><td><span class="fill">[X.X] kW</span></td></tr>
+<tr><td>Number of panels</td><td><span class="fill">[N]</span></td></tr>
+<tr><td>Panel make &amp; model</td><td><span class="fill">[BRAND] [MODEL] [W per panel]</span></td></tr>
+<tr><td>Inverter make &amp; model</td><td><span class="fill">[BRAND] [MODEL]</span></td></tr>
+<tr><td>Inverter serial number</td><td><span class="fill">[SN]</span></td></tr>
+<tr><td>Battery (if any)</td><td><span class="fill">[BRAND] [MODEL] [kWh] / N/A</span></td></tr>
+<tr><td>Install date</td><td><span class="fill">[DD MMM YYYY]</span></td></tr>
+<tr><td>Commissioning date</td><td><span class="fill">[DD MMM YYYY]</span></td></tr>
+<tr><td>Lead installer (SAA#)</td><td><span class="fill">[NAME] (#[SAA ACCREDITATION NUMBER])</span></td></tr>
+<tr><td>Lead electrician (licence#)</td><td><span class="fill">[NAME] (#[ELECTRICAL LICENCE])</span></td></tr>
+<tr><td>Job reference</td><td><span class="fill">[JOB#]</span></td></tr>
+</table>
+
+<h2>3. How your solar system works</h2>
+<p>In simple terms:</p>
+<ol>
+<li><strong>Sunlight</strong> hits the solar panels on your roof.</li>
+<li>The panels convert sunlight into <strong>DC electricity</strong> (the same kind that comes out of a battery).</li>
+<li>The <strong>inverter</strong> converts DC into <strong>AC electricity</strong> (the kind your house uses).</li>
+<li>AC power flows first to <strong>your house</strong> &mdash; running your appliances directly.</li>
+<li>Any leftover power is <strong>exported to the grid</strong> through your meter, earning you a feed-in credit.</li>
+<li>When the sun isn't shining, your house draws power from the grid normally.</li>
+</ol>
+<p>If you have a battery, surplus solar charges the battery first (during the day) and discharges it back into your home in the evening &mdash; reducing what you import from the grid.</p>
+<p><strong>Important:</strong> solar panels only work when there is daylight. They produce most power on clear sunny days, less on overcast days, and very little at dawn, dusk or in rain. They do not work at night.</p>
+
+<h2>4. Your components</h2>
+<h3>Solar panels</h3>
+<p>Your panels are <span class="fill">[BRAND] [MODEL]</span>, rated at <span class="fill">[W]</span> watts each. They have an expected service life of 25+ years and carry a product warranty of <span class="fill">[YEARS]</span> years and a performance warranty of <span class="fill">[YEARS]</span> years (output guaranteed above <span class="fill">[%]</span> at 25 years). The panel datasheet is included as Appendix A.</p>
+
+<h3>Inverter</h3>
+<p>Your inverter is a <span class="fill">[BRAND] [MODEL]</span>, serial number <span class="fill">[SN]</span>. It is mounted <span class="fill">[LOCATION &mdash; e.g. on the south wall of the garage, in the meter box, in the roof cavity]</span>. The inverter has a product warranty of <span class="fill">[YEARS]</span> years. The inverter manual is included as Appendix B.</p>
+<div class="note">The inverter is the part of your system most likely to need attention over its lifetime. It is also the part that shows you what the system is doing &mdash; through its LED indicators, screen, or connected app.</div>
+
+<h3>DC isolator (rooftop)</h3>
+<p>A weatherproof DC isolator is mounted on the roof near the panel array. This disconnects the panels from the inverter and is operated by emergency services if needed. <strong>Do not operate this isolator yourself</strong> &mdash; opening it under load can cause arcing.</p>
+
+<h3>DC isolator (inverter)</h3>
+<p>A second DC isolator sits next to the inverter. Same rule &mdash; do not operate under load.</p>
+
+<h3>AC isolator</h3>
+<p>The AC isolator sits between the inverter and your switchboard. This is the isolator you may need to operate in an emergency (see Section 10). It is located <span class="fill">[LOCATION]</span>.</p>
+
+<h3>Monitoring</h3>
+<p>Your inverter is connected to your home Wi-Fi and reports generation data to your installer's portal in real time. The portal is accessible at <span class="fill">[PORTAL URL]</span> using the PIN provided at handover. The inverter manufacturer may also provide its own app &mdash; details in Appendix B.</p>
+
+<h2>5. Daily operation &mdash; what to expect</h2>
+<p>Once commissioned, your system runs automatically. You do not need to switch it on each morning or off at night &mdash; the inverter does this itself when the panel voltage rises and falls with the sun.</p>
+
+<h3>A normal day</h3>
+<ul>
+<li><strong>5:30&ndash;7:00 AM</strong> &mdash; system wakes up as light hits the panels. Output is low.</li>
+<li><strong>9:00 AM &ndash; 3:00 PM</strong> &mdash; peak production. Most of your daily generation happens here.</li>
+<li><strong>3:00&ndash;6:30 PM</strong> &mdash; output tapers off.</li>
+<li><strong>After sunset</strong> &mdash; inverter goes to standby (LED may dim or change colour). No generation overnight.</li>
+</ul>
+
+<h3>What affects output</h3>
+<table>
+<tr><th>Factor</th><th>Impact</th></tr>
+<tr><td>Cloud cover</td><td>Light cloud: 60&ndash;80% of clear-sky output. Heavy cloud: 10&ndash;30%.</td></tr>
+<tr><td>Rain</td><td>Reduces output, but cleans the panels.</td></tr>
+<tr><td>Season</td><td>Summer days produce roughly 2x what winter days produce, due to sun angle and day length.</td></tr>
+<tr><td>Heat</td><td>Panels lose ~0.3&ndash;0.4% efficiency per &deg;C above 25&deg;C. A 40&deg;C day produces less than a 25&deg;C day, even with the same sun.</td></tr>
+<tr><td>Dust / pollen</td><td>Light soiling: 1&ndash;3% loss. Heavy soiling (bushfire ash, salt spray): up to 25%.</td></tr>
+<tr><td>Shade</td><td>Even partial shade on one panel can disproportionately reduce string output if optimisers are not fitted.</td></tr>
+</table>
+
+<h2>6. Reading your inverter</h2>
+<p>Your inverter <span class="fill">[has / does not have]</span> a screen. The status indicators mean:</p>
+<table>
+<tr><th>Indicator</th><th>Meaning</th><th>Action</th></tr>
+<tr><td>Solid green</td><td>Normal operation &mdash; generating</td><td>Nothing &mdash; all good</td></tr>
+<tr><td>Slow green flash</td><td>Standby (night or early morning)</td><td>Nothing &mdash; will resume at sunrise</td></tr>
+<tr><td>Solid orange / yellow</td><td>Reduced output (heat or grid issue)</td><td>Note the time; check again next clear day</td></tr>
+<tr><td>Flashing red</td><td>Fault detected</td><td>See Section 11. Note any code shown.</td></tr>
+<tr><td>Solid red</td><td>System tripped/stopped</td><td>Do not reset more than once. Call installer.</td></tr>
+<tr><td>No lights at all</td><td>Inverter has no power</td><td>Check AC isolator is on. If on, call installer.</td></tr>
+</table>
+<p>Refer to Appendix B (inverter manual) for codes specific to your model.</p>
+
+<h2>7. Monitoring your system</h2>
+<p>You have two ways to see what your system is doing:</p>
+<h3>Customer portal</h3>
+<p>Visit <span class="fill">[PORTAL URL]</span> and sign in with your PIN. The portal shows live generation, monthly and lifetime totals, dollar savings, CO&#8322; offset, and any performance alerts. See the separate <strong>Customer Guide</strong> for full portal instructions.</p>
+
+<h3>Manufacturer app (optional)</h3>
+<p>Your inverter manufacturer also provides a free app: <span class="fill">[APP NAME &amp; STORE LINK]</span>. This gives you more technical detail (per-string output, voltage, temperature). The login is configured during commissioning &mdash; your credentials are <span class="fill">[USERNAME / starter password / "see appendix"]</span>.</p>
+
+<div class="note">If the inverter loses Wi-Fi, the portal will show "no recent data". The inverter keeps generating &mdash; it just can't tell anyone. Check your home router; reconnect the inverter using the procedure in Appendix B.</div>
+
+<h2>8. Maintenance schedule</h2>
+<table>
+<tr><th>Interval</th><th>Task</th><th>Who</th></tr>
+<tr><td>Monthly</td><td>Visual check from the ground &mdash; panels look intact, no new shading from tree growth, inverter LED is normal</td><td>You</td></tr>
+<tr><td>Quarterly</td><td>Glance at portal to confirm generation is in the expected range for the season</td><td>You</td></tr>
+<tr><td>Annually</td><td>Visual safety inspection (every 12 months &mdash; included with most installers)</td><td>Installer</td></tr>
+<tr><td>Every 3&ndash;5 years (or sooner in heavy dust / salt / bird areas)</td><td>Professional panel clean</td><td>Installer or licensed cleaner</td></tr>
+<tr><td>Every 5 years</td><td>Full electrical safety test (string test, IR scan, isolator check)</td><td>Licensed electrician</td></tr>
+<tr><td>Every 10 years</td><td>Inverter check / replacement consideration (many inverters last 10&ndash;15 years)</td><td>Installer</td></tr>
+</table>
+
+<h2>9. Cleaning your panels</h2>
+<p>Most panels are self-cleaning to a useful degree &mdash; rain washes off most dust. However, in coastal, dusty or heavily treed areas, a professional clean every 3&ndash;5 years can recover 5&ndash;15% of lost output.</p>
+
+<h3>If you choose to DIY clean (ground level only)</h3>
+<ul>
+<li><strong>Never climb on the roof.</strong> Falls from height are the most common cause of solar-related injury. Use a long-reach soft brush from the ground only.</li>
+<li>Clean in the early morning or late afternoon &mdash; never on a hot panel, which can crack from thermal shock when cold water hits.</li>
+<li>Use lukewarm water and a soft brush. <strong>Do not use detergent, high-pressure washers, or abrasive cleaners</strong> &mdash; these void the panel warranty.</li>
+<li>Avoid walking on panels under any circumstances &mdash; even a hairline crack can destroy a panel's output and may not be visible to the eye.</li>
+</ul>
+<div class="warning">If your panels are on a two-storey roof, a steep-pitch roof, or you cannot reach safely from the ground, <strong>book a professional clean</strong>. The cost (typically $200&ndash;$350) is far less than the cost of falling off a roof.</div>
+
+<h2>10. Safety &mdash; isolators &amp; emergency procedures</h2>
+
+<h3>Knowing your isolators</h3>
+<table>
+<tr><th>Isolator</th><th>Location</th><th>Operate yourself?</th></tr>
+<tr><td>DC rooftop isolator</td><td>On the roof near the panel array</td><td>No &mdash; emergency services only</td></tr>
+<tr><td>DC inverter isolator</td><td>Next to inverter</td><td>No &mdash; licensed electrician only</td></tr>
+<tr><td>AC isolator</td><td><span class="fill">[LOCATION]</span></td><td>Yes &mdash; in emergencies (see below)</td></tr>
+<tr><td>Main switch (solar supply)</td><td>In switchboard, labelled "Solar Supply Main Switch"</td><td>Yes &mdash; in emergencies</td></tr>
+</table>
+
+<h3>Emergency procedures</h3>
+<div class="danger">
+<strong>If you see sparks, smoke, fire, or smell burning from the inverter or any solar wiring:</strong>
+<ol>
+<li>Turn off the <strong>AC isolator</strong> and the <strong>Solar Supply Main Switch</strong> in your switchboard.</li>
+<li>Do <strong>not</strong> try to open the DC isolators &mdash; opening them under load can ignite an arc.</li>
+<li>Evacuate the building if there is any smoke or fire. Call <strong>000</strong>.</li>
+<li>Tell the attending fire service: "Solar PV on roof, DC isolator on roof, AC isolator is off." Show them this manual if you can.</li>
+<li>After it's safe, call your installer on the number in Section 19.</li>
+</ol>
+</div>
+
+<h3>Storm, hail, fallen tree</h3>
+<ul>
+<li>If panels are visibly damaged: turn off the AC isolator. Stay clear of the area. Call your installer.</li>
+<li>Photograph damage from the ground (do not climb). You'll need photos for insurance.</li>
+<li>Do not touch any cables that may have come loose.</li>
+</ul>
+
+<h3>Water ingress around inverter</h3>
+<ul>
+<li>Turn off AC isolator immediately. Do not touch the inverter.</li>
+<li>Call your installer. Do not attempt to dry the unit yourself.</li>
+</ul>
+
+<h3>You smell something funny but everything looks fine</h3>
+<ul>
+<li>Trust your nose. Turn off AC isolator. Call your installer the same day.</li>
+<li>Electrical fires can smoulder for hours before flaring &mdash; never "wait and see" with electrical smells.</li>
+</ul>
+
+<h2>11. Fault codes &amp; common issues</h2>
+<p>Common issues you might see, in plain language:</p>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>What to do</th></tr>
+<tr><td>"No production today" message in portal</td><td>Wi-Fi disconnected, or grid outage, or inverter fault</td><td>Check inverter LED. If green, it's likely Wi-Fi. If red, call installer.</td></tr>
+<tr><td>Generation suddenly half what it was</td><td>One string offline, partial shading, soiling</td><td>Check portal for per-string data. Book a diagnostic if persistent.</td></tr>
+<tr><td>Inverter trips off in middle of sunny days</td><td>Grid over-voltage in your area (very common in solar-dense suburbs)</td><td>Not your fault &mdash; report to installer. They notify the distributor.</td></tr>
+<tr><td>Inverter LED flashes red briefly then resets</td><td>Brief grid disturbance &mdash; harmless if rare</td><td>Note it. If it happens daily, call installer.</td></tr>
+<tr><td>Fan noise from inverter on hot days</td><td>Normal &mdash; inverter is cooling itself</td><td>Nothing &mdash; that's how it should work.</td></tr>
+<tr><td>Loud buzzing or clicking from inverter</td><td>Not normal</td><td>Turn off AC isolator. Call installer.</td></tr>
+</table>
+<p>For manufacturer-specific fault codes, see Appendix B. Always note the exact code shown before resetting anything.</p>
+
+<h2>12. Battery (if installed)</h2>
+<div class="tplnote"><strong>DELETE this whole section if the customer has no battery.</strong></div>
+
+<p>Your battery is a <span class="fill">[BRAND] [MODEL]</span>, capacity <span class="fill">[X.X] kWh</span> (useable). It is mounted <span class="fill">[LOCATION]</span>.</p>
+
+<h3>How it works</h3>
+<p>During the day, when your solar produces more than your home uses, the surplus charges the battery instead of being exported. In the evening, when solar stops, the battery discharges to power your home &mdash; reducing what you import from the grid. The whole process is automatic.</p>
+
+<h3>Backup mode</h3>
+<p>Your battery <span class="fill">[is / is not]</span> configured for backup. If configured for backup, during a grid outage the battery will continue to power <span class="fill">[the whole home / essential circuits only]</span>. Backup behaviour is governed by the changeover switch installed during commissioning. See your inverter manual for the indicator that shows "running on battery".</p>
+
+<h3>Battery care</h3>
+<ul>
+<li>Do not block the battery's vents or stack items on it.</li>
+<li>Keep the area around the battery clear of flammable items (1 m exclusion zone per AS/NZS 5139).</li>
+<li>Do not attempt to open the battery enclosure under any circumstances &mdash; lithium fires are extremely difficult to extinguish.</li>
+<li>If you see smoke, hear hissing, or smell a sweet/chemical odour from the battery &mdash; evacuate and call <strong>000</strong>. Lithium battery fires can re-ignite hours later.</li>
+</ul>
+
+<h3>Battery warranty</h3>
+<p>Your battery is warranted for <span class="fill">[YEARS]</span> years or <span class="fill">[CYCLES]</span> full cycles, whichever comes first, with end-of-warranty capacity guaranteed at <span class="fill">[%]</span> of original. Warranty documents are in Appendix C.</p>
+
+<h2>13. Warranties</h2>
+<table>
+<tr><th>Component</th><th>Product warranty</th><th>Performance warranty</th><th>Held by</th></tr>
+<tr><td>Solar panels</td><td><span class="fill">[YEARS]</span></td><td><span class="fill">[YEARS] @ [%]</span></td><td>Manufacturer (via installer)</td></tr>
+<tr><td>Inverter</td><td><span class="fill">[YEARS]</span></td><td>N/A</td><td>Manufacturer (via installer)</td></tr>
+<tr><td>Battery</td><td><span class="fill">[YEARS] / [CYCLES]</span></td><td><span class="fill">[%] at end</span></td><td>Manufacturer (via installer)</td></tr>
+<tr><td>Mounting system</td><td><span class="fill">[YEARS]</span></td><td>N/A</td><td>Manufacturer (via installer)</td></tr>
+<tr><td>Installation workmanship</td><td>5 years minimum (SAA Code)</td><td>N/A</td><td><span class="fill">[INSTALLER COMPANY NAME]</span></td></tr>
+<tr><td>Whole-of-system performance</td><td><span class="fill">[YEARS, if offered]</span></td><td><span class="fill">[YEARS]</span></td><td><span class="fill">[INSTALLER COMPANY NAME]</span></td></tr>
+</table>
+
+<h3>How to claim</h3>
+<ol>
+<li>Open the customer portal &rarr; <strong>My System &rarr; Components</strong>, find the affected component, tap <strong>Start warranty claim</strong>.</li>
+<li>Describe the issue. Attach photos and the fault code if any.</li>
+<li>Your installer handles the manufacturer paperwork on your behalf at no charge.</li>
+<li>If the claim is approved, repair or replacement is arranged. If declined, you receive a written reason.</li>
+</ol>
+<div class="warning"><strong>Things that void warranty:</strong> walking on panels, using high-pressure cleaners or detergents on panels, unauthorised modifications to the system, damage from neglect (e.g. tree-growth shading you were warned about and didn't act on), damage from pest entry where the system was certified pest-proof at commissioning.</div>
+
+<h2>14. Insurance</h2>
+<p>Notify your home insurer that you have a solar PV system. Many require this in writing. Premium changes are typically modest (~$30&ndash;$80/yr) but failing to declare the system can void the entire policy.</p>
+<p>What to tell your insurer:</p>
+<ul>
+<li>System size in kW (DC and AC)</li>
+<li>Install date and installer details</li>
+<li>That the system is installed by an SAA-accredited installer using CEC-approved panels, inverter and (if fitted) battery</li>
+<li>Whether you have a battery, and if so, its make/model/capacity</li>
+</ul>
+<p>Your customer portal contains an <strong>Insurance Documentation Pack</strong> button under Documents &mdash; this generates a single PDF you can email straight to your insurer.</p>
+
+<h2>15. STC rebate &amp; tax records</h2>
+<p>Your system was eligible for <span class="fill">[N]</span> Small-scale Technology Certificates (STCs) under the federal Renewable Energy Target. <span class="fill">[INSTALLER COMPANY NAME]</span> claimed these on your behalf and discounted <strong>$<span class="fill">[AMOUNT]</span></strong> off your invoice.</p>
+<p>You do not need to do anything further &mdash; the STC has been assigned, traded and accounted for. Keep this manual and your final invoice for tax records (especially if you are claiming the system as part of an investment property or business). For owner-occupiers, no tax declaration is required.</p>
+
+<h2>16. Adding to your system</h2>
+<p>You can add to your system over time. Before you do, check with your installer &mdash; some additions require network approval (re-application to your distributor) and may take 4&ndash;8 weeks.</p>
+
+<table>
+<tr><th>Addition</th><th>Network approval needed?</th><th>Typical lead time</th></tr>
+<tr><td>Panel cleaning, performance test</td><td>No</td><td>1&ndash;2 weeks</td></tr>
+<tr><td>Like-for-like inverter replacement (same brand, same size)</td><td>No</td><td>1&ndash;2 weeks</td></tr>
+<tr><td>Inverter upgrade (different brand or larger)</td><td>Yes</td><td>4&ndash;8 weeks</td></tr>
+<tr><td>Add a battery</td><td>Yes (for grid-connect)</td><td>4&ndash;8 weeks</td></tr>
+<tr><td>Add more panels (system size increase)</td><td>Yes</td><td>4&ndash;8 weeks</td></tr>
+<tr><td>EV charger</td><td>Sometimes (depends on supply)</td><td>2&ndash;4 weeks</td></tr>
+<tr><td>Hot water diverter</td><td>No</td><td>1&ndash;2 weeks</td></tr>
+</table>
+<div class="warning"><strong>QLD Solar Bonus Scheme customers (44&cent;/kWh tariff):</strong> adding a battery, increasing system size, or upgrading the inverter to a higher-rated unit will <strong>permanently void</strong> your 44&cent; feed-in tariff. The new rate would drop to 6&ndash;10&cent;/kWh &mdash; a typical loss of $1,400&ndash;$1,600 per year. Discuss with your installer first.</div>
+
+<h2>17. Selling your home</h2>
+<p>Solar systems transfer to the new owner with the house. The 25-year panel warranty, the inverter warranty, the battery warranty and the installer workmanship warranty all transfer automatically &mdash; <strong>they are tied to the property, not to you</strong>.</p>
+
+<h3>At settlement, give the buyer:</h3>
+<ul>
+<li>This manual</li>
+<li>The Grid-Connect Owner's Manual (if grid-connected)</li>
+<li>Final commissioning paperwork (CES certificate, COES, SAA)</li>
+<li>The customer portal access details (your installer will transfer the account on request)</li>
+<li>The most recent annual inspection report, if any</li>
+</ul>
+
+<h3>Notify</h3>
+<ul>
+<li>Your installer &mdash; they'll transfer the portal account and warranty records to the new owner</li>
+<li>Your electricity retailer &mdash; cancel the final-resident export agreement; the new owner sets up theirs</li>
+<li>Your insurer &mdash; cancel the policy on settlement day</li>
+</ul>
+
+<h2>18. End-of-life &amp; disposal</h2>
+<p>Solar panels are recyclable. At end-of-life (25+ years) or if a panel is damaged:</p>
+<ul>
+<li>Do not put panels in household waste &mdash; they contain glass, aluminium and small amounts of silver and lead.</li>
+<li>Contact your installer or a licensed solar-panel recycler. Many councils now offer drop-off points; ask your installer for current local options.</li>
+<li>Batteries <strong>must</strong> be returned to a licensed lithium-battery recycler &mdash; never to general waste or scrap metal. Battery fires in landfill are a serious problem.</li>
+<li>Inverters can usually be returned to the manufacturer or to e-waste recycling.</li>
+</ul>
+
+<h2>19. Who to call &mdash; emergency directory</h2>
+<table>
+<tr><th>Who</th><th>When</th><th>Contact</th></tr>
+<tr><td><strong>000</strong></td><td>Fire, sparks, smoke, immediate danger</td><td>000</td></tr>
+<tr><td>Your installer (business hours)</td><td>Faults, warranty, questions</td><td><span class="fill">[INSTALLER PHONE]</span> &middot; <span class="fill">[INSTALLER EMAIL]</span></td></tr>
+<tr><td>Your installer (after-hours emergency)</td><td>Urgent safety issues outside hours</td><td><span class="fill">[AFTER-HOURS PHONE]</span></td></tr>
+<tr><td>Panel manufacturer support</td><td>Warranty escalation if installer unavailable</td><td><span class="fill">[BRAND SUPPORT NUMBER]</span></td></tr>
+<tr><td>Inverter manufacturer support</td><td>Warranty escalation if installer unavailable</td><td><span class="fill">[BRAND SUPPORT NUMBER]</span></td></tr>
+<tr><td>Battery manufacturer support</td><td>Warranty escalation</td><td><span class="fill">[BRAND SUPPORT NUMBER]</span></td></tr>
+<tr><td>Electricity retailer</td><td>Bill, feed-in tariff, plan changes</td><td><span class="fill">[RETAILER NAME &amp; PHONE]</span></td></tr>
+<tr><td>Network distributor (DNSP)</td><td>Grid outages, connection issues, voltage problems</td><td><span class="fill">[DNSP NAME &amp; PHONE]</span></td></tr>
+<tr><td>Energy &amp; Water Ombudsman</td><td>Unresolved retailer or distributor disputes</td><td><span class="fill">[STATE EWO PHONE]</span></td></tr>
+<tr><td>Solar Accreditation Australia (SAA)</td><td>Unresolved installer accreditation / workmanship disputes</td><td>complaints@solaraccreditation.com.au</td></tr>
+</table>
+
+<h2>20. Glossary</h2>
+<ul>
+<li><strong>AC (alternating current)</strong> &mdash; the type of electricity used in your home and on the grid.</li>
+<li><strong>AS/NZS 5033</strong> &mdash; Australian/New Zealand standard for the installation of PV arrays.</li>
+<li><strong>CEC</strong> &mdash; Clean Energy Council. The industry body that maintains the lists of approved PV modules, inverters and batteries that installers must use. (Note: CEC previously also handled installer accreditation; that role moved to SAA in late 2023.)</li>
+<li><strong>CES / COES</strong> &mdash; Certificate of Electrical Safety. Issued by the electrician at install completion.</li>
+<li><strong>DC (direct current)</strong> &mdash; the type of electricity solar panels produce. Converted to AC by the inverter.</li>
+<li><strong>DNSP</strong> &mdash; Distribution Network Service Provider. The company that owns and maintains the poles and wires in your street. Different to your retailer.</li>
+<li><strong>Feed-in tariff (FiT)</strong> &mdash; the per-kWh rate your retailer pays for solar energy you export to the grid.</li>
+<li><strong>Inverter</strong> &mdash; converts DC from the panels into AC for your home.</li>
+<li><strong>kW vs kWh</strong> &mdash; kW is power (rate); kWh is energy (amount). A 6 kW system running flat-out for one hour produces 6 kWh.</li>
+<li><strong>SAA</strong> &mdash; Solar Accreditation Australia. The body that accredits solar installers and designers. Took over installer accreditation from the CEC in late 2023.</li>
+<li><strong>STC</strong> &mdash; Small-scale Technology Certificate. Federal subsidy claimed by your installer at install and discounted off your invoice.</li>
+<li><strong>String</strong> &mdash; a series-connected group of panels wired to one input of the inverter. Most home systems have 1&ndash;3 strings.</li>
+<li><strong>VPP</strong> &mdash; Virtual Power Plant. A program (typically by a retailer) that orchestrates many home batteries to act like a single grid-scale generator. You're paid to participate.</li>
+</ul>
+
+<h2>21. Quick reference card</h2>
+<div class="note">
+<strong>If something looks wrong:</strong>
+<ol>
+<li>Check inverter LED &mdash; green = OK, orange = reduced, red = fault.</li>
+<li>Open the customer portal &mdash; check for an alert or message.</li>
+<li>Note the fault code (if any).</li>
+<li>Message your installer through the portal, or call <span class="fill">[INSTALLER PHONE]</span>.</li>
+</ol>
+<strong>In an emergency:</strong>
+<ol>
+<li>Turn off AC isolator (<span class="fill">[LOCATION]</span>).</li>
+<li>Turn off Solar Supply Main Switch in switchboard.</li>
+<li>Call 000 if fire/smoke.</li>
+<li>Call <span class="fill">[INSTALLER AFTER-HOURS PHONE]</span>.</li>
+</ol>
+</div>
+
+<p style="margin-top:40px;color:#888;font-size:9pt;border-top:1px solid #e0e0e0;padding-top:12px;">
+Solar System Owner's Manual &middot; Template v1.0 &middot; June 2026 &middot; Issued by <span class="fill">[INSTALLER COMPANY NAME]</span><br>
+Powered by SolarSync. This manual must be retained for the life of the system and transferred with the property at sale.
+</p>
+</body></html>

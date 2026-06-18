@@ -8,10 +8,13 @@
     "seed": "node seed.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.658.1",
+    "@aws-sdk/s3-request-presigner": "^3.658.1",
     "@electric-sql/pglite": "^0.5.2",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
     "pg": "^8.21.0",
     "qrcode": "^1.5.4",
     "stripe": "^16.8.0"

@@ -118,6 +118,25 @@ async function migrate() {
       revoked_at timestamptz,
       last_seen timestamptz,
       use_count int default 0)`,
+    `create table if not exists tenant_documents (
+      id text primary key,
+      tenant_id text not null,
+      doc_group text not null,
+      version int not null default 1,
+      is_current boolean not null default true,
+      title text not null,
+      category text default 'Other',
+      filename text not null,
+      mime_type text,
+      size_bytes bigint,
+      spaces_key text not null,
+      uploaded_by text,
+      uploaded_at timestamptz default now(),
+      visibility text default 'tenant',
+      notes text,
+      is_deleted boolean default false)`,
+    `create index if not exists tenant_documents_group_idx on tenant_documents (tenant_id, doc_group, version desc)`,
+    `create index if not exists tenant_documents_current_idx on tenant_documents (tenant_id, is_current) where is_current = true and is_deleted = false`,
   ];
   for (const s of stmts) await _db.query(s);
 }

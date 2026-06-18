@@ -370,6 +370,172 @@ app.post("/api/testers/redeem", h(async (req, res) => {
 }));
 
 // ============================================================
+// TENANT DOCUMENT LIBRARY (paid add-on: addon_key = 'document-library')
+// Storage: DigitalOcean Spaces (S3-compatible) — see backend/storage.js.
+// ============================================================
+const multer = require("multer");
+const storage = require("./storage");
+
+const ALLOWED_MIMES = new Set([
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/pdf",
+  "image/png", "image/jpeg",
+]);
+const ALLOWED_EXTS = /\.(doc|docx|pdf|png|jpe?g)$/i;
+
+// 25 MB ceiling, buffered in memory then streamed to Spaces.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_MIMES.has(file.mimetype) || ALLOWED_EXTS.test(file.originalname)) return cb(null, true);
+    cb(new Error("unsupported_file_type"));
+  },
+});
+
+// Paid-gated: unlocked when the tenant has an active 'document-library' add-on row,
+// OR a valid tester token is presented (mirrors complianceUnlocked so the feature is
+// testable before a real paid activation). Real tenants without either stay locked.
+async function documentLibraryUnlocked(tenant_id, token) {
+  if (tenant_id) {
+    const a = await one("select active from tenant_addons where tenant_id=$1 and addon_key='document-library'", [tenant_id]);
+    if (a && a.active) return true;
+  }
+  if (token) {
+    const t = await one("select active from tester_tokens where token=$1 and active=true", [String(token).toUpperCase()]);
+    if (t) return true;
+  }
+  return false;
+}
+
+const requireDocLibrary = h(async (req, res, next) => {
+  if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
+  if (!(await documentLibraryUnlocked(tenantOf(req), req.query.token))) return res.status(402).json({ error: "addon_required", addon: "document-library" });
+  next();
+});
+
+// Entitlement probe — UI uses this to show locked vs unlocked state without trying an upload.
+app.get("/api/entitlements/document-library", A.authRequired, h(async (req, res) => {
+  const unlocked = await documentLibraryUnlocked(tenantOf(req), req.query.token);
+  ok(res, { unlocked, configured: storage.isConfigured() });
+}));
+
+// List all current documents for the calling tenant (one row per doc_group).
+app.get("/api/tenant/documents", A.authRequired, requireDocLibrary, h(async (req, res) => {
+  const r = await rows(
+    `select id, doc_group, version, title, category, filename, mime_type, size_bytes,
+            uploaded_by, uploaded_at, visibility, notes
+     from tenant_documents
+     where tenant_id=$1 and is_current=true and is_deleted=false
+     order by uploaded_at desc`,
+    [tenantOf(req)]
+  );
+  ok(res, r);
+}));
+
+// Version history for one doc_group (current + all prior). Tenant-scoped.
+app.get("/api/tenant/documents/:doc_group/versions", A.authRequired, requireDocLibrary, h(async (req, res) => {
+  const r = await rows(
+    `select id, version, is_current, title, filename, mime_type, size_bytes, uploaded_by, uploaded_at
+     from tenant_documents
+     where tenant_id=$1 and doc_group=$2 and is_deleted=false
+     order by version desc`,
+    [tenantOf(req), req.params.doc_group]
+  );
+  ok(res, r);
+}));
+
+// Upload a brand-new document (new doc_group, version 1).
+// multipart form: file (binary), title, category, visibility?, notes?
+app.post("/api/tenant/documents", A.authRequired, requireDocLibrary, upload.single("file"), h(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "no_file" });
+  const { title, category, visibility, notes } = req.body || {};
+  if (!title || String(title).trim() === "") return res.status(400).json({ error: "title_required" });
+  const id = rid();
+  const doc_group = rid();
+  const tenant_id = tenantOf(req);
+  const key = storage.makeKey(tenant_id, doc_group, 1, req.file.originalname);
+  await storage.putObject(key, req.file.buffer, req.file.mimetype);
+  await run(
+    `insert into tenant_documents (id, tenant_id, doc_group, version, is_current, title, category,
+        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes)
+     values ($1,$2,$3,1,true,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [id, tenant_id, doc_group, String(title).trim().slice(0, 200), (category || "Other").slice(0, 50),
+     req.file.originalname.slice(0, 200), req.file.mimetype, req.file.size, key,
+     req.user.sub, (visibility || "tenant").slice(0, 20), (notes || "").slice(0, 1000)]
+  );
+  await audit(req.user.sub, "doc_upload", id, tenant_id, { title, category, size: req.file.size });
+  ok(res, { id, doc_group, version: 1 });
+}));
+
+// Upload a new VERSION of an existing document (same doc_group). Old row's is_current is flipped off.
+app.put("/api/tenant/documents/:doc_group", A.authRequired, requireDocLibrary, upload.single("file"), h(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "no_file" });
+  const tenant_id = tenantOf(req);
+  const { doc_group } = req.params;
+  const current = await one(
+    `select id, version, title, category, visibility from tenant_documents
+     where tenant_id=$1 and doc_group=$2 and is_current=true and is_deleted=false`,
+    [tenant_id, doc_group]
+  );
+  if (!current) return res.status(404).json({ error: "not_found" });
+  const newVersion = (current.version || 1) + 1;
+  const id = rid();
+  const key = storage.makeKey(tenant_id, doc_group, newVersion, req.file.originalname);
+  await storage.putObject(key, req.file.buffer, req.file.mimetype);
+  await run("update tenant_documents set is_current=false where tenant_id=$1 and doc_group=$2 and is_current=true", [tenant_id, doc_group]);
+  await run(
+    `insert into tenant_documents (id, tenant_id, doc_group, version, is_current, title, category,
+        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes)
+     values ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [id, tenant_id, doc_group, newVersion,
+     (req.body && req.body.title) || current.title, (req.body && req.body.category) || current.category,
+     req.file.originalname.slice(0, 200), req.file.mimetype, req.file.size, key,
+     req.user.sub, (req.body && req.body.visibility) || current.visibility, (req.body && req.body.notes || "").slice(0, 1000)]
+  );
+  await audit(req.user.sub, "doc_new_version", id, tenant_id, { doc_group, version: newVersion });
+  ok(res, { id, doc_group, version: newVersion });
+}));
+
+// Presigned download URL (5 min). Works for the current row OR any prior version (by id).
+app.get("/api/tenant/documents/:id/download", A.authRequired, requireDocLibrary, h(async (req, res) => {
+  const d = await one("select * from tenant_documents where id=$1", [req.params.id]);
+  if (!d || d.is_deleted || d.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  const url = await storage.presignDownload(d.spaces_key, d.filename);
+  await audit(req.user.sub, "doc_download", d.id, d.tenant_id);
+  ok(res, { url, filename: d.filename, expires_in: 300 });
+}));
+
+// Soft-delete a single version. If it was the current row, promote the previous version
+// in the same doc_group to current. If no prior version exists, the whole group is gone.
+app.delete("/api/tenant/documents/:id", A.authRequired, requireDocLibrary, h(async (req, res) => {
+  const d = await one("select * from tenant_documents where id=$1", [req.params.id]);
+  if (!d || d.is_deleted || d.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  await run("update tenant_documents set is_deleted=true where id=$1", [d.id]);
+  if (d.is_current) {
+    const prev = await one(
+      `select id from tenant_documents where tenant_id=$1 and doc_group=$2 and is_deleted=false
+       order by version desc limit 1`,
+      [d.tenant_id, d.doc_group]
+    );
+    if (prev) await run("update tenant_documents set is_current=true where id=$1", [prev.id]);
+  }
+  await audit(req.user.sub, "doc_delete", d.id, d.tenant_id, { version: d.version });
+  ok(res, { ok: true });
+}));
+
+// multer error → JSON
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "file_too_large" : err.code });
+  if (err && err.message === "unsupported_file_type") return res.status(400).json({ error: "unsupported_file_type" });
+  next(err);
+});
+
+// SolarSync template downloads (public, no auth — these are tenant-editable starter files)
+app.use("/templates", express.static(path.join(__dirname, "public", "templates"), { maxAge: "1h" }));
+
+// ============================================================
 // Health + serve the front-end
 // ============================================================
 app.get("/api/health", h(async (req, res) => ok(res, { ok: true, ts: Date.now() })));
