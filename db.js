@@ -137,6 +137,20 @@ async function migrate() {
       is_deleted boolean default false)`,
     `create index if not exists tenant_documents_group_idx on tenant_documents (tenant_id, doc_group, version desc)`,
     `create index if not exists tenant_documents_current_idx on tenant_documents (tenant_id, is_current) where is_current = true and is_deleted = false`,
+    `create table if not exists document_publications (
+      id text primary key,
+      document_id text not null,
+      doc_group text,
+      tenant_id text not null,
+      client_id text not null,
+      title text,
+      filename text,
+      mime_type text,
+      size_bytes bigint,
+      spaces_key text not null,
+      published_by text,
+      published_at timestamptz default now())`,
+    `create index if not exists document_publications_client_idx on document_publications (client_id, published_at desc)`,
   ];
   for (const s of stmts) await _db.query(s);
 }

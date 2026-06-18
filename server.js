@@ -194,6 +194,35 @@ app.get("/api/client/reports", A.authRequired, A.requireRole("client"), h(async 
   ok(res, { paid: true, reports });
 }));
 
+// Tenant's own client list — used by the "Send to customer" document picker.
+app.get("/api/clients", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  ok(res, await rows("select id, name, site_address, install_status from clients where tenant_id=$1 order by name", [tenantOf(req)]));
+}));
+
+// Documents an installer has sent to THIS logged-in customer (snapshot at publish time).
+app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const client = await one("select * from clients where user_id=$1", [req.user.sub]);
+  if (!client) return ok(res, []);
+  const docs = await rows(
+    `select id, title, filename, mime_type, size_bytes, published_at
+     from document_publications where client_id=$1 order by published_at desc`,
+    [client.id]
+  );
+  ok(res, docs);
+}));
+
+// Customer download of a document their installer sent them (presigned, scoped to them).
+app.get("/api/client/documents/:pubId/download", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
+  const client = await one("select * from clients where user_id=$1", [req.user.sub]);
+  if (!client) return res.status(404).json({ error: "not_found" });
+  const pub = await one("select * from document_publications where id=$1", [req.params.pubId]);
+  if (!pub || pub.client_id !== client.id) return res.status(404).json({ error: "not_found" });
+  const url = await storage.presignDownload(pub.spaces_key, pub.filename);
+  await audit(req.user.sub, "client_doc_download", pub.id, pub.tenant_id);
+  ok(res, { url, filename: pub.filename, expires_in: 300 });
+}));
+
 // ============================================================
 // INVOICES + PAYMENTS (Stripe)
 // ============================================================
@@ -409,11 +438,15 @@ async function documentLibraryUnlocked(tenant_id, token) {
   return false;
 }
 
-const requireDocLibrary = h(async (req, res, next) => {
-  if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
-  if (!(await documentLibraryUnlocked(tenantOf(req), req.query.token))) return res.status(402).json({ error: "addon_required", addon: "document-library" });
-  next();
-});
+// Proper async middleware: must receive AND forward `next` (cannot use the h() wrapper,
+// which only passes req,res and would leave next undefined on the pass-through path).
+async function requireDocLibrary(req, res, next) {
+  try {
+    if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
+    if (!(await documentLibraryUnlocked(tenantOf(req), req.query.token))) return res.status(402).json({ error: "addon_required", addon: "document-library" });
+    next();
+  } catch (e) { next(e); }
+}
 
 // Entitlement probe — UI uses this to show locked vs unlocked state without trying an upload.
 app.get("/api/entitlements/document-library", A.authRequired, h(async (req, res) => {
@@ -522,6 +555,26 @@ app.delete("/api/tenant/documents/:id", A.authRequired, requireDocLibrary, h(asy
     if (prev) await run("update tenant_documents set is_current=true where id=$1", [prev.id]);
   }
   await audit(req.user.sub, "doc_delete", d.id, d.tenant_id, { version: d.version });
+  ok(res, { ok: true });
+}));
+
+// Send a document to a customer — snapshots the chosen version into document_publications
+// so the customer keeps what they were sent even if the tenant later edits/deletes it
+// (mirrors how reports publish). Re-publishing the same doc_group to the same client replaces.
+app.post("/api/tenant/documents/:id/publish", A.authRequired, requireDocLibrary, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const d = await one("select * from tenant_documents where id=$1", [req.params.id]);
+  if (!d || d.is_deleted || d.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  const { client_id } = req.body || {};
+  if (!client_id) return res.status(400).json({ error: "client_required" });
+  const client = await one("select id from clients where id=$1 and tenant_id=$2", [client_id, tenantOf(req)]);
+  if (!client) return res.status(404).json({ error: "client_not_found" });
+  if (d.doc_group) await run("delete from document_publications where client_id=$1 and doc_group=$2", [client_id, d.doc_group]);
+  await run(
+    `insert into document_publications (id, document_id, doc_group, tenant_id, client_id, title, filename, mime_type, size_bytes, spaces_key, published_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [rid(), d.id, d.doc_group, d.tenant_id, client_id, d.title, d.filename, d.mime_type, d.size_bytes, d.spaces_key, req.user.sub]
+  );
+  await audit(req.user.sub, "doc_publish", d.id, d.tenant_id, { client_id, version: d.version });
   ok(res, { ok: true });
 }));
 
