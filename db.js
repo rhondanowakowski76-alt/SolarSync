@@ -134,6 +134,7 @@ async function migrate() {
       uploaded_at timestamptz default now(),
       visibility text default 'tenant',
       notes text,
+      content_html text,
       is_deleted boolean default false)`,
     `create index if not exists tenant_documents_group_idx on tenant_documents (tenant_id, doc_group, version desc)`,
     `create index if not exists tenant_documents_current_idx on tenant_documents (tenant_id, is_current) where is_current = true and is_deleted = false`,
@@ -147,12 +148,17 @@ async function migrate() {
       filename text,
       mime_type text,
       size_bytes bigint,
-      spaces_key text not null,
+      spaces_key text,
+      body_html text,
       published_by text,
       published_at timestamptz default now())`,
     `create index if not exists document_publications_client_idx on document_publications (client_id, published_at desc)`,
+    // Idempotent column adds for DBs created by an earlier deploy (tables already exist):
+    `alter table tenant_documents add column if not exists content_html text`,
+    `alter table document_publications add column if not exists body_html text`,
+    `alter table document_publications alter column spaces_key drop not null`,
   ];
-  for (const s of stmts) await _db.query(s);
+  for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }
 
 module.exports = { db, query, rows, one, run, rid, audit, init };

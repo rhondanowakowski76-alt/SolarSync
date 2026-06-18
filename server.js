@@ -194,9 +194,10 @@ app.get("/api/client/reports", A.authRequired, A.requireRole("client"), h(async 
   ok(res, { paid: true, reports });
 }));
 
-// Tenant's own client list — used by the "Send to customer" document picker.
+// Tenant's own client list — used by the "Send to customer" / "Fill for customer" pickers.
+// Includes system_spec so the front-end can autofill system fields into a form.
 app.get("/api/clients", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
-  ok(res, await rows("select id, name, site_address, install_status from clients where tenant_id=$1 order by name", [tenantOf(req)]));
+  ok(res, await rows("select id, name, site_address, install_status, system_spec from clients where tenant_id=$1 order by name", [tenantOf(req)]));
 }));
 
 // Documents an installer has sent to THIS logged-in customer (snapshot at publish time).
@@ -204,20 +205,33 @@ app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(asyn
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
   if (!client) return ok(res, []);
   const docs = await rows(
-    `select id, title, filename, mime_type, size_bytes, published_at
+    `select id, title, filename, mime_type, size_bytes, published_at,
+            (body_html is not null) as has_html
      from document_publications where client_id=$1 order by published_at desc`,
     [client.id]
   );
   ok(res, docs);
 }));
 
-// Customer download of a document their installer sent them (presigned, scoped to them).
-app.get("/api/client/documents/:pubId/download", A.authRequired, A.requireRole("client"), h(async (req, res) => {
-  if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
+// Customer view of a filled/edited HTML document their installer sent them.
+app.get("/api/client/documents/:pubId/view", A.authRequired, A.requireRole("client"), h(async (req, res) => {
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
   if (!client) return res.status(404).json({ error: "not_found" });
   const pub = await one("select * from document_publications where id=$1", [req.params.pubId]);
   if (!pub || pub.client_id !== client.id) return res.status(404).json({ error: "not_found" });
+  if (!pub.body_html) return res.status(409).json({ error: "no_html" });
+  await audit(req.user.sub, "client_doc_view", pub.id, pub.tenant_id);
+  ok(res, { title: pub.title, body_html: pub.body_html });
+}));
+
+// Customer download of a document their installer sent them (presigned, scoped to them).
+app.get("/api/client/documents/:pubId/download", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const client = await one("select * from clients where user_id=$1", [req.user.sub]);
+  if (!client) return res.status(404).json({ error: "not_found" });
+  const pub = await one("select * from document_publications where id=$1", [req.params.pubId]);
+  if (!pub || pub.client_id !== client.id) return res.status(404).json({ error: "not_found" });
+  if (!pub.spaces_key) return res.status(409).json({ error: "no_file" });
+  if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
   const url = await storage.presignDownload(pub.spaces_key, pub.filename);
   await audit(req.user.sub, "client_doc_download", pub.id, pub.tenant_id);
   ok(res, { url, filename: pub.filename, expires_in: 300 });
@@ -423,6 +437,19 @@ const upload = multer({
   },
 });
 
+// HTML form detection — HTML-based forms (the format the SolarSync manuals and the
+// portal's own forms use) can be autofilled from customer data and edited in-browser.
+// Real binary .doc/.docx/.pdf are not HTML and stay download-only.
+const HTML_EXT = /\.(html?|doc)$/i;
+function extractFormHtml(file) {
+  const isHtmlMime = file.mimetype === "text/html" || file.mimetype === "application/xhtml+xml";
+  if (!isHtmlMime && !HTML_EXT.test(file.originalname)) return null;
+  let text;
+  try { text = file.buffer.toString("utf8"); } catch (e) { return null; }
+  if (/<html[\s>]|<!doctype html/i.test(text.slice(0, 2000))) return text.slice(0, 2000000);
+  return null;
+}
+
 // Paid-gated: unlocked when the tenant has an active 'document-library' add-on row,
 // OR a valid tester token is presented (mirrors complianceUnlocked so the feature is
 // testable before a real paid activation). Real tenants without either stay locked.
@@ -458,7 +485,8 @@ app.get("/api/entitlements/document-library", A.authRequired, h(async (req, res)
 app.get("/api/tenant/documents", A.authRequired, requireDocLibrary, h(async (req, res) => {
   const r = await rows(
     `select id, doc_group, version, title, category, filename, mime_type, size_bytes,
-            uploaded_by, uploaded_at, visibility, notes
+            uploaded_by, uploaded_at, visibility, notes,
+            (content_html is not null) as fillable
      from tenant_documents
      where tenant_id=$1 and is_current=true and is_deleted=false
      order by uploaded_at desc`,
@@ -490,16 +518,17 @@ app.post("/api/tenant/documents", A.authRequired, requireDocLibrary, upload.sing
   const tenant_id = tenantOf(req);
   const key = storage.makeKey(tenant_id, doc_group, 1, req.file.originalname);
   await storage.putObject(key, req.file.buffer, req.file.mimetype);
+  const content_html = extractFormHtml(req.file);
   await run(
     `insert into tenant_documents (id, tenant_id, doc_group, version, is_current, title, category,
-        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes)
-     values ($1,$2,$3,1,true,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes, content_html)
+     values ($1,$2,$3,1,true,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [id, tenant_id, doc_group, String(title).trim().slice(0, 200), (category || "Other").slice(0, 50),
      req.file.originalname.slice(0, 200), req.file.mimetype, req.file.size, key,
-     req.user.sub, (visibility || "tenant").slice(0, 20), (notes || "").slice(0, 1000)]
+     req.user.sub, (visibility || "tenant").slice(0, 20), (notes || "").slice(0, 1000), content_html]
   );
-  await audit(req.user.sub, "doc_upload", id, tenant_id, { title, category, size: req.file.size });
-  ok(res, { id, doc_group, version: 1 });
+  await audit(req.user.sub, "doc_upload", id, tenant_id, { title, category, size: req.file.size, fillable: !!content_html });
+  ok(res, { id, doc_group, version: 1, fillable: !!content_html });
 }));
 
 // Upload a new VERSION of an existing document (same doc_group). Old row's is_current is flipped off.
@@ -517,18 +546,27 @@ app.put("/api/tenant/documents/:doc_group", A.authRequired, requireDocLibrary, u
   const id = rid();
   const key = storage.makeKey(tenant_id, doc_group, newVersion, req.file.originalname);
   await storage.putObject(key, req.file.buffer, req.file.mimetype);
+  const content_html = extractFormHtml(req.file);
   await run("update tenant_documents set is_current=false where tenant_id=$1 and doc_group=$2 and is_current=true", [tenant_id, doc_group]);
   await run(
     `insert into tenant_documents (id, tenant_id, doc_group, version, is_current, title, category,
-        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes)
-     values ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        filename, mime_type, size_bytes, spaces_key, uploaded_by, visibility, notes, content_html)
+     values ($1,$2,$3,$4,true,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [id, tenant_id, doc_group, newVersion,
      (req.body && req.body.title) || current.title, (req.body && req.body.category) || current.category,
      req.file.originalname.slice(0, 200), req.file.mimetype, req.file.size, key,
-     req.user.sub, (req.body && req.body.visibility) || current.visibility, (req.body && req.body.notes || "").slice(0, 1000)]
+     req.user.sub, (req.body && req.body.visibility) || current.visibility, (req.body && req.body.notes || "").slice(0, 1000), content_html]
   );
   await audit(req.user.sub, "doc_new_version", id, tenant_id, { doc_group, version: newVersion });
-  ok(res, { id, doc_group, version: newVersion });
+  ok(res, { id, doc_group, version: newVersion, fillable: !!content_html });
+}));
+
+// Fetch a form's editable HTML content (for the autofill + in-browser editor flow).
+app.get("/api/tenant/documents/:id/content", A.authRequired, requireDocLibrary, h(async (req, res) => {
+  const row = await one("select * from tenant_documents where id=$1", [req.params.id]);
+  if (!row || row.is_deleted || row.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  if (!row.content_html) return res.status(409).json({ error: "not_fillable" });
+  ok(res, { id: row.id, title: row.title, filename: row.filename, content_html: row.content_html });
 }));
 
 // Presigned download URL (5 min). Works for the current row OR any prior version (by id).
@@ -568,13 +606,17 @@ app.post("/api/tenant/documents/:id/publish", A.authRequired, requireDocLibrary,
   if (!client_id) return res.status(400).json({ error: "client_required" });
   const client = await one("select id from clients where id=$1 and tenant_id=$2", [client_id, tenantOf(req)]);
   if (!client) return res.status(404).json({ error: "client_not_found" });
+  // Optional filled/edited HTML (from the autofill + editor flow). When present the customer
+  // views it as a rendered document; otherwise they download the original Spaces file.
+  const body_html = (req.body && typeof req.body.body_html === "string" && req.body.body_html.trim())
+    ? req.body.body_html.slice(0, 2000000) : null;
   if (d.doc_group) await run("delete from document_publications where client_id=$1 and doc_group=$2", [client_id, d.doc_group]);
   await run(
-    `insert into document_publications (id, document_id, doc_group, tenant_id, client_id, title, filename, mime_type, size_bytes, spaces_key, published_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [rid(), d.id, d.doc_group, d.tenant_id, client_id, d.title, d.filename, d.mime_type, d.size_bytes, d.spaces_key, req.user.sub]
+    `insert into document_publications (id, document_id, doc_group, tenant_id, client_id, title, filename, mime_type, size_bytes, spaces_key, body_html, published_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [rid(), d.id, d.doc_group, d.tenant_id, client_id, d.title, d.filename, d.mime_type, d.size_bytes, d.spaces_key, body_html, req.user.sub]
   );
-  await audit(req.user.sub, "doc_publish", d.id, d.tenant_id, { client_id, version: d.version });
+  await audit(req.user.sub, "doc_publish", d.id, d.tenant_id, { client_id, version: d.version, html: !!body_html });
   ok(res, { ok: true });
 }));
 

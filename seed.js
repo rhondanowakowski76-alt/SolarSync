@@ -23,8 +23,9 @@ async function seed() {
   await mk("u-contractor", TID, "contractor", "Dan Webb");
   await mk("u-client", TID, "client", "Adam Smith");
 
-  await run("insert into clients (id,tenant_id,user_id,name,site_address,install_status) values ($1,$2,$3,$4,$5,$6)",
-    ["c-adam", TID, "u-client", "Adam Smith", "42 Solar Ave, Brisbane QLD 4000", "installed"]);
+  await run("insert into clients (id,tenant_id,user_id,name,site_address,install_status,system_spec) values ($1,$2,$3,$4,$5,$6,$7)",
+    ["c-adam", TID, "u-client", "Adam Smith", "42 Solar Ave, Brisbane QLD 4000", "installed",
+     JSON.stringify({ systemKw: 6.6, panels: 16, panelModel: "Jinko Tiger Neo 440W", inverter: "Fronius Primo GEN24 5.0", battery: null, phone: "0412 345 678", email: "adam.smith@email.com" })]);
 
   for (const [k,n,p] of [["compliance-suite","Compliance Reports Suite",69],["vpp","VPP Enrollment Assistant",49],["document-library","Document Library",29]])
     await run("insert into addons (key,name,price) values ($1,$2,$3)", [k,n,p]);
