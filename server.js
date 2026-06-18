@@ -657,7 +657,27 @@ app.get("*", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+// One-time, idempotent data backfill run at startup (safe to run every boot):
+// gives the connected-demo customer a system spec so form autofill can populate
+// system fields (kW / panels / inverter). Only fills when it's currently empty,
+// so it never overwrites real data a tenant has entered.
+async function startupBackfill() {
+  try {
+    const spec = JSON.stringify({
+      systemKw: 6.6, panels: 16, panelModel: "Jinko Tiger Neo 440W",
+      inverter: "Fronius Primo GEN24 5.0", battery: null,
+      phone: "0412 345 678", email: "adam.smith@email.com",
+    });
+    await run(
+      "update clients set system_spec=$1::jsonb where id='c-adam' and (system_spec is null or system_spec='{}'::jsonb)",
+      [spec]
+    );
+  } catch (e) { console.error("startupBackfill failed:", e.message); }
+}
+
 // ensure DB is initialised (and schema migrated) before accepting traffic
-require("./db").db().then(() => {
+require("./db").db().then(async () => {
+  await startupBackfill();
   app.listen(PORT, () => console.log(`SolarSync backend on :${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite local"})`));
 }).catch(e => { console.error("DB init failed:", e); process.exit(1); });
