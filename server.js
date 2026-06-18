@@ -673,5 +673,5 @@ async function startupBackfill() {
 // ensure DB is initialised (and schema migrated) before accepting traffic
 require("./db").db().then(async () => {
   await startupBackfill();
-  app.listen(PORT, () => console.log(`SolarSync backend on :${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite local"}) [BUILD: doclib-formfix 18Jun]`));
+  app.listen(PORT, () => console.log(`SolarSync backend on :${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite local"}) [BUILD: doclib-ui 18Jun]`));
 }).catch(e => { console.error("DB init failed:", e); process.exit(1); });
