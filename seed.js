@@ -29,6 +29,9 @@ async function seed() {
 
   for (const [k,n,p] of [["compliance-suite","Compliance Reports Suite",69],["vpp","VPP Enrollment Assistant",49],["document-library","Document Library",29]])
     await run("insert into addons (key,name,price) values ($1,$2,$3)", [k,n,p]);
+  // Connected-demo tenant has all premium add-ons active so every feature is showcaseable.
+  for (const k of ["compliance-suite","vpp","document-library"])
+    await run("insert into tenant_addons (tenant_id,addon_key,active,activated_at) values ($1,$2,true,now())", [TID, k]);
   await run("insert into tester_tokens (token,scope,active) values ($1,$2,true)", ["TESTER-2026","compliance"]);
 
   const tpl = (k,t,b)=>run("insert into report_templates (key,category,title,body_html) values ($1,'compliance',$2,$3)", [k,t,b]);

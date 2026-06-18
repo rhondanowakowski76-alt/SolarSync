@@ -453,7 +453,11 @@ function extractFormHtml(file) {
 // Paid-gated: unlocked when the tenant has an active 'document-library' add-on row,
 // OR a valid tester token is presented (mirrors complianceUnlocked so the feature is
 // testable before a real paid activation). Real tenants without either stay locked.
+// The connected-demo tenant always has it on, matching how the demo showcases the
+// Compliance Suite and other premium features (unlocked without a real purchase).
+const DEMO_TENANT = "tenant-helios";
 async function documentLibraryUnlocked(tenant_id, token) {
+  if (tenant_id === DEMO_TENANT) return true;
   if (tenant_id) {
     const a = await one("select active from tenant_addons where tenant_id=$1 and addon_key='document-library'", [tenant_id]);
     if (a && a.active) return true;
