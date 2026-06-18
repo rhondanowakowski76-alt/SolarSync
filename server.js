@@ -455,18 +455,11 @@ function extractFormHtml(file) {
 // testable before a real paid activation). Real tenants without either stay locked.
 // The connected-demo tenant always has it on, matching how the demo showcases the
 // Compliance Suite and other premium features (unlocked without a real purchase).
-const DEMO_TENANT = "tenant-helios";
 async function documentLibraryUnlocked(tenant_id, token) {
-  if (tenant_id === DEMO_TENANT) return true;
-  if (tenant_id) {
-    const a = await one("select active from tenant_addons where tenant_id=$1 and addon_key='document-library'", [tenant_id]);
-    if (a && a.active) return true;
-  }
-  if (token) {
-    const t = await one("select active from tester_tokens where token=$1 and active=true", [String(token).toUpperCase()]);
-    if (t) return true;
-  }
-  return false;
+  // TEMP (pre-launch): available to any signed-in tenant while billing is finalised.
+  // To re-gate for monetisation, restore the tenant_addons / tester-token checks
+  // (see git history for commit that gated on addon_key='document-library').
+  return !!tenant_id || !!token;
 }
 
 // Proper async middleware: must receive AND forward `next` (cannot use the h() wrapper,
@@ -482,6 +475,7 @@ async function requireDocLibrary(req, res, next) {
 // Entitlement probe — UI uses this to show locked vs unlocked state without trying an upload.
 app.get("/api/entitlements/document-library", A.authRequired, h(async (req, res) => {
   const unlocked = await documentLibraryUnlocked(tenantOf(req), req.query.token);
+  console.log("[doclib] entitlement check tenant=%s unlocked=%s configured=%s", tenantOf(req), unlocked, storage.isConfigured());
   ok(res, { unlocked, configured: storage.isConfigured() });
 }));
 
@@ -679,5 +673,5 @@ async function startupBackfill() {
 // ensure DB is initialised (and schema migrated) before accepting traffic
 require("./db").db().then(async () => {
   await startupBackfill();
-  app.listen(PORT, () => console.log(`SolarSync backend on :${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite local"})`));
+  app.listen(PORT, () => console.log(`SolarSync backend on :${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite local"}) [BUILD: doclib-open-gate 18Jun]`));
 }).catch(e => { console.error("DB init failed:", e); process.exit(1); });
