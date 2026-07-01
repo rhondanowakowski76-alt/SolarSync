@@ -192,6 +192,11 @@ async function migrate() {
     `alter table document_publications add column if not exists body_html text`,
     `alter table document_publications alter column spaces_key drop not null`,
     `alter table invoices add column if not exists is_demo boolean default false`,
+    `alter table invoices add column if not exists client_name text`,
+    `alter table invoices add column if not exists description text`,
+    `alter table invoices add column if not exists due text`,
+    `alter table invoices add column if not exists quote_id text`,
+    `alter table invoices alter column client_id drop not null`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

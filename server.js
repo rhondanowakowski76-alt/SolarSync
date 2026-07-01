@@ -522,6 +522,38 @@ app.get("/api/invoices", A.authRequired, h(async (req, res) => {
   ok(res, await rows("select * from invoices where tenant_id=$1 order by created_at desc", [tenantOf(req)]));
 }));
 
+// Create an invoice (tenant staff). client_id optional; client_name kept for display.
+app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.amount || Number(d.amount) <= 0) return res.status(400).json({ error: "amount_required" });
+  const id = "inv-" + rid().slice(0, 8);
+  const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [tenantOf(req)]);
+  const number = d.number || ("INV-" + (2100 + ((cnt && cnt.c) || 0)));
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, tenantOf(req), d.client_id || null, d.client_name || null, number, Number(d.amount),
+     d.status || "due", d.description || null, d.due || null, d.quote_id || null]);
+  await audit(req.user.sub, "create_invoice", id, tenantOf(req));
+  ok(res, await one("select * from invoices where id=$1", [id]));
+}));
+
+// Convert a saved quote into an invoice (carries client, amount and a link back).
+app.post("/api/quotes/:id/invoice", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const q = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!q || (!isReseller(req) && q.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const cust = q.customer || {};
+  const id = "inv-" + rid().slice(0, 8);
+  const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [q.tenant_id]);
+  const number = "INV-" + (2100 + ((cnt && cnt.c) || 0));
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id)
+    values ($1,$2,$3,$4,$5,$6,'due',$7,$8,$9)`,
+    [id, q.tenant_id, q.client_id || null, cust.name || null, number, Number(q.total) || 0,
+     "From quote " + (q.number || q.id), req.body && req.body.due || null, q.id]);
+  await run("update quotes set status='Accepted', updated_at=now() where id=$1", [q.id]);
+  await audit(req.user.sub, "quote_to_invoice", id, q.tenant_id, { quote: q.id });
+  ok(res, await one("select * from invoices where id=$1", [id]));
+}));
+
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeKey ? require("stripe")(stripeKey) : null;
 
