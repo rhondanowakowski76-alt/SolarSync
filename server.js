@@ -244,6 +244,78 @@ app.delete("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   ok(res, { ok: true });
 }));
 
+// ============================================================
+// PRODUCTS / CATALOG + INVENTORY (tenant-scoped)
+// ============================================================
+const PROD_COLS = "id, tenant_id, cat, name, spec, unit, price, watts, stock, reorder_point, direct_sale, recreational, note, active, updated_at, created_at";
+
+app.get("/api/products", A.authRequired, h(async (req, res) => {
+  const r = isReseller(req)
+    ? await rows(`select ${PROD_COLS} from products where active=true order by cat, name`)
+    : await rows(`select ${PROD_COLS} from products where tenant_id=$1 and active=true order by cat, name`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
+app.post("/api/products", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.name) return res.status(400).json({ error: "name_required" });
+  const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "prd-" + rid().slice(0, 8);
+  await run(`insert into products (id, tenant_id, cat, name, spec, unit, price, watts, stock, reorder_point, direct_sale, recreational, note)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [id, tenantOf(req), d.cat || null, d.name, d.spec || null, d.unit || "unit", Number(d.price) || 0, Number(d.watts) || 0,
+     d.stock == null || d.stock === "" ? null : Number(d.stock), Number(d.reorder_point) || 5,
+     d.direct_sale !== false, !!d.recreational, d.note || null]);
+  await audit(req.user.sub, "create_product", id, tenantOf(req));
+  ok(res, await one(`select ${PROD_COLS} from products where id=$1`, [id]));
+}));
+
+app.put("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from products where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const d = req.body || {};
+  await run(`update products set cat=$1, name=$2, spec=$3, unit=$4, price=$5, watts=$6, stock=$7, reorder_point=$8, direct_sale=$9, recreational=$10, note=$11, updated_at=now() where id=$12`,
+    [d.cat ?? cur.cat, d.name ?? cur.name, d.spec ?? cur.spec, d.unit ?? cur.unit,
+     d.price != null ? Number(d.price) : cur.price, d.watts != null ? Number(d.watts) : cur.watts,
+     d.stock === "" ? null : (d.stock != null ? Number(d.stock) : cur.stock), d.reorder_point != null ? Number(d.reorder_point) : cur.reorder_point,
+     d.direct_sale != null ? d.direct_sale : cur.direct_sale, d.recreational != null ? d.recreational : cur.recreational, d.note ?? cur.note, cur.id]);
+  await audit(req.user.sub, "update_product", cur.id, cur.tenant_id);
+  ok(res, await one(`select ${PROD_COLS} from products where id=$1`, [cur.id]));
+}));
+
+app.delete("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from products where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  await run("update products set active=false, updated_at=now() where id=$1", [cur.id]);  // soft delete keeps history intact
+  await audit(req.user.sub, "delete_product", cur.id, cur.tenant_id);
+  ok(res, { ok: true });
+}));
+
+// Adjust stock (over-the-counter sale, restock, correction) and record the movement.
+app.post("/api/products/:id/stock", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from products where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const d = req.body || {};
+  const delta = Number(d.delta) || 0;
+  if (!delta) return res.status(400).json({ error: "delta_required" });
+  const base = cur.stock == null ? 0 : cur.stock;
+  const next = Math.max(0, base + delta);
+  await run("update products set stock=$1, updated_at=now() where id=$2", [next, cur.id]);
+  const mid = "mov-" + rid().slice(0, 8);
+  await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, created_by)
+    values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [mid, cur.tenant_id, cur.id, delta, d.reason || (delta < 0 ? "sale" : "restock"), d.buyer || null,
+     d.total != null ? Number(d.total) : Math.abs(delta) * Number(cur.price || 0), req.user.sub]);
+  await audit(req.user.sub, "stock_move", cur.id, cur.tenant_id, { delta });
+  ok(res, { stock: next, movement_id: mid });
+}));
+
+app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const r = await rows(`select m.id, m.product_id, p.name as product, m.delta, m.reason, m.buyer, m.total, m.created_at
+    from stock_movements m left join products p on p.id=m.product_id
+    where m.tenant_id=$1 order by m.created_at desc limit 100`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
 // Documents an installer has sent to THIS logged-in customer (snapshot at publish time).
 app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(async (req, res) => {
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
@@ -732,6 +804,17 @@ async function startupBackfill() {
       for (const d of demo) {
         await run(`insert into deals (id, tenant_id, client, type, job_type, stage, system, value, installer, suburb, created_by)
           values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9,'system') on conflict (id) do nothing`, d);
+      }
+    }
+    // Seed the product catalog + stock for the demo tenant if empty (from products-seed.json).
+    const pc = await one("select count(*)::int as c from products where tenant_id='tenant-helios'");
+    if (!pc || pc.c === 0) {
+      let seed = [];
+      try { seed = require("./products-seed.json"); } catch (e) { console.error("products-seed.json missing:", e.message); }
+      for (const p of seed) {
+        await run(`insert into products (id, tenant_id, cat, name, spec, unit, price, watts, stock, direct_sale, recreational, note)
+          values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (id) do nothing`,
+          [p.id, p.cat, p.name, p.spec, p.unit, p.price, p.watts, p.stock, p.direct_sale, p.recreational, p.note]);
       }
     }
   } catch (e) { console.error("startupBackfill failed:", e.message); }

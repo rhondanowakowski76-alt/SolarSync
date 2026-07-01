@@ -82,6 +82,18 @@ async function migrate() {
       installer text, suburb text, due text, notes text,
       created_by text, updated_at timestamptz default now(), created_at timestamptz default now())`,
     `create index if not exists deals_tenant_idx on deals (tenant_id, updated_at desc)`,
+    `create table if not exists products (
+      id text primary key, tenant_id text not null, cat text, name text not null, spec text,
+      unit text default 'unit', price numeric default 0, watts int default 0,
+      stock int, reorder_point int default 5, direct_sale boolean default true,
+      recreational boolean default false, note text, active boolean default true,
+      updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists products_tenant_idx on products (tenant_id, cat)`,
+    `create table if not exists stock_movements (
+      id text primary key, tenant_id text not null, product_id text not null,
+      delta int not null, reason text, buyer text, total numeric,
+      created_by text, created_at timestamptz default now())`,
+    `create index if not exists stock_moves_idx on stock_movements (tenant_id, created_at desc)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
