@@ -316,6 +316,29 @@ app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "s
   ok(res, r);
 }));
 
+// ============================================================
+// WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
+// ============================================================
+app.get("/api/branding", A.authRequired, h(async (req, res) => {
+  const tid = tenantOf(req);
+  if (!tid) return ok(res, {});
+  const t = await one("select branding from tenants where id=$1", [tid]);
+  ok(res, (t && t.branding) || {});
+}));
+
+app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin"), h(async (req, res) => {
+  const tid = tenantOf(req);
+  const d = req.body || {};
+  const branding = {
+    accent: Array.isArray(d.accent) ? d.accent.slice(0, 3) : undefined,
+    glow: d.glow, name: d.name, tagline: d.tagline, logo_url: d.logo_url,
+  };
+  Object.keys(branding).forEach(k => branding[k] === undefined && delete branding[k]);
+  await run("update tenants set branding=$1::jsonb where id=$2", [JSON.stringify(branding), tid]);
+  await audit(req.user.sub, "update_branding", tid, tid);
+  ok(res, branding);
+}));
+
 // Documents an installer has sent to THIS logged-in customer (snapshot at publish time).
 app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(async (req, res) => {
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
