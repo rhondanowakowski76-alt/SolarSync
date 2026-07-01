@@ -94,6 +94,14 @@ async function migrate() {
       delta int not null, reason text, buyer text, total numeric,
       created_by text, created_at timestamptz default now())`,
     `create index if not exists stock_moves_idx on stock_movements (tenant_id, created_at desc)`,
+    `create table if not exists bookings (
+      id text primary key, tenant_id text not null, client_id text, client text,
+      type text default 'clean', title text, date text, time text, end_time text,
+      suburb text, job_id text, status text default 'requested', notes text,
+      value numeric default 0, installer text, source text default 'client',
+      created_by text, updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists bookings_tenant_idx on bookings (tenant_id, date)`,
+    `create index if not exists bookings_client_idx on bookings (client_id, created_at desc)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,

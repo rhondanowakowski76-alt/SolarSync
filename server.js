@@ -317,6 +317,85 @@ app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "s
 }));
 
 // ============================================================
+// BOOKINGS / SCHEDULE (service requests + scheduled jobs)
+//   - clients create "requested" bookings from their portal
+//   - tenants/contractors see them on the calendar and confirm/schedule
+// ============================================================
+const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, updated_at, created_at";
+
+// Resolve the clients row for a logged-in client user (used to attribute + scope bookings).
+async function clientRowOf(req) {
+  return await one("select * from clients where user_id=$1", [req.user.sub]);
+}
+
+// List bookings. Tenants/contractors see their tenant's; a client sees only their own.
+app.get("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  if (req.user.app_role === "client") {
+    const c = await clientRowOf(req);
+    if (!c) return ok(res, []);
+    return ok(res, await rows(`select ${BOOK_COLS} from bookings where client_id=$1 order by date, created_at`, [c.id]));
+  }
+  const r = isReseller(req)
+    ? await rows(`select ${BOOK_COLS} from bookings order by date, created_at`)
+    : await rows(`select ${BOOK_COLS} from bookings where tenant_id=$1 order by date, created_at`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
+// Create a booking. A client raises a "requested" service; a tenant can create a confirmed event directly.
+app.post("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  const d = req.body || {};
+  const id = "bk-" + rid().slice(0, 8);
+  let tenant_id, client_id = d.client_id || null, client = d.client || null, source = d.source || "tenant", status = d.status || "confirmed";
+  if (req.user.app_role === "client") {
+    const c = await clientRowOf(req);
+    if (!c) return res.status(400).json({ error: "no_client_record" });
+    tenant_id = c.tenant_id; client_id = c.id; client = c.name; source = "client"; status = "pending";
+  } else {
+    tenant_id = tenantOf(req);
+  }
+  await run(`insert into bookings (id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, created_by)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+    [id, tenant_id, client_id, client, d.type || "clean", d.title || null, d.date || null, d.time || null,
+     d.end_time || d.end || null, d.suburb || null, d.job_id || d.jobId || null,
+     status, d.notes || null, Number(d.value) || 0, d.installer || null, source, req.user.sub]);
+  await audit(req.user.sub, "create_booking", id, tenant_id, { type: d.type, source });
+  ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [id]));
+}));
+
+// Update a booking (confirm, reschedule, complete, cancel). Clients may only touch their own.
+app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  const cur = await one("select * from bookings where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  if (req.user.app_role === "client") {
+    const c = await clientRowOf(req);
+    if (!c || cur.client_id !== c.id) return res.status(403).json({ error: "forbidden" });
+  } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+  const d = req.body || {};
+  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, updated_at=now() where id=$12`,
+    [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
+     (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,
+     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, cur.id]);
+  await audit(req.user.sub, "update_booking", cur.id, cur.tenant_id, { status: d.status });
+  ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [cur.id]));
+}));
+
+app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  const cur = await one("select * from bookings where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  if (req.user.app_role === "client") {
+    const c = await clientRowOf(req);
+    if (!c || cur.client_id !== c.id) return res.status(403).json({ error: "forbidden" });
+  } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+  await run("delete from bookings where id=$1", [cur.id]);
+  await audit(req.user.sub, "delete_booking", cur.id, cur.tenant_id);
+  ok(res, { ok: true });
+}));
+
+// ============================================================
 // WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
 // ============================================================
 app.get("/api/branding", A.authRequired, h(async (req, res) => {
