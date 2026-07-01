@@ -164,6 +164,7 @@ async function migrate() {
     `alter table tenant_documents add column if not exists content_html text`,
     `alter table document_publications add column if not exists body_html text`,
     `alter table document_publications alter column spaces_key drop not null`,
+    `alter table invoices add column if not exists is_demo boolean default false`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

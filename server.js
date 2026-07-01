@@ -298,6 +298,7 @@ const stripe = stripeKey ? require("stripe")(stripeKey) : null;
 app.post("/api/invoices/:id/pay-intent", A.authRequired, h(async (req, res) => {
   const inv = await one("select * from invoices where id=$1", [req.params.id]);
   if (!inv) return res.status(404).json({ error: "not_found" });
+  if (inv.is_demo) return res.status(403).json({ error: "demo_invoice", message: "This is a demo invoice — charging is disabled." });
   if (!stripe) return res.status(503).json({ error: "stripe_not_configured" });
   const pi = await stripe.paymentIntents.create({
     amount: Math.round(Number(inv.amount) * 100), currency: "aud",
@@ -312,6 +313,7 @@ app.post("/api/invoices/:id/pay-intent", A.authRequired, h(async (req, res) => {
 app.post("/api/invoices/:id/checkout", A.authRequired, h(async (req, res) => {
   const inv = await one("select * from invoices where id=$1", [req.params.id]);
   if (!inv) return res.status(404).json({ error: "not_found" });
+  if (inv.is_demo) return res.status(403).json({ error: "demo_invoice", message: "This is a demo invoice — charging is disabled." });
   if (!stripe) return res.status(503).json({ error: "stripe_not_configured" });
   const origin = req.headers.origin || (req.headers.host ? "https://" + req.headers.host : "");
   const session = await stripe.checkout.sessions.create({
@@ -702,6 +704,8 @@ const PORT = process.env.PORT || 3000;
 // so it never overwrites real data a tenant has entered.
 async function startupBackfill() {
   try {
+    // Safety: the seeded demo invoice must never be chargeable on live Stripe keys.
+    await run("update invoices set is_demo=true where id='inv-2048'");
     const spec = JSON.stringify({
       systemKw: 6.6, panels: 16, panelModel: "Jinko Tiger Neo 440W",
       inverter: "Fronius Primo GEN24 5.0", battery: null,
