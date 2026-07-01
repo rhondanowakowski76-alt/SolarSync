@@ -396,6 +396,62 @@ app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "s
 }));
 
 // ============================================================
+// QUOTES (persisted quote/proposal builder — tenant-scoped)
+// ============================================================
+const QUOTE_COLS = "id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, notes, lines, spec, total, updated_at, created_at";
+
+const QUOTE_LIST_COLS = "id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, total, updated_at, created_at";
+app.get("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const r = isReseller(req)
+    ? await rows(`select ${QUOTE_LIST_COLS} from quotes order by updated_at desc`)
+    : await rows(`select ${QUOTE_LIST_COLS} from quotes where tenant_id=$1 order by updated_at desc`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
+app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const q = await one(`select ${QUOTE_COLS} from quotes where id=$1`, [req.params.id]);
+  if (!q || (!isReseller(req) && q.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  ok(res, q);
+}));
+
+app.post("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const d = req.body || {};
+  const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "qt-" + rid().slice(0, 8);
+  // Sequential-ish human number; fine for display (not a uniqueness guarantee).
+  const cnt = await one("select count(*)::int as c from quotes where tenant_id=$1", [tenantOf(req)]);
+  const number = d.number || ("QT-" + (2050 + ((cnt && cnt.c) || 0)));
+  await run(`insert into quotes (id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, notes, lines, spec, total, created_by)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [id, tenantOf(req), number, d.client_id || null, d.deal_id || null,
+     JSON.stringify(d.customer || {}), d.enq || "install", d.status || "Draft", String(d.validity || "30"),
+     d.notes || null, JSON.stringify(d.lines || []), JSON.stringify(d.spec || {}), Number(d.total) || 0, req.user.sub]);
+  await audit(req.user.sub, "create_quote", id, tenantOf(req));
+  ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [id]));
+}));
+
+app.put("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const cur = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const d = req.body || {};
+  await run(`update quotes set number=$1, client_id=$2, deal_id=$3, customer=$4, enq=$5, status=$6, validity=$7, notes=$8, lines=$9, spec=$10, total=$11, updated_at=now() where id=$12`,
+    [d.number ?? cur.number, d.client_id ?? cur.client_id, d.deal_id ?? cur.deal_id,
+     d.customer != null ? JSON.stringify(d.customer) : cur.customer, d.enq ?? cur.enq, d.status ?? cur.status,
+     d.validity != null ? String(d.validity) : cur.validity, d.notes ?? cur.notes,
+     d.lines != null ? JSON.stringify(d.lines) : cur.lines, d.spec != null ? JSON.stringify(d.spec) : cur.spec,
+     d.total != null ? Number(d.total) : cur.total, cur.id]);
+  await audit(req.user.sub, "update_quote", cur.id, cur.tenant_id, { status: d.status });
+  ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [cur.id]));
+}));
+
+app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const cur = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  await run("delete from quotes where id=$1", [cur.id]);
+  await audit(req.user.sub, "delete_quote", cur.id, cur.tenant_id);
+  ok(res, { ok: true });
+}));
+
+// ============================================================
 // WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
 // ============================================================
 app.get("/api/branding", A.authRequired, h(async (req, res) => {

@@ -102,6 +102,13 @@ async function migrate() {
       created_by text, updated_at timestamptz default now(), created_at timestamptz default now())`,
     `create index if not exists bookings_tenant_idx on bookings (tenant_id, date)`,
     `create index if not exists bookings_client_idx on bookings (client_id, created_at desc)`,
+    `create table if not exists quotes (
+      id text primary key, tenant_id text not null, number text, client_id text, deal_id text,
+      customer jsonb, enq text default 'install', status text default 'Draft',
+      validity text default '30', notes text, lines jsonb, spec jsonb,
+      total numeric default 0, created_by text,
+      updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists quotes_tenant_idx on quotes (tenant_id, updated_at desc)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
