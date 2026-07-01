@@ -498,6 +498,50 @@ app.post("/api/messages", A.authRequired, A.requireRole("tenant_admin", "staff",
 }));
 
 // ============================================================
+// TEAM / CREW (installers & staff — tenant-scoped)
+// ============================================================
+const TEAM_COLS = "id, tenant_id, name, role, type, licence, hrs, status, jobs, rate, approved, updated_at, created_at";
+
+app.get("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const r = isReseller(req)
+    ? await rows(`select ${TEAM_COLS} from team_members where active=true order by name`)
+    : await rows(`select ${TEAM_COLS} from team_members where tenant_id=$1 and active=true order by name`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
+app.post("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.name) return res.status(400).json({ error: "name_required" });
+  const id = "tm-" + rid().slice(0, 8);
+  await run(`insert into team_members (id, tenant_id, name, role, type, licence, hrs, status, jobs, rate)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, tenantOf(req), d.name, d.role || null, d.type || "Staff", d.licence || null,
+     Number(d.hrs) || 0, d.status || "Off", Number(d.jobs) || 0, Number(d.rate) || (d.type === "Contractor" ? 55 : 48)]);
+  await audit(req.user.sub, "create_team_member", id, tenantOf(req));
+  ok(res, await one(`select ${TEAM_COLS} from team_members where id=$1`, [id]));
+}));
+
+app.put("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from team_members where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const d = req.body || {};
+  await run(`update team_members set name=$1, role=$2, type=$3, licence=$4, hrs=$5, status=$6, jobs=$7, rate=$8, approved=$9, updated_at=now() where id=$10`,
+    [d.name ?? cur.name, d.role ?? cur.role, d.type ?? cur.type, d.licence ?? cur.licence,
+     d.hrs != null ? Number(d.hrs) : cur.hrs, d.status ?? cur.status, d.jobs != null ? Number(d.jobs) : cur.jobs,
+     d.rate != null ? Number(d.rate) : cur.rate, d.approved != null ? d.approved : cur.approved, cur.id]);
+  await audit(req.user.sub, "update_team_member", cur.id, cur.tenant_id);
+  ok(res, await one(`select ${TEAM_COLS} from team_members where id=$1`, [cur.id]));
+}));
+
+app.delete("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from team_members where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  await run("update team_members set active=false, updated_at=now() where id=$1", [cur.id]);
+  await audit(req.user.sub, "delete_team_member", cur.id, cur.tenant_id);
+  ok(res, { ok: true });
+}));
+
+// ============================================================
 // WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
 // ============================================================
 app.get("/api/branding", A.authRequired, h(async (req, res) => {
@@ -1051,6 +1095,23 @@ async function startupBackfill() {
         await run(`insert into products (id, tenant_id, cat, name, spec, unit, price, watts, stock, direct_sale, recreational, note)
           values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (id) do nothing`,
           [p.id, p.cat, p.name, p.spec, p.unit, p.price, p.watts, p.stock, p.direct_sale, p.recreational, p.note]);
+      }
+    }
+
+    // Seed the crew for the demo tenant if empty.
+    const tc = await one("select count(*)::int as c from team_members where tenant_id='tenant-helios'");
+    if (!tc || tc.c === 0) {
+      const crew = [
+        ["Dan Webb", "Lead Installer · SAA A1234", "Staff", "SAA A1234", 38, "Clocked on", 3, 48],
+        ["Kira Park", "Installer · SAA A2231", "Staff", "SAA A2231", 41, "On site", 2, 46],
+        ["Mia Tran", "Electrician · SAA A4456", "Contractor", "SAA A4456", 33, "Off", 2, 62],
+        ["Sam Cole", "Apprentice", "Staff", "Apprentice", 36, "On site", 1, 32],
+        ["Joel Ruiz", "Cleaning crew", "Contractor", "Contractor", 22, "Off", 4, 40],
+      ];
+      for (const [name, role, type, licence, hrs, status, jobs, rate] of crew) {
+        await run(`insert into team_members (id, tenant_id, name, role, type, licence, hrs, status, jobs, rate)
+          values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9)`,
+          ["tm-" + Buffer.from(name).toString("hex").slice(0, 8), name, role, type, licence, hrs, status, jobs, rate]);
       }
     }
   } catch (e) { console.error("startupBackfill failed:", e.message); }

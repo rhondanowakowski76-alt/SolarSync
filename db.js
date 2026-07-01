@@ -114,6 +114,12 @@ async function migrate() {
       sender_role text not null, sender_id text, sender_name text, body text not null,
       created_at timestamptz default now())`,
     `create index if not exists messages_thread_idx on messages (tenant_id, client_id, created_at)`,
+    `create table if not exists team_members (
+      id text primary key, tenant_id text not null, name text not null, role text,
+      type text default 'Staff', licence text, hrs numeric default 0, status text default 'Off',
+      jobs int default 0, rate numeric default 48, approved boolean default false,
+      active boolean default true, updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists team_tenant_idx on team_members (tenant_id, name)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
