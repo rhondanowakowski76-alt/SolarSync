@@ -200,6 +200,50 @@ app.get("/api/clients", A.authRequired, A.requireRole("tenant_admin", "staff", "
   ok(res, await rows("select id, name, site_address, install_status, system_spec from clients where tenant_id=$1 order by name", [tenantOf(req)]));
 }));
 
+// ============================================================
+// DEALS / CRM PIPELINE (tenant-scoped, full CRUD)
+// ============================================================
+const DEAL_COLS = "id, tenant_id, client_id, client, type, job_type, stage, system, value, installer, suburb, due, notes, updated_at, created_at";
+
+app.get("/api/deals", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const r = isReseller(req)
+    ? await rows(`select ${DEAL_COLS} from deals order by updated_at desc`)
+    : await rows(`select ${DEAL_COLS} from deals where tenant_id=$1 order by updated_at desc`, [tenantOf(req)]);
+  ok(res, r);
+}));
+
+app.post("/api/deals", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.client) return res.status(400).json({ error: "client_required" });
+  const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "SS-" + rid().slice(0, 8);
+  await run(`insert into deals (id, tenant_id, client_id, client, type, job_type, stage, system, value, installer, suburb, due, notes, created_by)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [id, tenantOf(req), d.client_id || null, d.client, d.type || "install", d.job_type || null,
+     d.stage || "enquiry", d.system || null, Number(d.value) || 0, d.installer || null, d.suburb || null, d.due || null, d.notes || null, req.user.sub]);
+  await audit(req.user.sub, "create_deal", id, tenantOf(req));
+  ok(res, await one(`select ${DEAL_COLS} from deals where id=$1`, [id]));
+}));
+
+app.put("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const cur = await one("select * from deals where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  const d = req.body || {};
+  await run(`update deals set client=$1, type=$2, job_type=$3, stage=$4, system=$5, value=$6, installer=$7, suburb=$8, due=$9, notes=$10, client_id=$11, updated_at=now() where id=$12`,
+    [d.client ?? cur.client, d.type ?? cur.type, d.job_type ?? cur.job_type, d.stage ?? cur.stage, d.system ?? cur.system,
+     d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, d.suburb ?? cur.suburb, d.due ?? cur.due,
+     d.notes ?? cur.notes, d.client_id ?? cur.client_id, cur.id]);
+  await audit(req.user.sub, "update_deal", cur.id, cur.tenant_id);
+  ok(res, await one(`select ${DEAL_COLS} from deals where id=$1`, [cur.id]));
+}));
+
+app.delete("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const cur = await one("select * from deals where id=$1", [req.params.id]);
+  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  await run("delete from deals where id=$1", [cur.id]);
+  await audit(req.user.sub, "delete_deal", cur.id, cur.tenant_id);
+  ok(res, { ok: true });
+}));
+
 // Documents an installer has sent to THIS logged-in customer (snapshot at publish time).
 app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(async (req, res) => {
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
@@ -667,6 +711,25 @@ async function startupBackfill() {
       "update clients set system_spec=$1::jsonb where id='c-adam' and (system_spec is null or system_spec='{}'::jsonb)",
       [spec]
     );
+    // Seed the CRM pipeline for the connected-demo tenant only if it's empty,
+    // so an existing DB (which won't re-run seed.js) still shows a populated board.
+    const dc = await one("select count(*)::int as c from deals where tenant_id='tenant-helios'");
+    if (!dc || dc.c === 0) {
+      const demo = [
+        ["SS-1042","Smith Residence","install","solar_installation","installed","6.6 kW · 16 panels",8400,"Dan Webb","Toowoomba QLD"],
+        ["SS-1041","Jones Farm","install","solar_installation","scheduled","13.2 kW · 32 panels",16900,"Kira Park","Gatton QLD"],
+        ["SS-1043","Patel Townhouse","inspection","site_inspection","enquiry","Site inspection",0,"Unassigned","Ipswich QLD"],
+        ["SS-1040","Delta Office Park","install","solar_installation","quote","24 kW · 58 panels",41500,"Unassigned","Springfield QLD"],
+        ["SS-1039","Clarkson Home","install","solar_installation","accepted","10 kWh battery",11200,"Unassigned","Brisbane QLD"],
+        ["SS-1044","Nguyen Residence","cleaning","panel_cleaning","deposit","Panel clean × 22",480,"Mia Tran","Logan QLD"],
+        ["SS-1037","Marlow Cottage","install","solar_installation","manual","5 kW · 12 panels",6300,"Mia Tran","Redlands QLD"],
+        ["SS-1036","Riverside Cafe","install","solar_installation","invoiced","8.8 kW · 22 panels",10800,"Kira Park","Brisbane QLD"],
+      ];
+      for (const d of demo) {
+        await run(`insert into deals (id, tenant_id, client, type, job_type, stage, system, value, installer, suburb, created_by)
+          values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9,'system') on conflict (id) do nothing`, d);
+      }
+    }
   } catch (e) { console.error("startupBackfill failed:", e.message); }
 }
 

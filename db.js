@@ -75,6 +75,13 @@ async function migrate() {
       id text primary key, tenant_id text not null, user_id text,
       name text not null, site_address text, system_spec jsonb default '{}', install_status text,
       created_at timestamptz default now())`,
+    `create table if not exists deals (
+      id text primary key, tenant_id text not null, client_id text,
+      client text not null, type text default 'install', job_type text,
+      stage text default 'enquiry', system text, value numeric default 0,
+      installer text, suburb text, due text, notes text,
+      created_by text, updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists deals_tenant_idx on deals (tenant_id, updated_at desc)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
