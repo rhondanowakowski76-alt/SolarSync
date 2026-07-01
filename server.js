@@ -452,6 +452,52 @@ app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "sta
 }));
 
 // ============================================================
+// MESSAGES (shared client <-> installer threads; one thread per client)
+// ============================================================
+// Tenant sees a conversation list (one per client that has a thread or any client);
+// a client sees only their own single thread with the installer.
+app.get("/api/message-threads", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+  const tid = tenantOf(req);
+  // All clients for the tenant, with the latest message + unread-ish preview.
+  const clients = await rows("select id, name, site_address from clients where tenant_id=$1 order by name", [tid]);
+  const last = await rows(`select distinct on (client_id) client_id, body, created_at, sender_role
+    from messages where tenant_id=$1 order by client_id, created_at desc`, [tid]);
+  const lastBy = {}; last.forEach(m => { lastBy[m.client_id] = m; });
+  ok(res, clients.map(c => ({ id: c.id, who: c.name, role: "Client", address: c.site_address,
+    last: lastBy[c.id] ? lastBy[c.id].body : "", last_at: lastBy[c.id] ? lastBy[c.id].created_at : null })));
+}));
+
+app.get("/api/messages", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  let tid = tenantOf(req), clientId = req.query.client_id;
+  if (req.user.app_role === "client") {
+    const c = await one("select * from clients where user_id=$1", [req.user.sub]);
+    if (!c) return ok(res, []);
+    tid = c.tenant_id; clientId = c.id;
+  }
+  if (!clientId) return res.status(400).json({ error: "client_id_required" });
+  ok(res, await rows(`select id, sender_role, sender_id, sender_name, body, created_at
+    from messages where tenant_id=$1 and client_id=$2 order by created_at`, [tid, clientId]));
+}));
+
+app.post("/api/messages", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.body || !String(d.body).trim()) return res.status(400).json({ error: "body_required" });
+  let tid = tenantOf(req), clientId = d.client_id;
+  if (req.user.app_role === "client") {
+    const c = await one("select * from clients where user_id=$1", [req.user.sub]);
+    if (!c) return res.status(400).json({ error: "no_client_record" });
+    tid = c.tenant_id; clientId = c.id;
+  }
+  if (!clientId) return res.status(400).json({ error: "client_id_required" });
+  const id = "msg-" + rid().slice(0, 10);
+  await run(`insert into messages (id, tenant_id, client_id, sender_role, sender_id, sender_name, body)
+    values ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, tid, clientId, req.user.app_role, req.user.sub, req.user.display_name || null, String(d.body).trim()]);
+  await audit(req.user.sub, "send_message", id, tid, { client_id: clientId });
+  ok(res, await one("select id, sender_role, sender_id, sender_name, body, created_at from messages where id=$1", [id]));
+}));
+
+// ============================================================
 // WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
 // ============================================================
 app.get("/api/branding", A.authRequired, h(async (req, res) => {

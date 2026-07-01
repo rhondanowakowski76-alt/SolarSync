@@ -109,6 +109,11 @@ async function migrate() {
       total numeric default 0, created_by text,
       updated_at timestamptz default now(), created_at timestamptz default now())`,
     `create index if not exists quotes_tenant_idx on quotes (tenant_id, updated_at desc)`,
+    `create table if not exists messages (
+      id text primary key, tenant_id text not null, client_id text not null,
+      sender_role text not null, sender_id text, sender_name text, body text not null,
+      created_at timestamptz default now())`,
+    `create index if not exists messages_thread_idx on messages (tenant_id, client_id, created_at)`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
