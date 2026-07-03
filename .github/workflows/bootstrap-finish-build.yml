@@ -1,0 +1,240 @@
+name: Bootstrap finish/build-tests branch and PR
+on:
+  push:
+    paths:
+      - ".github/workflows/bootstrap-finish-build.yml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create branch and add files
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # create or switch to branch
+          if git show-ref --verify --quiet refs/heads/finish/build-tests; then
+            git checkout finish/build-tests
+          else
+            git checkout -b finish/build-tests
+          fi
+
+          # Create .github/workflows/ci-tests.yml
+          mkdir -p .github/workflows
+          cat > .github/workflows/ci-tests.yml <<'EOF'
+name: CI Full Test Pipeline
+on: [push, pull_request]
+
+jobs:
+  smoke-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Compose
+        run: |
+          docker version
+          docker-compose version || true
+      - name: Start test environment
+        run: |
+          docker-compose -f docker-compose.test.yml up --build -d
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to be healthy..."
+          sleep 8
+      - name: Normalize smoke script line endings
+        run: |
+          # convert CRLF to LF to avoid shell issues
+          if command -v sed >/dev/null 2>&1; then
+            sed -i 's/\r$//' ./scripts/smoke.sh || true
+          fi
+      - name: Run smoke tests
+        run: |
+          chmod +x ./scripts/smoke.sh
+          ./scripts/smoke.sh > smoke.log 2>&1 || (cat smoke.log && exit 1)
+      - name: Upload smoke log
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log
+          path: smoke.log
+      - name: Tear down
+        if: always()
+        run: |
+          docker-compose -f docker-compose.test.yml down -v
+EOF
+
+          # Create docker-compose.test.yml
+          cat > docker-compose.test.yml <<'EOF'
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "test", "-d", "testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: "postgres://test:test@postgres:5432/testdb"
+      NODE_ENV: test
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./public:/usr/share/nginx/html:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+EOF
+
+          # Create PR_TEMPLATE.md
+          cat > PR_TEMPLATE.md <<'EOF'
+# Pull Request template for finishing and testing
+
+## What/Why
+- Brief description of changes and reason.
+
+## Checklist (must be completed before merge)
+- [ ] Acceptance criteria listed below are satisfied
+- [ ] Unit tests added/updated and passing
+- [ ] Integration tests added/updated and passing
+- [ ] E2E test added or updated and passes locally
+- [ ] DB migrations included and idempotent (if applicable)
+- [ ] README / run instructions updated if relevant
+- [ ] No secrets committed
+
+## Acceptance criteria
+- (List measurable pass conditions for this PR, e.g., endpoint /api/contacts POST persists contact and returns 201, UI shows saved item, test coverage for changed module >= 80%)
+
+## Test instructions
+- How to run locally and verify manually (commands & test user creds)
+EOF
+
+          # Create finish-the-build.txt
+          cat > finish-the-build.txt <<'EOF'
+You are a senior full-stack engineer tasked with finishing the SolarSync application in this repository: https://github.com/rhondanowakowski76-alt/SolarSync
+
+Goal: fix all functional defects (backend and frontend), complete tests (unit/integration/E2E), and deliver a production-ready release. No prototypes or placeholders — every change must be functional and evidenced.
+
+STAGING: docker-compose.test.yml (local staging). Use SMOKE_USER and SMOKE_PASS environment variables for login smoke tests.
+
+Gating: The assistant must STOP after push/PR for each milestone and wait for the exact word APPROVE to continue. Final release requires FINAL-APPROVE.
+
+Milestones (high level):
+- M0: Smoke test (scripts/smoke.sh). Provide smoke.log.
+- M1: Plan & file tree.
+- M2: API/OpenAPI & DB migrations + seeds.
+- M3: Backend fixes + tests.
+- M4: Frontend fixes + tests.
+- M5: CI, security scans, perf and accessibility checks.
+- M6: Release candidate and demo script.
+
+Evidence requirement: For every claim include PR URL + commit SHA and CI run URL or raw logs/artifacts.
+
+Stop after each milestone and wait for APPROVE.
+EOF
+
+          # Create scripts/smoke.sh
+          mkdir -p scripts
+          cat > scripts/smoke.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+STAGING_URL=${STAGING_URL:-http://localhost:4000}
+SMOKE_USER=${SMOKE_USER:-}
+SMOKE_PASS=${SMOKE_PASS:-}
+
+echo "Using STAGING_URL=$STAGING_URL"
+
+echo "Checking /health..."
+status=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/health" || true)
+echo "health status=$status"
+if [ "$status" != "200" ]; then
+  echo "HEALTH_FAIL"
+  exit 2
+fi
+
+if [ -n "$SMOKE_USER" ] && [ -n "$SMOKE_PASS" ]; then
+  echo "Attempting login..."
+  http_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$STAGING_URL/api/auth/login" -H "Content-Type: application/json" -d "{\"email\":\"$SMOKE_USER\",\"password\":\"$SMOKE_PASS\"}" || true)
+  echo "login status=$http_status"
+  if [ "$http_status" != "200" ]; then
+    echo "LOGIN_FAIL"
+    exit 3
+  fi
+else
+  echo "SMOKE_USER/SMOKE_PASS not set; skipping login check."
+fi
+
+echo "SMOKE_PASS"
+EOF
+          chmod +x scripts/smoke.sh || true
+
+          # Create .github/PULL_REQUEST_TEMPLATE.md
+          mkdir -p .github
+          cat > .github/PULL_REQUEST_TEMPLATE.md <<'EOF'
+# Pull request template for GitHub UI
+
+## Description
+Describe the change and why it is needed.
+
+## Checklist
+- [ ] Tests added/updated
+- [ ] Documentation updated
+- [ ] No secrets committed
+
+## Acceptance Criteria
+(List measurable items)
+EOF
+
+          # Add and push
+          git add .github/workflows/ci-tests.yml docker-compose.test.yml PR_TEMPLATE.md finish-the-build.txt scripts/smoke.sh .github/PULL_REQUEST_TEMPLATE.md
+          if git commit -m "chore(testing): add CI/test artifacts & finish prompt" ; then
+            echo "Committed files"
+          else
+            echo "No changes to commit"
+          fi
+
+          # Push branch
+          git push --set-upstream origin finish/build-tests
+
+      - name: Create a Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(testing): add CI/test artifacts & finish prompt"
+          title: "chore(testing): add CI/test artifacts & finish prompt"
+          body: |
+            This PR adds non-destructive test & CI artifacts (docker-compose.test.yml, smoke script, CI workflow, PR templates) and a finish-the-build prompt to drive the gated fix workflow.
+            
+            Next steps:
+            - Run the CI smoke job (it will run on the PR once triggered)
+            - Review the smoke.log artifact and paste it here for triage
+          base: main
+          head: finish/build-tests
