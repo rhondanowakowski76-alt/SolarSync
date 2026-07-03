@@ -1232,6 +1232,35 @@ const PORT = process.env.PORT || 3000;
 // so it never overwrites real data a tenant has entered.
 async function startupBackfill() {
   try {
+    // Owner bootstrap: the platform owner sets OWNER_NAME + OWNER_PIN as
+    // environment variables and the account creates itself on the next boot.
+    // The PIN keeps syncing from the variable until the authenticator is
+    // enrolled (so a typo'd PIN is fixable by editing the variable); after
+    // enrolment the app owns the PIN and the variable is ignored.
+    const ownerName = String(process.env.OWNER_NAME || "").trim().replace(/\s+/g, " ");
+    const ownerPin = String(process.env.OWNER_PIN || "").trim();
+    if (ownerName.length >= 3 && /^\d{6}$/.test(ownerPin)) {
+      const u = await one("select * from users where app_role='reseller' and lower(display_name)=lower($1)", [ownerName]);
+      if (!u) {
+        const uo = await one("select * from users where id='u-owner'");
+        if (uo && !uo.totp_enrolled) {
+          // OWNER_NAME was corrected before first sign-in — rename in place.
+          await run("update users set display_name=$1, pin_hash=$2, status='active', failed_attempts=0, locked_until=null where id='u-owner'",
+            [ownerName, A.bcrypt.hashSync(ownerPin, 10)]);
+        } else if (!uo) {
+          await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ('u-owner', null, 'reseller', $1, $2)",
+            [ownerName, A.bcrypt.hashSync(ownerPin, 10)]);
+          console.log(`Owner account ready for "${ownerName}" — sign in with the OWNER_PIN to set up the authenticator.`);
+        }
+      } else if (!u.totp_enrolled) {
+        await run("update users set pin_hash=$1, status='active', failed_attempts=0, locked_until=null where id=$2",
+          [A.bcrypt.hashSync(ownerPin, 10), u.id]);
+      }
+      // Any other reseller login that never finished authenticator setup is a
+      // demo leftover (e.g. the old seeded admin) — switch it off on live.
+      await run("update users set status='disabled' where app_role='reseller' and totp_enrolled=false and lower(display_name)<>lower($1)", [ownerName]);
+    }
+
     // Safety: the seeded demo invoice must never be chargeable on live Stripe keys.
     await run("update invoices set is_demo=true where id='inv-2048'");
     const spec = JSON.stringify({
