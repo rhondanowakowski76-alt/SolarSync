@@ -5,6 +5,7 @@ const fs = require("fs");
 const { rows, one, run, rid, audit } = require("./db");
 const A = require("./auth");
 const QRCode = require("qrcode");
+const erp = require("./erp");
 
 const app = express();
 app.use(express.json({ limit: "12mb" }));
@@ -27,12 +28,15 @@ const h = (fn) => (req, res) => fn(req, res).catch(e => { console.error(e); res.
 // ============================================================
 // AUTH (PIN + TOTP only — no email)
 // ============================================================
-app.post("/api/auth/accounts", h(async (req, res) => {
-  const { tenant_id } = req.body || {};
-  const r = tenant_id
-    ? await rows("select id, display_name, app_role from users where status='active' and tenant_id=$1 order by app_role", [tenant_id])
-    : await rows("select id, display_name, app_role from users where status='active' order by app_role");
-  ok(res, r);
+// Live-safe sign-in: nobody can list the user base. The person types their
+// sign-in name and we only return accounts whose full name matches exactly.
+app.post("/api/auth/lookup", h(async (req, res) => {
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const name = norm((req.body || {}).name);
+  if (name.length < 3) return ok(res, []);
+  const r = await rows("select id, display_name, app_role from users where status='active'");
+  ok(res, r.filter(u => norm(u.display_name) === name)
+           .map(u => ({ id: u.id, display_name: u.display_name, app_role: u.app_role })));
 }));
 
 app.post("/api/auth/pin", h(async (req, res) => {
@@ -247,7 +251,7 @@ app.delete("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staf
 // ============================================================
 // PRODUCTS / CATALOG + INVENTORY (tenant-scoped)
 // ============================================================
-const PROD_COLS = "id, tenant_id, cat, name, spec, unit, price, watts, stock, reorder_point, direct_sale, recreational, note, active, updated_at, created_at";
+const PROD_COLS = "id, tenant_id, cat, name, spec, unit, price, cost, watts, stock, reorder_point, direct_sale, recreational, note, active, updated_at, created_at";
 
 app.get("/api/products", A.authRequired, h(async (req, res) => {
   const r = isReseller(req)
@@ -260,9 +264,9 @@ app.post("/api/products", A.authRequired, A.requireRole("tenant_admin", "staff")
   const d = req.body || {};
   if (!d.name) return res.status(400).json({ error: "name_required" });
   const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "prd-" + rid().slice(0, 8);
-  await run(`insert into products (id, tenant_id, cat, name, spec, unit, price, watts, stock, reorder_point, direct_sale, recreational, note)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-    [id, tenantOf(req), d.cat || null, d.name, d.spec || null, d.unit || "unit", Number(d.price) || 0, Number(d.watts) || 0,
+  await run(`insert into products (id, tenant_id, cat, name, spec, unit, price, cost, watts, stock, reorder_point, direct_sale, recreational, note)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [id, tenantOf(req), d.cat || null, d.name, d.spec || null, d.unit || "unit", Number(d.price) || 0, Number(d.cost) || 0, Number(d.watts) || 0,
      d.stock == null || d.stock === "" ? null : Number(d.stock), Number(d.reorder_point) || 5,
      d.direct_sale !== false, !!d.recreational, d.note || null]);
   await audit(req.user.sub, "create_product", id, tenantOf(req));
@@ -273,11 +277,12 @@ app.put("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   const cur = await one("select * from products where id=$1", [req.params.id]);
   if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
-  await run(`update products set cat=$1, name=$2, spec=$3, unit=$4, price=$5, watts=$6, stock=$7, reorder_point=$8, direct_sale=$9, recreational=$10, note=$11, updated_at=now() where id=$12`,
+  await run(`update products set cat=$1, name=$2, spec=$3, unit=$4, price=$5, watts=$6, stock=$7, reorder_point=$8, direct_sale=$9, recreational=$10, note=$11, cost=$13, updated_at=now() where id=$12`,
     [d.cat ?? cur.cat, d.name ?? cur.name, d.spec ?? cur.spec, d.unit ?? cur.unit,
      d.price != null ? Number(d.price) : cur.price, d.watts != null ? Number(d.watts) : cur.watts,
      d.stock === "" ? null : (d.stock != null ? Number(d.stock) : cur.stock), d.reorder_point != null ? Number(d.reorder_point) : cur.reorder_point,
-     d.direct_sale != null ? d.direct_sale : cur.direct_sale, d.recreational != null ? d.recreational : cur.recreational, d.note ?? cur.note, cur.id]);
+     d.direct_sale != null ? d.direct_sale : cur.direct_sale, d.recreational != null ? d.recreational : cur.recreational, d.note ?? cur.note, cur.id,
+     d.cost != null ? Number(d.cost) : cur.cost]);
   await audit(req.user.sub, "update_product", cur.id, cur.tenant_id);
   ok(res, await one(`select ${PROD_COLS} from products where id=$1`, [cur.id]));
 }));
@@ -301,11 +306,19 @@ app.post("/api/products/:id/stock", A.authRequired, A.requireRole("tenant_admin"
   const next = Math.max(0, base + delta);
   await run("update products set stock=$1, updated_at=now() where id=$2", [next, cur.id]);
   const mid = "mov-" + rid().slice(0, 8);
-  await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, created_by)
-    values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+  await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, job_id, unit_cost, created_by)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [mid, cur.tenant_id, cur.id, delta, d.reason || (delta < 0 ? "sale" : "restock"), d.buyer || null,
-     d.total != null ? Number(d.total) : Math.abs(delta) * Number(cur.price || 0), req.user.sub]);
+     d.total != null ? Number(d.total) : Math.abs(delta) * Number(cur.price || 0),
+     d.job_id || null, cur.cost != null ? Number(cur.cost) : null, req.user.sub]);
   await audit(req.user.sub, "stock_move", cur.id, cur.tenant_id, { delta });
+  // Ledger: an over-the-counter sale books revenue + GST + COGS automatically.
+  if (delta < 0 && (d.reason || "sale") === "sale") {
+    try {
+      const mov = await one("select * from stock_movements where id=$1", [mid]);
+      await erp.postCounterSale(mov, cur, req.user.sub);
+    } catch (e) { console.error("ledger post (counter sale) failed:", e.message); }
+  }
   ok(res, { stock: next, movement_id: mid });
 }));
 
@@ -502,26 +515,31 @@ app.post("/api/messages", A.authRequired, A.requireRole("tenant_admin", "staff",
 // ============================================================
 const TEAM_COLS = "id, tenant_id, name, role, type, licence, hrs, status, jobs, rate, approved, updated_at, created_at";
 
-app.get("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+app.get("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  // Reseller default view = oversight of everyone; ?mine=1 = only the
+  // reseller's OWN staff (kept in the separate 'reseller-platform' book).
   const r = isReseller(req)
-    ? await rows(`select ${TEAM_COLS} from team_members where active=true order by name`)
+    ? (req.query.mine
+        ? await rows(`select ${TEAM_COLS} from team_members where tenant_id='reseller-platform' and active=true order by name`)
+        : await rows(`select ${TEAM_COLS} from team_members where active=true order by name`))
     : await rows(`select ${TEAM_COLS} from team_members where tenant_id=$1 and active=true order by name`, [tenantOf(req)]);
-  ok(res, r);
+  // Contractors can see who's on the crew, but not what everyone is paid.
+  ok(res, req.user.app_role === "contractor" ? r.map(({ rate, ...m }) => m) : r);
 }));
 
-app.post("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.post("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const d = req.body || {};
   if (!d.name) return res.status(400).json({ error: "name_required" });
   const id = "tm-" + rid().slice(0, 8);
   await run(`insert into team_members (id, tenant_id, name, role, type, licence, hrs, status, jobs, rate)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [id, tenantOf(req), d.name, d.role || null, d.type || "Staff", d.licence || null,
+    [id, isReseller(req) ? "reseller-platform" : tenantOf(req), d.name, d.role || null, d.type || "Staff", d.licence || null,
      Number(d.hrs) || 0, d.status || "Off", Number(d.jobs) || 0, Number(d.rate) || (d.type === "Contractor" ? 55 : 48)]);
   await audit(req.user.sub, "create_team_member", id, tenantOf(req));
   ok(res, await one(`select ${TEAM_COLS} from team_members where id=$1`, [id]));
 }));
 
-app.put("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.put("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const cur = await one("select * from team_members where id=$1", [req.params.id]);
   if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
@@ -533,12 +551,121 @@ app.put("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff"),
   ok(res, await one(`select ${TEAM_COLS} from team_members where id=$1`, [cur.id]));
 }));
 
-app.delete("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.delete("/api/team/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const cur = await one("select * from team_members where id=$1", [req.params.id]);
   if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
   await run("update team_members set active=false, updated_at=now() where id=$1", [cur.id]);
   await audit(req.user.sub, "delete_team_member", cur.id, cur.tenant_id);
   ok(res, { ok: true });
+}));
+
+// ============================================================
+// CLOCK ON / CLOCK OFF — geo-tagged site attendance for installers
+// ============================================================
+const clockBook = (req) => isReseller(req) ? "reseller-platform" : tenantOf(req);
+
+app.post("/api/clock", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  if (d.kind !== "on" && d.kind !== "off") return res.status(400).json({ error: "kind_must_be_on_or_off" });
+  const kind = d.kind;
+  const id = "ck-" + rid().slice(0, 10);
+  await run(`insert into clock_events (id, tenant_id, user_id, user_name, job_id, job_label, kind, lat, lng, accuracy, client_time)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [id, clockBook(req), req.user.sub, req.user.display_name || null, d.job_id || null, d.job_label || null, kind,
+     d.lat != null ? Number(d.lat) : null, d.lng != null ? Number(d.lng) : null,
+     d.accuracy != null ? Number(d.accuracy) : null, d.client_time || null]);
+  await audit(req.user.sub, "clock_" + kind, id, clockBook(req), { job_id: d.job_id || null, geo: d.lat != null });
+  ok(res, await one("select * from clock_events where id=$1", [id]));
+}));
+
+app.get("/api/clock/status", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const last = await one("select * from clock_events where user_id=$1 order by created_at desc limit 1", [req.user.sub]);
+  ok(res, { clocked_on: !!last && last.kind === "on", last: last || null });
+}));
+
+app.get("/api/clock/events", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
+  const lim = Math.min(500, Number(req.query.limit) || 200);
+  const r = req.query.user_id
+    ? await rows(`select * from clock_events where tenant_id=$1 and user_id=$2 order by created_at desc limit ${lim}`, [clockBook(req), req.query.user_id])
+    : await rows(`select * from clock_events where tenant_id=$1 order by created_at desc limit ${lim}`, [clockBook(req)]);
+  ok(res, r);
+}));
+
+// ============================================================
+// JOB PHOTOS — taken onsite (camera) or uploaded in the office
+// ============================================================
+app.get("/api/job-photos", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const r = req.query.job_id
+    ? await rows("select id, photo_key, job_id, kind, data, uploaded_by, lat, lng, created_at from job_photos where tenant_id=$1 and job_id=$2 order by created_at", [clockBook(req), req.query.job_id])
+    : await rows("select id, photo_key, job_id, kind, data, uploaded_by, lat, lng, created_at from job_photos where tenant_id=$1 order by created_at", [clockBook(req)]);
+  ok(res, r);
+}));
+
+app.post("/api/job-photos", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.photo_key || !d.data) return res.status(400).json({ error: "photo_key_and_data_required" });
+  if (!/^data:image\//.test(String(d.data))) return res.status(400).json({ error: "data_must_be_image_data_url" });
+  if (String(d.data).length > 6 * 1024 * 1024) return res.status(413).json({ error: "photo_too_large" });
+  const id = "ph-" + rid().slice(0, 10);
+  await run(`insert into job_photos (id, tenant_id, photo_key, job_id, kind, data, uploaded_by, lat, lng)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    on conflict (tenant_id, photo_key) do update set data=excluded.data, uploaded_by=excluded.uploaded_by,
+      lat=excluded.lat, lng=excluded.lng, created_at=now()`,
+    [id, clockBook(req), String(d.photo_key), d.job_id || null, d.kind || null, d.data,
+     req.user.display_name || req.user.sub, d.lat != null ? Number(d.lat) : null, d.lng != null ? Number(d.lng) : null]);
+  await audit(req.user.sub, "upload_photo", String(d.photo_key), clockBook(req), { job_id: d.job_id || null });
+  ok(res, { ok: true, photo_key: d.photo_key });
+}));
+
+app.delete("/api/job-photos/:key", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  await run("delete from job_photos where tenant_id=$1 and photo_key=$2", [clockBook(req), req.params.key]);
+  ok(res, { ok: true });
+}));
+
+// ============================================================
+// ONSITE REPORTS — checklist forms filled & signed in the field
+// ============================================================
+app.get("/api/onsite-reports", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) =>
+  ok(res, await rows("select id, rid, type, job_id, payload, signed_by, completed, updated_at from onsite_reports where tenant_id=$1 order by updated_at desc", [clockBook(req)]))));
+
+app.post("/api/onsite-reports", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  if (!d.rid) return res.status(400).json({ error: "rid_required" });
+  const id = "osr-" + rid().slice(0, 10);
+  await run(`insert into onsite_reports (id, tenant_id, rid, type, job_id, payload, signed_by, completed, updated_at)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,now())
+    on conflict (tenant_id, rid) do update set payload=excluded.payload, signed_by=excluded.signed_by,
+      completed=excluded.completed, updated_at=now()`,
+    [id, clockBook(req), String(d.rid), d.type || null, d.job_id || null,
+     JSON.stringify(d.payload || {}), d.signed_by || null, !!d.completed]);
+  await audit(req.user.sub, "onsite_report", String(d.rid), clockBook(req), { completed: !!d.completed });
+  ok(res, { ok: true, rid: d.rid });
+}));
+
+// ============================================================
+// TENANT FEATURES — ERP module upgrade toggle + accounting source
+// ============================================================
+app.get("/api/my-features", A.authRequired, h(async (req, res) => {
+  if (isReseller(req)) return ok(res, { erp_enabled: true, accounting_provider: "builtin" });
+  const t = await one("select erp_enabled, accounting_provider from tenants where id=$1", [tenantOf(req)]);
+  ok(res, { erp_enabled: t ? t.erp_enabled !== false : true, accounting_provider: (t && t.accounting_provider) || "builtin" });
+}));
+
+app.get("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const cur = await one("select id, erp_enabled, accounting_provider from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  ok(res, cur);
+}));
+
+app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  const cur = await one("select id, erp_enabled, accounting_provider from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  await run("update tenants set erp_enabled=$1, accounting_provider=$2 where id=$3",
+    [d.erp_enabled != null ? !!d.erp_enabled : cur.erp_enabled,
+     d.accounting_provider != null ? String(d.accounting_provider).toLowerCase() : cur.accounting_provider, cur.id]);
+  await audit(req.user.sub, "tenant_features", cur.id, cur.id, d);
+  ok(res, await one("select id, erp_enabled, accounting_provider from tenants where id=$1", [cur.id]));
 }));
 
 // ============================================================
@@ -624,7 +751,9 @@ app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff")
     [id, tenantOf(req), d.client_id || null, d.client_name || null, number, Number(d.amount),
      d.status || "due", d.description || null, d.due || null, d.quote_id || null]);
   await audit(req.user.sub, "create_invoice", id, tenantOf(req));
-  ok(res, await one("select * from invoices where id=$1", [id]));
+  const inv = await one("select * from invoices where id=$1", [id]);
+  try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (invoice) failed:", e.message); }
+  ok(res, inv);
 }));
 
 // Convert a saved quote into an invoice (carries client, amount and a link back).
@@ -641,7 +770,9 @@ app.post("/api/quotes/:id/invoice", A.authRequired, A.requireRole("tenant_admin"
      "From quote " + (q.number || q.id), req.body && req.body.due || null, q.id]);
   await run("update quotes set status='Accepted', updated_at=now() where id=$1", [q.id]);
   await audit(req.user.sub, "quote_to_invoice", id, q.tenant_id, { quote: q.id });
-  ok(res, await one("select * from invoices where id=$1", [id]));
+  const inv = await one("select * from invoices where id=$1", [id]);
+  try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (quote invoice) failed:", e.message); }
+  ok(res, inv);
 }));
 
 const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -687,7 +818,13 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
   if (event.type === "payment_intent.succeeded" || event.type === "checkout.session.completed") {
     const obj = event.data.object;
     const invId = obj.metadata && obj.metadata.invoice_id;
-    if (invId) { run("update invoices set status='paid', paid_at=now() where id=$1", [invId]).then(() => audit(null, "invoice_paid", invId, obj.metadata.tenant_id)).catch(()=>{}); }
+    if (invId) {
+      run("update invoices set status='paid', paid_at=now() where id=$1", [invId])
+        .then(() => audit(null, "invoice_paid", invId, obj.metadata.tenant_id))
+        .then(() => one("select * from invoices where id=$1", [invId]))
+        .then(inv => erp.postInvoicePaid(inv, "stripe"))
+        .catch(e => console.error("ledger post (stripe payment) failed:", e && e.message));
+    }
   }
   res.json({ received: true });
 });
@@ -697,6 +834,7 @@ app.post("/api/invoices/:id/mark-paid", A.authRequired, A.requireRole("tenant_ad
   if (!inv || inv.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   await run("update invoices set status='paid', paid_at=now() where id=$1", [inv.id]);
   await audit(req.user.sub, "invoice_paid_manual", inv.id, inv.tenant_id);
+  try { await erp.postInvoicePaid(inv, req.user.sub); } catch (e) { console.error("ledger post (mark paid) failed:", e.message); }
   ok(res, { ok: true });
 }));
 
@@ -1025,6 +1163,12 @@ app.use((err, req, res, next) => {
 
 // SolarSync template downloads (public, no auth — these are tenant-editable starter files)
 app.use("/templates", express.static(path.join(__dirname, "public", "templates"), { maxAge: "1h" }));
+
+// ============================================================
+// ERP — accounting, purchasing, stock valuation, payroll,
+// financial reports, BAS, bank rec, Xero/MYOB export (erp.js)
+// ============================================================
+erp.register(app, { h, ok, tenantOf });
 
 // ============================================================
 // Health + serve the front-end

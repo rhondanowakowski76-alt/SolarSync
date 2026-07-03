@@ -120,6 +120,7 @@ async function migrate() {
       jobs int default 0, rate numeric default 48, approved boolean default false,
       active boolean default true, updated_at timestamptz default now(), created_at timestamptz default now())`,
     `create index if not exists team_tenant_idx on team_members (tenant_id, name)`,
+    `alter table team_members add column if not exists user_id text`,
     `create table if not exists addons ( key text primary key, name text not null, price numeric default 0 )`,
     `create table if not exists tenant_addons (
       tenant_id text, addon_key text, active boolean default false, activated_at timestamptz,
@@ -198,6 +199,84 @@ async function migrate() {
       published_by text,
       published_at timestamptz default now())`,
     `create index if not exists document_publications_client_idx on document_publications (client_id, published_at desc)`,
+    // ---------- ERP: accounting, purchasing, payroll ----------
+    `create table if not exists accounts (
+      id text primary key, tenant_id text not null, code text not null, name text not null,
+      type text not null, tax_code text default 'GST', is_system boolean default false,
+      active boolean default true, created_at timestamptz default now())`,
+    `create unique index if not exists accounts_code_idx on accounts (tenant_id, code)`,
+    `create table if not exists journals (
+      id text primary key, tenant_id text not null, date date not null default current_date,
+      memo text, source text default 'manual', source_id text, posted_by text,
+      created_at timestamptz default now())`,
+    `create index if not exists journals_tenant_idx on journals (tenant_id, date desc)`,
+    `create unique index if not exists journals_source_idx on journals (tenant_id, source, source_id) where source_id is not null`,
+    `create table if not exists journal_lines (
+      id text primary key, journal_id text not null, tenant_id text not null,
+      account_id text not null, debit numeric default 0, credit numeric default 0, memo text)`,
+    `create index if not exists journal_lines_acct_idx on journal_lines (tenant_id, account_id)`,
+    `create index if not exists journal_lines_jrn_idx on journal_lines (journal_id)`,
+    `create table if not exists suppliers (
+      id text primary key, tenant_id text not null, name text not null, abn text, email text,
+      phone text, address text, terms text default '30 days', notes text, active boolean default true,
+      updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create table if not exists purchase_orders (
+      id text primary key, tenant_id text not null, supplier_id text, number text,
+      status text default 'draft', lines jsonb default '[]', subtotal numeric default 0,
+      gst numeric default 0, total numeric default 0, expected text, notes text,
+      received_at timestamptz, created_by text,
+      updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create index if not exists po_tenant_idx on purchase_orders (tenant_id, created_at desc)`,
+    `create table if not exists bills (
+      id text primary key, tenant_id text not null, supplier_id text, po_id text, number text,
+      date date default current_date, due text, category text default 'inventory',
+      subtotal numeric default 0, gst numeric default 0, total numeric default 0,
+      status text default 'due', paid_at timestamptz, notes text, created_by text,
+      created_at timestamptz default now())`,
+    `create index if not exists bills_tenant_idx on bills (tenant_id, created_at desc)`,
+    `create table if not exists timesheets (
+      id text primary key, tenant_id text not null, member_id text not null,
+      week_start date not null, hours numeric not null default 0, job_id text, notes text,
+      status text default 'submitted', approved_by text, approved_at timestamptz,
+      payroll_run_id text, created_at timestamptz default now())`,
+    `create unique index if not exists timesheets_member_week_idx on timesheets (tenant_id, member_id, week_start)`,
+    `create table if not exists payroll_runs (
+      id text primary key, tenant_id text not null, period_start date, period_end date,
+      status text default 'draft', gross numeric default 0, tax numeric default 0,
+      super numeric default 0, net numeric default 0, created_by text,
+      finalised_at timestamptz, created_at timestamptz default now())`,
+    `create table if not exists payslips (
+      id text primary key, tenant_id text not null, run_id text not null, member_id text not null,
+      member_name text, hours numeric default 0, rate numeric default 0, gross numeric default 0,
+      tax numeric default 0, super numeric default 0, net numeric default 0,
+      created_at timestamptz default now())`,
+    `create index if not exists payslips_run_idx on payslips (run_id)`,
+    `create table if not exists bank_transactions (
+      id text primary key, tenant_id text not null, date date, description text,
+      amount numeric not null, status text default 'unmatched', matched_journal_id text,
+      imported_at timestamptz default now())`,
+    `create index if not exists bank_tx_tenant_idx on bank_transactions (tenant_id, date desc)`,
+    `create table if not exists clock_events (
+      id text primary key, tenant_id text not null, user_id text not null, user_name text,
+      job_id text, job_label text, kind text not null,
+      lat numeric, lng numeric, accuracy numeric,
+      client_time timestamptz, created_at timestamptz default now())`,
+    `create index if not exists clock_events_tenant_idx on clock_events (tenant_id, created_at desc)`,
+    `create index if not exists clock_events_user_idx on clock_events (user_id, created_at desc)`,
+    `create table if not exists job_photos (
+      id text primary key, tenant_id text not null, photo_key text not null, job_id text, kind text,
+      data text, uploaded_by text, lat numeric, lng numeric, created_at timestamptz default now())`,
+    `create unique index if not exists job_photos_key_idx on job_photos (tenant_id, photo_key)`,
+    `create table if not exists onsite_reports (
+      id text primary key, tenant_id text not null, rid text not null, type text, job_id text,
+      payload jsonb default '{}', signed_by text, completed boolean default false,
+      updated_at timestamptz default now(), created_at timestamptz default now())`,
+    `create unique index if not exists onsite_reports_rid_idx on onsite_reports (tenant_id, rid)`,
+    `alter table tenants add column if not exists erp_enabled boolean default true`,
+    `alter table tenants add column if not exists accounting_provider text default 'builtin'`,
+    `alter table products add column if not exists cost numeric default 0`,
+    `alter table stock_movements add column if not exists job_id text`,
+    `alter table stock_movements add column if not exists unit_cost numeric`,
     // Idempotent column adds for DBs created by an earlier deploy (tables already exist):
     `alter table tenant_documents add column if not exists content_html text`,
     `alter table document_publications add column if not exists body_html text`,
