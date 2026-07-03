@@ -131,6 +131,35 @@ app.post("/api/tenants/:id/addons/:key", A.authRequired, A.requireRole("reseller
 }));
 
 // ============================================================
+// AI ASSISTANT — customer-service copilot (staff) + client helper
+// Uses the Anthropic API when ANTHROPIC_API_KEY is set in the
+// environment; otherwise tells the UI it isn't configured yet.
+// ============================================================
+app.post("/api/ai/assist", A.authRequired, h(async (req, res) => {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return ok(res, { configured: false });
+  const { messages, persona, brand_name } = req.body || {};
+  if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: "messages_required" });
+  const clean = messages.slice(-20).map(m => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: String(m.content || "").slice(0, 4000),
+  }));
+  const brandName = String(brand_name || "our company").slice(0, 80);
+  const system = persona === "client"
+    ? `You are the friendly customer assistant for ${brandName}, an Australian solar installation company. Help the customer understand their solar journey: quotes, installation steps, bookings, invoices, warranties, maintenance and how solar works. Be concise and plain-spoken. You cannot see their account data — if asked about it, point them to the right portal section (Bookings, Documents, Invoices) or suggest contacting ${brandName} staff. Never mention SolarSync, other companies' branding, or other customers.`
+    : `You are the customer-service copilot for staff at ${brandName}, an Australian solar company. Help staff draft replies to customers, explain solar concepts (STCs, feed-in tariffs, AS/NZS compliance), summarise job notes, and suggest next steps in a client's journey. Be concise and practical. Never invent customer data — work only from what the staff member tells you.`;
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5", max_tokens: 700, system, messages: clean }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) { console.error("ai_assist_upstream", j); return res.status(502).json({ error: "ai_upstream" }); }
+  const text = ((j && j.content) || []).filter(c => c.type === "text").map(c => c.text).join("\n");
+  ok(res, { configured: true, reply: text });
+}));
+
+// ============================================================
 // LETTERHEAD
 // ============================================================
 app.get("/api/letterhead", A.authRequired, h(async (req, res) =>
@@ -1163,6 +1192,9 @@ app.use((err, req, res, next) => {
 
 // SolarSync template downloads (public, no auth — these are tenant-editable starter files)
 app.use("/templates", express.static(path.join(__dirname, "public", "templates"), { maxAge: "1h" }));
+
+// Front-end vendor libraries (e.g. Word-import converter for bring-your-own forms)
+app.use("/vendor", express.static(path.join(__dirname, "public", "vendor"), { maxAge: "7d" }));
 
 // ============================================================
 // ERP — accounting, purchasing, stock valuation, payroll,
