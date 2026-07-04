@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-smoke:
+    name: Build & smoke-test backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax-check backend sources
+        run: |
+          node --check server.js
+          node --check erp.js
+          node --check db.js
+          node --check seed.js
+
+      - name: Boot backend on PGlite and hit health check
+        env:
+          NODE_ENV: test
+        run: |
+          # No DATABASE_URL -> db.js falls back to in-process PGlite, runs
+          # migrations, and the server listens on :3000. We then confirm the
+          # health endpoint answers, proving the app boots and the DB migrates.
+          node server.js &
+          SERVER_PID=$!
+          HEALTHY=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/health > /dev/null; then
+              echo "health check OK"
+              HEALTHY=1
+              break
+            fi
+            sleep 1
+          done
+          kill "$SERVER_PID" 2>/dev/null || true
+          if [ "$HEALTHY" != "1" ]; then
+            echo "::error::backend did not become healthy within 30s"
+            exit 1
+          fi
