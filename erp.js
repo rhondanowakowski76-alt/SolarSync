@@ -139,6 +139,22 @@ async function postCounterSale(mov, product, posted_by) {
   });
 }
 
+// Stock allocated to a customer order (quote go-ahead). Moves value out of
+// Inventory on Hand into Cost of Goods Sold. Revenue is booked separately when
+// the order is invoiced, so this posts COGS only. Idempotent per source_id.
+async function postStockAllocation(tenant_id, { source_id, posted_by, cost, memo }) {
+  const c = r2(cost || 0);
+  if (c <= 0) return null;
+  return postJournal(tenant_id, {
+    date: today(), memo: memo || "Stock allocated to order",
+    source: "stock_allocation", source_id, posted_by,
+    lines: [
+      { code: "5-1000", debit: c, memo: "COGS — materials allocated" },
+      { code: "1-1300", credit: c, memo: "Inventory out" },
+    ],
+  });
+}
+
 async function postBillCreated(bill, posted_by) {
   const total = Number(bill.total) || 0; if (total <= 0) return null;
   const expenseCode = bill.category === "inventory" ? "1-1300" : (bill.category === "subcontractor" ? "6-2000" : "6-3000");
@@ -466,6 +482,30 @@ function register(app, { h, ok, tenantOf: _tenantOf }) {
     ok(res, await one("select * from timesheets where id=$1", [cur.id]));
   }));
 
+  // Self-service pay for the logged-in team member (staff or contractor):
+  // their member record, recent timesheets, finalised payslips and YTD totals.
+  // Powers the contractor Timesheets / Payslips / Earnings screens with live data.
+  app.get("/api/me/pay", A.authRequired, A.requireRole(...ALL_STAFF), h(async (req, res) => {
+    const tid = tenantOf(req);
+    const m = await one(
+      `select * from team_members where tenant_id=$1 and active=true
+         and (user_id=$2 or lower(name)=lower($3)) order by (user_id=$2) desc limit 1`,
+      [tid, req.user.sub, req.user.display_name || ""]);
+    if (!m) return ok(res, { member: null, timesheets: [], payslips: [], ytd: { gross: 0, tax: 0, super: 0, net: 0 } });
+    const timesheets = await rows(
+      "select * from timesheets where tenant_id=$1 and member_id=$2 order by week_start desc limit 16", [tid, m.id]);
+    const payslips = await rows(
+      `select p.*, r.finalised_at, r.status as run_status from payslips p
+         join payroll_runs r on r.id = p.run_id
+        where p.tenant_id=$1 and p.member_id=$2 and r.status='finalised'
+        order by r.finalised_at desc limit 24`, [tid, m.id]);
+    const ytd = payslips.reduce((a, p) => ({
+      gross: r2(a.gross + Number(p.gross)), tax: r2(a.tax + Number(p.tax)),
+      super: r2(a.super + Number(p.super)), net: r2(a.net + Number(p.net)),
+    }), { gross: 0, tax: 0, super: 0, net: 0 });
+    ok(res, { member: { id: m.id, name: m.name, role: m.role, rate: Number(m.rate) || 0 }, timesheets, payslips, ytd });
+  }));
+
   // ---------------- Payroll ----------------
   app.get("/api/payroll/runs", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) =>
     ok(res, await rows("select * from payroll_runs where tenant_id=$1 order by created_at desc limit 100", [tenantOf(req)]))));
@@ -780,4 +820,4 @@ function register(app, { h, ok, tenantOf: _tenantOf }) {
   }));
 }
 
-module.exports = { register, postJournal, postInvoiceCreated, postInvoicePaid, postCounterSale, ensureAccounts, paygWeekly };
+module.exports = { register, postJournal, postInvoiceCreated, postInvoicePaid, postCounterSale, postStockAllocation, ensureAccounts, paygWeekly };

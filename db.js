@@ -274,6 +274,7 @@ async function migrate() {
     `create unique index if not exists onsite_reports_rid_idx on onsite_reports (tenant_id, rid)`,
     `alter table tenants add column if not exists erp_enabled boolean default true`,
     `alter table tenants add column if not exists accounting_provider text default 'builtin'`,
+    `alter table tenants add column if not exists region text`,
     `alter table products add column if not exists cost numeric default 0`,
     `alter table stock_movements add column if not exists job_id text`,
     `alter table stock_movements add column if not exists unit_cost numeric`,
@@ -286,6 +287,7 @@ async function migrate() {
     `alter table invoices add column if not exists description text`,
     `alter table invoices add column if not exists due text`,
     `alter table invoices add column if not exists quote_id text`,
+    `alter table invoices add column if not exists lines jsonb default '[]'`,
     `alter table invoices alter column client_id drop not null`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }

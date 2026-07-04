@@ -11,7 +11,10 @@ const app = express();
 app.use(express.json({ limit: "12mb" }));
 
 const ok = (res, body) => res.json(body);
-const tenantOf = (req) => req.user.tenant_id;
+// The reseller keeps its OWN ERP book under the fixed id "reseller-platform"
+// (matches erp.js) so its products, POs, stock and quotes stay separate from
+// every tenant. Tenants use their own tenant_id.
+const tenantOf = (req) => req.user.app_role === "reseller" ? "reseller-platform" : req.user.tenant_id;
 const isReseller = (req) => req.user.app_role === "reseller";
 
 // anti-brute-force (DB writes here, async)
@@ -39,10 +42,18 @@ app.post("/api/auth/lookup", h(async (req, res) => {
            .map(u => ({ id: u.id, display_name: u.display_name, app_role: u.app_role })));
 }));
 
+// A suspended tenant's people can't sign in (reseller flips this per tenant).
+async function tenantSuspended(u) {
+  if (!u || !u.tenant_id) return false;
+  const t = await one("select status from tenants where id=$1", [u.tenant_id]);
+  return !!(t && t.status === "suspended");
+}
+
 app.post("/api/auth/pin", h(async (req, res) => {
   const { user_id, pin } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u) return res.status(404).json({ error: "not_found" });
+  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   if (!u.pin_hash) return res.status(409).json({ error: "no_pin", must_set: true });
   if (!A.bcrypt.compareSync(String(pin), u.pin_hash)) { await bumpFail(u); return res.status(401).json({ error: "bad_pin" }); }
@@ -55,6 +66,7 @@ app.post("/api/auth/totp", h(async (req, res) => {
   const { user_id, code } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u || !u.totp_secret) return res.status(404).json({ error: "not_found" });
+  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   if (!A.verifyTotp(u.totp_secret, code)) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
   await clearFail(u.id);
@@ -283,13 +295,17 @@ app.delete("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staf
 const PROD_COLS = "id, tenant_id, cat, name, spec, unit, price, cost, watts, stock, reorder_point, direct_sale, recreational, note, active, updated_at, created_at";
 
 app.get("/api/products", A.authRequired, h(async (req, res) => {
-  const r = isReseller(req)
-    ? await rows(`select ${PROD_COLS} from products where active=true order by cat, name`)
-    : await rows(`select ${PROD_COLS} from products where tenant_id=$1 and active=true order by cat, name`, [tenantOf(req)]);
+  // Reseller normally sees the whole platform catalogue (for "viewing as" a tenant),
+  // but its OWN ERP book (Accounting → Purchasing/Stock) passes ?mine=1 to get just
+  // the reseller's own products — office equipment, consumables, resale items, etc.
+  const ownBook = !isReseller(req) || req.query.mine === "1";
+  const r = ownBook
+    ? await rows(`select ${PROD_COLS} from products where tenant_id=$1 and active=true order by cat, name`, [tenantOf(req)])
+    : await rows(`select ${PROD_COLS} from products where active=true order by cat, name`);
   ok(res, r);
 }));
 
-app.post("/api/products", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.post("/api/products", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const d = req.body || {};
   if (!d.name) return res.status(400).json({ error: "name_required" });
   const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "prd-" + rid().slice(0, 8);
@@ -302,9 +318,9 @@ app.post("/api/products", A.authRequired, A.requireRole("tenant_admin", "staff")
   ok(res, await one(`select ${PROD_COLS} from products where id=$1`, [id]));
 }));
 
-app.put("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.put("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const cur = await one("select * from products where id=$1", [req.params.id]);
-  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
   await run(`update products set cat=$1, name=$2, spec=$3, unit=$4, price=$5, watts=$6, stock=$7, reorder_point=$8, direct_sale=$9, recreational=$10, note=$11, cost=$13, updated_at=now() where id=$12`,
     [d.cat ?? cur.cat, d.name ?? cur.name, d.spec ?? cur.spec, d.unit ?? cur.unit,
@@ -316,18 +332,18 @@ app.put("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   ok(res, await one(`select ${PROD_COLS} from products where id=$1`, [cur.id]));
 }));
 
-app.delete("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.delete("/api/products/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const cur = await one("select * from products where id=$1", [req.params.id]);
-  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   await run("update products set active=false, updated_at=now() where id=$1", [cur.id]);  // soft delete keeps history intact
   await audit(req.user.sub, "delete_product", cur.id, cur.tenant_id);
   ok(res, { ok: true });
 }));
 
 // Adjust stock (over-the-counter sale, restock, correction) and record the movement.
-app.post("/api/products/:id/stock", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.post("/api/products/:id/stock", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const cur = await one("select * from products where id=$1", [req.params.id]);
-  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
   const delta = Number(d.delta) || 0;
   if (!delta) return res.status(400).json({ error: "delta_required" });
@@ -351,7 +367,7 @@ app.post("/api/products/:id/stock", A.authRequired, A.requireRole("tenant_admin"
   ok(res, { stock: next, movement_id: mid });
 }));
 
-app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const r = await rows(`select m.id, m.product_id, p.name as product, m.delta, m.reason, m.buyer, m.total, m.created_at
     from stock_movements m left join products p on p.id=m.product_id
     where m.tenant_id=$1 order by m.created_at desc limit 100`, [tenantOf(req)]);
@@ -442,21 +458,19 @@ app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "s
 // ============================================================
 const QUOTE_COLS = "id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, notes, lines, spec, total, updated_at, created_at";
 
-const QUOTE_LIST_COLS = "id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, total, updated_at, created_at";
-app.get("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
-  const r = isReseller(req)
-    ? await rows(`select ${QUOTE_LIST_COLS} from quotes order by updated_at desc`)
-    : await rows(`select ${QUOTE_LIST_COLS} from quotes where tenant_id=$1 order by updated_at desc`, [tenantOf(req)]);
+const QUOTE_LIST_COLS = "id, tenant_id, number, client_id, deal_id, customer, enq, status, validity, total, updated_at, created_at, (spec->>'stock_allocated_at') as stock_allocated_at";
+app.get("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  const r = await rows(`select ${QUOTE_LIST_COLS} from quotes where tenant_id=$1 order by updated_at desc`, [tenantOf(req)]);
   ok(res, r);
 }));
 
-app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const q = await one(`select ${QUOTE_COLS} from quotes where id=$1`, [req.params.id]);
-  if (!q || (!isReseller(req) && q.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!q || q.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   ok(res, q);
 }));
 
-app.post("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+app.post("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const d = req.body || {};
   const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "qt-" + rid().slice(0, 8);
   // Sequential-ish human number; fine for display (not a uniqueness guarantee).
@@ -471,9 +485,9 @@ app.post("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "
   ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [id]));
 }));
 
-app.put("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+app.put("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const cur = await one("select * from quotes where id=$1", [req.params.id]);
-  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
   await run(`update quotes set number=$1, client_id=$2, deal_id=$3, customer=$4, enq=$5, status=$6, validity=$7, notes=$8, lines=$9, spec=$10, total=$11, updated_at=now() where id=$12`,
     [d.number ?? cur.number, d.client_id ?? cur.client_id, d.deal_id ?? cur.deal_id,
@@ -485,12 +499,53 @@ app.put("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff"
   ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [cur.id]));
 }));
 
-app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
+app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const cur = await one("select * from quotes where id=$1", [req.params.id]);
-  if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   await run("delete from quotes where id=$1", [cur.id]);
   await audit(req.user.sub, "delete_quote", cur.id, cur.tenant_id);
   ok(res, { ok: true });
+}));
+
+// Allocate a quote's stock against the customer order (ERP draw-down, MYOB/Xero style).
+// Each stockable line reduces on-hand inventory in THIS book, records a negative stock
+// movement tagged to the job, and posts COGS → Inventory-out to the ledger.
+// Idempotent: a quote allocates once (guarded by spec.stock_allocated_at).
+app.post("/api/quotes/:id/allocate-stock", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
+  const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+  const cur = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  let spec = {}; try { spec = typeof cur.spec === "string" ? JSON.parse(cur.spec) : (cur.spec || {}); } catch (e) {}
+  if (spec.stock_allocated_at) return res.status(409).json({ error: "already_allocated", allocated_at: spec.stock_allocated_at });
+  let lines = []; try { lines = Array.isArray(cur.lines) ? cur.lines : JSON.parse(cur.lines || "[]"); } catch (e) {}
+  let customer = {}; try { customer = typeof cur.customer === "string" ? JSON.parse(cur.customer) : (cur.customer || {}); } catch (e) {}
+  const job = cur.deal_id || cur.id;
+  const allocated = []; const skipped = []; let totalCost = 0;
+  for (const l of lines) {
+    const pid = l.product_id || l.id;
+    const qty = Number(l.qty) || 0;
+    if (!pid || qty <= 0) continue;
+    const p = await one("select * from products where id=$1", [pid]);
+    if (!p || p.tenant_id !== cur.tenant_id) { skipped.push({ name: l.name || pid, reason: "not_a_stocked_product" }); continue; }
+    const base = p.stock == null ? 0 : Number(p.stock);
+    const next = Math.max(0, base - qty);
+    const unitCost = p.cost != null ? Number(p.cost) : 0;
+    await run("update products set stock=$1, updated_at=now() where id=$2", [next, p.id]);
+    await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, job_id, unit_cost, created_by)
+      values ($1,$2,$3,$4,'allocation',$5,$6,$7,$8,$9)`,
+      ["mov-" + rid().slice(0, 8), cur.tenant_id, p.id, -qty, customer.name || null,
+       round2(qty * unitCost), job, unitCost, req.user.sub]);
+    totalCost += qty * unitCost;
+    allocated.push({ product_id: p.id, name: p.name, qty, from: base, to: next, short: base < qty });
+  }
+  if (!allocated.length) return res.status(400).json({ error: "no_stock_lines", detail: "No line items match a stocked product in this book.", skipped });
+  try { await erp.postStockAllocation(cur.tenant_id, { source_id: cur.id, posted_by: req.user.sub, cost: totalCost, memo: `Stock allocated — quote ${cur.number || cur.id}` }); }
+  catch (e) { console.error("ledger post (stock allocation) failed:", e.message); }
+  spec.stock_allocated_at = new Date().toISOString();
+  await run("update quotes set spec=$1, status=(CASE WHEN status='Draft' OR status='Sent' THEN 'Accepted' ELSE status END), updated_at=now() where id=$2",
+    [JSON.stringify(spec), cur.id]);
+  await audit(req.user.sub, "allocate_stock", cur.id, cur.tenant_id, { lines: allocated.length, cost: round2(totalCost) });
+  ok(res, { ok: true, allocated, skipped, total_cost: round2(totalCost) });
 }));
 
 // ============================================================
@@ -698,6 +753,105 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 }));
 
 // ============================================================
+// TENANT LIFECYCLE (reseller-only): list, provision, plan, suspend
+// ============================================================
+const PLAN_PRICES = { Starter: 179, Growth: 499, Scale: 899 };
+
+app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants order by created_at");
+  const counts = await rows("select tenant_id, count(*)::int as n from users where status='active' and tenant_id is not null group by tenant_id");
+  const cmap = {}; for (const c of counts) cmap[c.tenant_id] = c.n;
+  ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
+}));
+
+app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim();
+  const domain = String(b.domain || "").trim().toLowerCase();
+  const region = String(b.region || "").trim();
+  const plan = ["Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
+  const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
+  if (name.length < 2) return res.status(400).json({ error: "name_required" });
+  if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
+  const id = "tenant-" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || rid());
+  if (await one("select id from tenants where id=$1 or (domain<>'' and domain=$2)", [id, domain]))
+    return res.status(409).json({ error: "tenant_exists" });
+  // sign-in is by exact full name, so names must stay unambiguous platform-wide
+  if (await one("select id from users where status='active' and lower(display_name)=lower($1)", [adminName]))
+    return res.status(409).json({ error: "admin_name_taken" });
+  const branding = { name };
+  if (Array.isArray(b.accent) && b.accent.length) branding.accent = b.accent.slice(0, 3).map(String);
+  if (b.logo_url) branding.logo_url = String(b.logo_url).slice(0, 400000);
+  await run("insert into tenants (id, reseller_id, name, domain, plan, region, branding, status) values ($1,$2,$3,$4,$5,$6,$7::jsonb,'active')",
+    [id, "reseller-solarsync", name, domain, plan, region, JSON.stringify(branding)]);
+  const pin = String(require("crypto").randomInt(100000, 1000000));
+  const uid = "u-" + rid();
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,'tenant_admin',$3,$4)",
+    [uid, id, adminName, A.bcrypt.hashSync(pin, 10)]);
+  await audit(req.user.sub, "provision_tenant", id, id);
+  // the PIN is returned exactly once — hand it to the tenant admin, then they
+  // set up their authenticator on first sign-in
+  ok(res, { id, name, domain, plan, region, admin: { id: uid, display_name: adminName, pin } });
+}));
+
+app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const plan = String((req.body || {}).plan || "");
+  if (!["Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
+  const cur = await one("select id from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  await run("update tenants set plan=$1 where id=$2", [plan, cur.id]);
+  await audit(req.user.sub, "tenant_plan", cur.id, cur.id, { plan });
+  ok(res, { id: cur.id, plan });
+}));
+
+app.put("/api/tenants/:id/status", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const status = String((req.body || {}).status || "");
+  if (!["active", "suspended"].includes(status)) return res.status(400).json({ error: "bad_status" });
+  const cur = await one("select id from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  await run("update tenants set status=$1 where id=$2", [status, cur.id]);
+  await audit(req.user.sub, status === "suspended" ? "tenant_suspended" : "tenant_reactivated", cur.id, cur.id);
+  ok(res, { id: cur.id, status });
+}));
+
+// ============================================================
+// USER PROVISIONING — how new people get a sign-in.
+// Reseller can create logins for any tenant (or reseller staff);
+// a tenant admin can create staff/contractor/client logins for
+// their own tenant only. The starter PIN is returned exactly once.
+// ============================================================
+// Who has a sign-in: reseller sees everyone, tenant admin sees only their own team.
+app.get("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin"), h(async (req, res) => {
+  const list = isReseller(req)
+    ? await rows("select id, display_name, app_role, tenant_id, status, totp_enrolled from users order by created_at")
+    : await rows("select id, display_name, app_role, tenant_id, status, totp_enrolled from users where tenant_id=$1 order by created_at", [tenantOf(req)]);
+  ok(res, list);
+}));
+
+app.post("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin"), h(async (req, res) => {
+  const b = req.body || {};
+  const displayName = String(b.display_name || "").trim().replace(/\s+/g, " ");
+  const role = String(b.app_role || "");
+  const isRes = isReseller(req);
+  const allowed = isRes ? ["reseller", "tenant_admin", "staff", "contractor", "client"] : ["staff", "contractor", "client"];
+  if (!allowed.includes(role)) return res.status(403).json({ error: "bad_role" });
+  const tenantId = role === "reseller" ? null : (isRes ? String(b.tenant_id || "") : tenantOf(req));
+  if (role !== "reseller") {
+    if (!tenantId) return res.status(400).json({ error: "tenant_required" });
+    if (!await one("select id from tenants where id=$1", [tenantId])) return res.status(404).json({ error: "tenant_not_found" });
+  }
+  if (displayName.length < 3 || !displayName.includes(" ")) return res.status(400).json({ error: "full_name_required" });
+  if (await one("select id from users where status='active' and lower(display_name)=lower($1)", [displayName]))
+    return res.status(409).json({ error: "name_taken" });
+  const pin = String(require("crypto").randomInt(100000, 1000000));
+  const uid = "u-" + rid();
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,$3,$4,$5)",
+    [uid, tenantId, role, displayName, A.bcrypt.hashSync(pin, 10)]);
+  await audit(req.user.sub, "create_user", uid, tenantId);
+  ok(res, { id: uid, display_name: displayName, app_role: role, tenant_id: tenantId, pin });
+}));
+
+// ============================================================
 // WHITE-LABEL BRANDING (tenant colours/name/logo — applies across all portals)
 // ============================================================
 app.get("/api/branding", A.authRequired, h(async (req, res) => {
@@ -775,10 +929,11 @@ app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff")
   const id = "inv-" + rid().slice(0, 8);
   const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [tenantOf(req)]);
   const number = d.number || ("INV-" + (2100 + ((cnt && cnt.c) || 0)));
-  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+  const invLines = Array.isArray(d.lines) ? d.lines : [];
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id, lines)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [id, tenantOf(req), d.client_id || null, d.client_name || null, number, Number(d.amount),
-     d.status || "due", d.description || null, d.due || null, d.quote_id || null]);
+     d.status || "due", d.description || null, d.due || null, d.quote_id || null, JSON.stringify(invLines)]);
   await audit(req.user.sub, "create_invoice", id, tenantOf(req));
   const inv = await one("select * from invoices where id=$1", [id]);
   try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (invoice) failed:", e.message); }
@@ -793,10 +948,11 @@ app.post("/api/quotes/:id/invoice", A.authRequired, A.requireRole("tenant_admin"
   const id = "inv-" + rid().slice(0, 8);
   const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [q.tenant_id]);
   const number = "INV-" + (2100 + ((cnt && cnt.c) || 0));
-  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id)
-    values ($1,$2,$3,$4,$5,$6,'due',$7,$8,$9)`,
+  let qLines = []; try { qLines = Array.isArray(q.lines) ? q.lines : JSON.parse(q.lines || "[]"); } catch (e) {}
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id, lines)
+    values ($1,$2,$3,$4,$5,$6,'due',$7,$8,$9,$10)`,
     [id, q.tenant_id, q.client_id || null, cust.name || null, number, Number(q.total) || 0,
-     "From quote " + (q.number || q.id), req.body && req.body.due || null, q.id]);
+     "From quote " + (q.number || q.id), req.body && req.body.due || null, q.id, JSON.stringify(qLines)]);
   await run("update quotes set status='Accepted', updated_at=now() where id=$1", [q.id]);
   await audit(req.user.sub, "quote_to_invoice", id, q.tenant_id, { quote: q.id });
   const inv = await one("select * from invoices where id=$1", [id]);
@@ -891,7 +1047,7 @@ function _testerLink(req, jwtToken) {
   return `${_testerOrigin(req)}/app?tester=${encodeURIComponent(jwtToken)}`;
 }
 
-// Issue — reseller only
+// Issue — reseller only. Returns the signed magic link exactly once.
 app.post("/api/testers/issue", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const { name, email, duration_days, notes } = req.body || {};
   if (!name || !String(name).trim()) return res.status(400).json({ error: "name_required" });
@@ -947,9 +1103,8 @@ app.delete("/api/testers/:id", A.authRequired, A.requireRole("reseller"), h(asyn
   ok(res, { ok: true });
 }));
 
-// Redeem — PUBLIC. Tester clicks the magic link → portal POSTs the token here.
-// We verify JWT signature + DB state (revoked / expired) then mint a regular
-// access token for a synthetic tenant_admin user pointing at a demo tenant.
+// Redeem — public (the magic link is the credential). Verifies the JWT,
+// then checks server-side revocation/expiry before minting real tokens.
 app.post("/api/testers/redeem", h(async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: "token_required" });
@@ -1015,16 +1170,13 @@ function extractFormHtml(file) {
   return null;
 }
 
-// Paid-gated: unlocked when the tenant has an active 'document-library' add-on row,
-// OR a valid tester token is presented (mirrors complianceUnlocked so the feature is
-// testable before a real paid activation). Real tenants without either stay locked.
-// The connected-demo tenant always has it on, matching how the demo showcases the
-// Compliance Suite and other premium features (unlocked without a real purchase).
-async function documentLibraryUnlocked(tenant_id, token) {
+// Paid-gated: unlocked when the tenant has an active 'document-library' add-on row.
+// A valid tester token (?token=) also unlocks, mirroring the compliance gate.
+async function documentLibraryUnlocked(tenant_id) {
   // TEMP (pre-launch): available to any signed-in tenant while billing is finalised.
-  // To re-gate for monetisation, restore the tenant_addons / tester-token checks
+  // To re-gate for monetisation, restore the tenant_addons check
   // (see git history for commit that gated on addon_key='document-library').
-  return !!tenant_id || !!token;
+  return !!tenant_id;
 }
 
 // Proper async middleware: must receive AND forward `next` (cannot use the h() wrapper,
@@ -1219,6 +1371,22 @@ app.get("/", (req, res) => {
 });
 app.get("/privacy", (req, res) => { if (fs.existsSync(PRIVACY)) return res.sendFile(PRIVACY); res.redirect("/"); });
 app.get("/terms", (req, res) => { if (fs.existsSync(TERMS)) return res.sendFile(TERMS); res.redirect("/"); });
+// PWA offline support: served explicitly so the "*" catch-all below doesn't return the SPA bundle.
+// sw.js must be uncached and root-scoped so it can control /app on remote, no-signal sites.
+app.get("/sw.js", (req, res) => {
+  const SW = path.join(__dirname, "public", "sw.js");
+  if (!fs.existsSync(SW)) return res.status(404).end();
+  res.set("Service-Worker-Allowed", "/");
+  res.set("Cache-Control", "no-cache");
+  res.type("application/javascript");
+  res.sendFile(SW);
+});
+app.get("/manifest.webmanifest", (req, res) => {
+  const MF = path.join(__dirname, "public", "manifest.webmanifest");
+  if (!fs.existsSync(MF)) return res.status(404).end();
+  res.type("application/manifest+json");
+  res.sendFile(MF);
+});
 app.get("*", (req, res) => {
   if (fs.existsSync(BUNDLE)) return res.sendFile(BUNDLE);
   res.status(200).send("SolarSync API running. Front-end goes at backend/public/index.html");
