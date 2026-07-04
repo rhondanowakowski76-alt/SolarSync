@@ -1,0 +1,164 @@
+name: Bootstrap finish/build-tests branch and PR
+on:
+  push:
+    paths:
+      - ".github/workflows/bootstrap-finish-build.yml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create or switch to branch
+        run: |
+          if git show-ref --verify --quiet refs/heads/finish/build-tests; then
+            git checkout finish/build-tests
+          else
+            git checkout -b finish/build-tests
+         Image 8 shows the exact YAML error GitHub flagged: a lone EOF marker sitting at fi
+
+      - name: Create .github/workflows/ci-tests.yml
+        run: |
+          mkdir -p .github/workflows
+          cat > .github/workflows/ci-tests.yml <<'EOF'
+name: CI Full Test line 75 of your workflow. The parser sees that EOF at top level and reports "Invalid workflow file — You have an error in your yaml syntax on line 75."
+
+What the image shows (brief)
+- The workflow fragment above shows the "T Pipeline
+on: [push, pull_request]
+
+jobs:
+  smoke-and-tests:
+    runs-on:ear down" step with a run: | block that contains:
+  docker-compose -f docker-compose.test.yml down -v
+ ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set- Immediately after that block there is a bare line with EOF (line 75) highlighted by GitHub as the error.
+- Below it the file continues with the next heredoc (cat > docker-compose.test.yml <<'EOF') starting on line 78 — so the EOF on line up Docker Compose
+        run: |
+          docker version
+          docker-compose version || true
+      - name: Start test environment
+ 75 is out of place.
+
+Why this is an error
+- Your workflow embeds multiple shell heredocs (        run: |
+          docker-compose -f docker-compose.test.yml up --build -d
+      - name: Wait for servicescat <<'EOF' ... EOF) inside YAML run: | scalars. YAML treats the run: | block as a single quoted literal; a stray, un
+        run: |
+          echo "Waiting for services to be healthy..."
+          sleep 8
+      - name: Normalize smoke script lineindented EOF on its own line ends the overall YAML structure and confuses the parser.
+- In short: one of the heredoc closing markers is outside the run: | block (or otherwise mis endings
+        run: |
+          # convert CRLF to LF to avoid shell issues
+          if command -v sed‑indented), so the YAML is malformed.
+
+Quick fix you can apply right now (two >/dev/null 2>&1; then
+            sed -i 's/\r$//' ./scripts/smoke.sh || safe options)
+1) Fastest (probably correct): remove the stray EOF on line 75
+   - Open .github/workflows/bootstrap-finish-build.yml in the GitHub editor.
+   - true
+          fi
+      - name: Run smoke tests
+        run: |
+          chmod +x ./scripts/smoke Go to line 75 (the line that contains only: EOF).
+   - Delete that single line and Commit changes to main.
+   - The file should then.sh
+          ./scripts/smoke.sh > smoke.log 2>&1 || (cat smoke.log && exit 1)
+      - name parse — the subsequent cat <<'EOF' sections will work normally.
+
+2) Safer / explicit: move/indent the EOF so it closes the correct heredoc inside the same run: | block: Upload smoke log
+        uses: actions/upload-artifact@v4
+        with:
+         
+   - If that EOF was intended to close a heredoc that begins earlier in the same run: | name: smoke-log
+          path: smoke.log
+      - name: Tear down
+        if: always()
+        run: block, ensure the EOF line is indented exactly to the same column as the run |
+          docker-compose -f docker-compose.test.yml down -v
+EOF
+
+      - name: Create docker-compose: block’s content (i.e., keep it inside the YAML.test.yml
+        run: |
+          cat > docker-compose.test.yml <<'EOF'
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", scalar). Example:
+     run: "test", "-d", "testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: "postgres://test:test@postgres:5432/testdb"
+ |
+       cat > somefile <<'EOF'
+       ...content...
+       EOF      # EOF must be indented the same as      NODE_ENV: test
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    depends_on the cat line inside the run block
+   - If the EOF is meant to close a heredoc from a previous step, move it so it immediately follows that:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./public:/usr/share/nginx/html:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      heredoc content inside that step's run: block.
+
+Would you like me to fix and provide the corrected workflow file?
+- I can - backend
+EOF
+
+      - name: Create PR_TEMPLATE.md
+        run: |
+          cat > PR_TEMPLATE.md paste a corrected .github/workflows/bootstrap-finish-build.yml (ready to copy/paste and commit) that removes the misplaced EOF and ensures each heredoc is properly closed inside its run: | block. Reply FIX WORKFLOW and <<'EOF'
+# Pull Request template for finishing and testing
+
+## What/Why
+- Brief description of changes and reason.
+
+## Checklist (must be completed before merge)
+- [ ] Acceptance criteria listed below are satisfied
+- [ ] Unit tests added/updated and passing
+ I’ll paste the fixed file- [ ] Integration tests added/updated and passing
+- [ ] E2E test added or updated and passes locally
+- [ ] DB migrations included and idempotent (if applicable)
+- [ ] README and exact one-click steps to update the file in the GitHub UI. / run instructions updated if relevant
+- [ ] No secrets committed
+
+## Acceptance criteria
+- (List measurable pass conditions for this PR, e.g., endpoint /api/contacts POST persists contact and returns 201, UI shows saved item, test coverage for changed module >= 80%)
