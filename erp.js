@@ -33,17 +33,25 @@ const COA = [
   ["4-1000", "Sales — Installations", "income", "GST"],
   ["4-2000", "Sales — Service & Cleaning", "income", "GST"],
   ["4-3000", "Sales — Products (Counter)", "income", "GST"],
+  ["4-4000", "Sales — Subscriptions & Services", "income", "GST"],
   ["5-1000", "Cost of Goods Sold — Materials", "cogs", "GST"],
   ["6-1000", "Wages & Salaries", "expense", "NONE"],
   ["6-1100", "Superannuation Expense", "expense", "NONE"],
   ["6-2000", "Subcontractors", "expense", "GST"],
   ["6-3000", "General & Operating Expenses", "expense", "GST"],
+  // General business expense accounts (used by the reseller's own book and any tenant).
+  ["6-4000", "Office Supplies", "expense", "GST"],
+  ["6-4100", "Software & Subscriptions", "expense", "GST"],
+  ["6-4200", "Rent & Utilities", "expense", "GST"],
+  ["6-4300", "Accounting & Professional Fees", "expense", "GST"],
+  ["6-4400", "Marketing & Advertising", "expense", "GST"],
+  ["6-4500", "Meetings & Travel", "expense", "GST"],
 ];
 
 async function ensureAccounts(tenant_id) {
   if (!tenant_id) return;
   const c = await one("select count(*)::int as c from accounts where tenant_id=$1", [tenant_id]);
-  if (c && c.c > 0) return;
+  if (c && c.c >= COA.length) return;   // re-run when new accounts have been added to the COA
   for (const [code, name, type, tax] of COA) {
     await run(
       `insert into accounts (id, tenant_id, code, name, type, tax_code, is_system)
@@ -97,7 +105,7 @@ async function postInvoiceCreated(inv, posted_by) {
     source: "invoice", source_id: inv.id, posted_by,
     lines: [
       { code: "1-1200", debit: total, memo: `AR ${inv.number}` },
-      { code: "4-1000", credit: exGst(total), memo: "Sale ex-GST" },
+      { code: inv.tenant_id === "reseller-platform" ? "4-4000" : "4-1000", credit: exGst(total), memo: "Sale ex-GST" },
       { code: "2-1200", credit: gstOf(total), memo: "GST collected" },
     ],
   });
@@ -577,6 +585,32 @@ function register(app, { h, ok, tenantOf: _tenantOf }) {
     await audit(req.user.sub, "finalise_payroll", cur.id, cur.tenant_id);
     ok(res, { ok: true });
   }));
+
+  // ---- Payroll liabilities: accrued super & PAYG still owed, and remitting them ----
+  const liabBal = async (tid, code) => {
+    const r = await one(`select coalesce(sum(jl.credit),0) - coalesce(sum(jl.debit),0) as bal
+      from journal_lines jl join accounts a on a.id = jl.account_id join journals j on j.id = jl.journal_id
+      where j.tenant_id=$1 and a.code=$2`, [tid, code]);
+    return r2(Number((r && r.bal) || 0));
+  };
+  app.get("/api/payroll/liabilities", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const tid = tenantOf(req); await ensureAccounts(tid);
+    ok(res, { super: await liabBal(tid, "2-1500"), payg: await liabBal(tid, "2-1400") });
+  }));
+  // Remit an accrued liability to the bank — clears the payable (debit liability, credit cash).
+  const remit = (code, label) => async (req, res) => {
+    const tid = tenantOf(req); await ensureAccounts(tid);
+    const bal = await liabBal(tid, code);
+    if (bal <= 0.005) return res.status(400).json({ error: "nothing_to_pay" });
+    await postJournal(tid, {
+      date: today(), memo: `${label} remittance`, source: "remit", source_id: `${code}-${Date.now()}`, posted_by: req.user.sub,
+      lines: [ { code, debit: bal, memo: `${label} paid` }, { code: "1-1100", credit: bal, memo: `${label} paid from bank` } ],
+    });
+    await audit(req.user.sub, "remit_liability", code, tid, { amount: bal });
+    ok(res, { paid: bal });
+  };
+  app.post("/api/payroll/pay-super", A.authRequired, A.requireRole(...TENANT_ROLES), h(remit("2-1500", "Superannuation")));
+  app.post("/api/payroll/pay-payg", A.authRequired, A.requireRole(...TENANT_ROLES), h(remit("2-1400", "PAYG withholding")));
 
   // ---------------- Financial reports ----------------
   async function ledgerTotals(tid, { from, to } = {}) {

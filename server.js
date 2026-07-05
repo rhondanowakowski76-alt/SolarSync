@@ -998,8 +998,8 @@ app.get("/api/invoices", A.authRequired, h(async (req, res) => {
   ok(res, await rows("select * from invoices where tenant_id=$1 order by created_at desc", [tenantOf(req)]));
 }));
 
-// Create an invoice (tenant staff). client_id optional; client_name kept for display.
-app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+// Create an invoice (tenant staff or reseller — each scoped to its own book). client_id optional.
+app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const d = req.body || {};
   if (!d.amount || Number(d.amount) <= 0) return res.status(400).json({ error: "amount_required" });
   const id = "inv-" + rid().slice(0, 8);
@@ -1090,7 +1090,7 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
   res.json({ received: true });
 });
 
-app.post("/api/invoices/:id/mark-paid", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+app.post("/api/invoices/:id/mark-paid", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const inv = await one("select * from invoices where id=$1", [req.params.id]);
   if (!inv || inv.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   await run("update invoices set status='paid', paid_at=now() where id=$1", [inv.id]);
