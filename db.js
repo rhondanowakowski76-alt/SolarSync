@@ -292,6 +292,19 @@ async function migrate() {
     `alter table invoices add column if not exists quote_id text`,
     `alter table invoices add column if not exists lines jsonb default '[]'`,
     `alter table invoices alter column client_id drop not null`,
+    // beta_testers: add columns missing on DBs created before they were introduced,
+    // so issuing tester invites (writes scope/plan/notes/issued_by/expiry) works again.
+    `alter table beta_testers add column if not exists issued_by text`,
+    `alter table beta_testers add column if not exists email text`,
+    `alter table beta_testers add column if not exists scope text default 'tenant,contractor,client'`,
+    `alter table beta_testers add column if not exists plan text default 'Scale'`,
+    `alter table beta_testers add column if not exists notes text`,
+    `alter table beta_testers add column if not exists issued_at timestamptz default now()`,
+    `alter table beta_testers add column if not exists expires_at timestamptz`,
+    `alter table beta_testers add column if not exists revoked boolean default false`,
+    `alter table beta_testers add column if not exists revoked_at timestamptz`,
+    `alter table beta_testers add column if not exists last_seen timestamptz`,
+    `alter table beta_testers add column if not exists use_count int default 0`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }
