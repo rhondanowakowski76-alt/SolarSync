@@ -2,6 +2,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
 const { rows, one, run, rid, audit } = require("./db");
 const A = require("./auth");
 const QRCode = require("qrcode");
@@ -27,6 +28,25 @@ async function clearFail(id) { await run("update users set failed_attempts=0, lo
 
 // wrap async handlers so errors return 500 instead of crashing
 const h = (fn) => (req, res) => fn(req, res).catch(e => { console.error(e); res.status(500).json({ error: String(e.message || e) }); });
+
+// Recovery / backup codes: single-use codes a person can use to sign in when they
+// can't reach their authenticator app. We store only bcrypt hashes; the plaintext
+// is shown to the user exactly once. Generating a new set replaces any old ones.
+const BC_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
+function normBackup(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+async function issueBackupCodes(user_id, n = 10) {
+  await run("delete from backup_codes where user_id=$1", [user_id]);
+  const crypto = require("crypto");
+  const shown = [];
+  for (let i = 0; i < n; i++) {
+    const bytes = crypto.randomBytes(8);
+    let raw = ""; for (const b of bytes) raw += BC_ALPHABET[b % 32];   // 8 chars, no dash
+    shown.push(raw.slice(0, 4) + "-" + raw.slice(4, 8));               // display form: XXXX-XXXX
+    await run("insert into backup_codes (id, user_id, code_hash) values ($1,$2,$3)",
+      [rid(), user_id, A.bcrypt.hashSync(raw, 10)]);                   // hash the normalised (dash-free) form
+  }
+  return shown;
+}
 
 // ============================================================
 // AUTH (PIN + TOTP only — no email)
@@ -96,7 +116,49 @@ app.post("/api/auth/set-pin", h(async (req, res) => {
   if (!A.verifyTotp(u.totp_secret, code)) return res.status(401).json({ error: "bad_code" });
   if (!/^\d{6}$/.test(String(pin))) return res.status(400).json({ error: "pin_format" });
   await run("update users set pin_hash=$1, must_reset=false where id=$2", [A.bcrypt.hashSync(String(pin), 10), u.id]);
-  ok(res, { ok: true });
+  // Setting a PIN proves control of the authenticator — a good moment to hand the
+  // person a fresh set of single-use recovery codes (shown once). Best-effort: a
+  // failure here must never block the PIN update itself.
+  let backup_codes = [];
+  try { backup_codes = await issueBackupCodes(u.id); } catch (e) { console.error("backup code issue failed", e); }
+  ok(res, { ok: true, backup_codes });
+}));
+
+// Sign in with a single-use recovery code instead of the authenticator app.
+// Same result as a successful authenticator step: issues the session tokens.
+app.post("/api/auth/backup", h(async (req, res) => {
+  const { user_id, code } = req.body || {};
+  const u = await one("select * from users where id=$1", [user_id]);
+  if (!u) return res.status(404).json({ error: "not_found" });
+  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
+  if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
+  const norm = normBackup(code);
+  if (norm.length < 8) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
+  const candidates = await rows("select id, code_hash from backup_codes where user_id=$1 and used_at is null", [user_id]);
+  let matched = null;
+  for (const c of candidates) { if (A.bcrypt.compareSync(norm, c.code_hash)) { matched = c; break; } }
+  if (!matched) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
+  await run("update backup_codes set used_at=now() where id=$1", [matched.id]);
+  await clearFail(u.id);
+  await audit(u.id, "login_backup_code", u.id, u.tenant_id);
+  ok(res, {
+    access_token: A.mintAccess(u), refresh_token: A.mintRefresh(u),
+    user: { id: u.id, display_name: u.display_name, app_role: u.app_role, tenant_id: u.tenant_id },
+    backup_codes_remaining: candidates.length - 1,
+  });
+}));
+
+// Logged-in user regenerates their recovery codes (invalidates the old set).
+app.post("/api/auth/backup/regenerate", A.authRequired, h(async (req, res) => {
+  const codes = await issueBackupCodes(req.user.sub);
+  await audit(req.user.sub, "backup_codes_regenerate", req.user.sub, req.user.tenant_id || "");
+  ok(res, { backup_codes: codes });
+}));
+
+// How many unused recovery codes remain (for a "you have N left" nudge).
+app.get("/api/auth/backup/count", A.authRequired, h(async (req, res) => {
+  const r = await one("select count(*)::int as c from backup_codes where user_id=$1 and used_at is null", [req.user.sub]);
+  ok(res, { remaining: (r && r.c) || 0 });
 }));
 
 app.post("/api/auth/refresh", h(async (req, res) => {
@@ -1361,6 +1423,40 @@ app.use("/templates", express.static(path.join(__dirname, "public", "templates")
 
 // Front-end vendor libraries (e.g. Word-import converter for bring-your-own forms)
 app.use("/vendor", express.static(path.join(__dirname, "public", "vendor"), { maxAge: "7d" }));
+
+// PWA home-screen icons (must be a real static route — the "*" catch-all below
+// would otherwise return the HTML bundle for these .png paths).
+app.use("/icons", express.static(path.join(__dirname, "public", "icons"), { maxAge: "7d" }));
+
+// Same-origin proxy for the client's rooftop satellite image (Esri World Imagery
+// export). The live map tiles are cross-origin, so the proposal screenshot tool
+// (html2canvas) can't capture them; fetching one composited image through our own
+// server makes it same-origin and canvas-safe, so the quote can show the panels on
+// the client's REAL roof. Read-only image passthrough, day-cached.
+app.get("/api/roof-image", (req, res) => {
+  const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng), zoom = parseFloat(req.query.zoom);
+  let w = Math.round(parseFloat(req.query.w)), h = Math.round(parseFloat(req.query.h));
+  if (![lat, lng, zoom, w, h].every(Number.isFinite)) return res.status(400).json({ error: "bad_params" });
+  w = Math.max(64, Math.min(1600, w)); h = Math.max(64, Math.min(1600, h));
+  // Web-Mercator (EPSG:3857) bbox for this centre + zoom + on-screen size, so the
+  // exported image lines up with the tile view the installer placed the panels over.
+  const RMAJ = 6378137;
+  const x = RMAJ * (lng * Math.PI / 180);
+  const y = RMAJ * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2));
+  const mpp = 156543.03392804097 / Math.pow(2, zoom);   // 3857 metres/pixel at this zoom
+  const hw = (w / 2) * mpp, hh = (h / 2) * mpp;
+  const bbox = [x - hw, y - hh, x + hw, y + hh].join(",");
+  const url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export"
+    + `?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${w},${h}&format=jpg&transparent=false&f=image`;
+  const up = https.get(url, (r2) => {
+    if (r2.statusCode !== 200) { r2.resume(); return res.status(502).json({ error: "upstream", code: r2.statusCode }); }
+    res.set("Content-Type", r2.headers["content-type"] || "image/jpeg");
+    res.set("Cache-Control", "public, max-age=86400");
+    r2.pipe(res);
+  });
+  up.on("error", () => { if (!res.headersSent) res.status(502).json({ error: "fetch_failed" }); });
+  up.setTimeout(8000, () => up.destroy());
+});
 
 // ============================================================
 // ERP — accounting, purchasing, stock valuation, payroll,

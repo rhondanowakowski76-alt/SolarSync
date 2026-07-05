@@ -5,7 +5,7 @@
    - Same-origin static assets (vendor libraries, fonts) are cache-first.
    - /api/* is never cached — live data always goes to the network, and offline
      writes are handled by window.ssOffline (the localStorage queue), not here. */
-const VERSION = "solarsync-v2";
+const VERSION = "solarsync-v3";
 const SHELL = ["/app", "/"];
 
 self.addEventListener("install", (e) => {

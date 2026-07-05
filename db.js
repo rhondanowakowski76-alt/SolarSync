@@ -71,6 +71,9 @@ async function migrate() {
       pin_hash text, totp_secret text, totp_enrolled boolean default false,
       must_reset boolean default false, failed_attempts int default 0, locked_until timestamptz,
       status text default 'active', created_at timestamptz default now())`,
+    `create table if not exists backup_codes (
+      id text primary key, user_id text not null, code_hash text not null,
+      used_at timestamptz, created_at timestamptz default now())`,
     `create table if not exists clients (
       id text primary key, tenant_id text not null, user_id text,
       name text not null, site_address text, system_spec jsonb default '{}', install_status text,
