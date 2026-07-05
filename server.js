@@ -761,7 +761,9 @@ app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req,
   const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants order by created_at");
   const counts = await rows("select tenant_id, count(*)::int as n from users where status='active' and tenant_id is not null group by tenant_id");
   const cmap = {}; for (const c of counts) cmap[c.tenant_id] = c.n;
-  ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
+  const inst = await rows("select tenant_id, count(*)::int as n from deals where stage='installed' and tenant_id is not null group by tenant_id");
+  const imap = {}; for (const c of inst) imap[c.tenant_id] = c.n;
+  ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, installs: imap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
 }));
 
 app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
@@ -1427,6 +1429,27 @@ async function startupBackfill() {
       // Any other reseller login that never finished authenticator setup is a
       // demo leftover (e.g. the old seeded admin) — switch it off on live.
       await run("update users set status='disabled' where app_role='reseller' and totp_enrolled=false and lower(display_name)<>lower($1)", [ownerName]);
+    }
+
+    // Ensure exactly one fully-functional sample tenant (Helios) exists on every
+    // deployment, so the live reseller portal always has a real, working example
+    // to open. Idempotent and non-destructive: each row is created only when it
+    // is absent (WHERE NOT EXISTS), so real tenants/users are never touched.
+    if (!await one("select id from tenants where id='tenant-helios'")) {
+      const pin = A.bcrypt.hashSync("123456", 10);
+      await run("insert into resellers (id,name) select 'reseller-solarsync','SolarSync' where not exists (select 1 from resellers where id='reseller-solarsync')");
+      await run("insert into tenants (id,reseller_id,name,domain,plan,status,region) select 'tenant-helios','reseller-solarsync','Helios Solar','portal.heliossolar.com.au','Scale','active','QLD' where not exists (select 1 from tenants where id='tenant-helios')");
+      for (const [id, role, name] of [["u-admin","tenant_admin","Sarah Chen"],["u-contractor","contractor","Dan Webb"],["u-client","client","Adam Smith"]])
+        await run("insert into users (id,tenant_id,app_role,display_name,pin_hash,totp_secret,totp_enrolled) select $1,'tenant-helios',$2,$3,$4,null,false where not exists (select 1 from users where id=$1)", [id, role, name, pin]);
+      await run("insert into clients (id,tenant_id,user_id,name,site_address,install_status) select 'c-adam','tenant-helios','u-client','Adam Smith','42 Solar Ave, Brisbane QLD 4000','installed' where not exists (select 1 from clients where id='c-adam')");
+      for (const [k,n,p] of [["compliance-suite","Compliance Reports Suite",69],["vpp","VPP Enrollment Assistant",49],["document-library","Document Library",29]])
+        await run("insert into addons (key,name,price) select $1,$2,$3 where not exists (select 1 from addons where key=$1)", [k,n,p]);
+      for (const k of ["compliance-suite","vpp","document-library"])
+        await run("insert into tenant_addons (tenant_id,addon_key,active,activated_at) select 'tenant-helios',$1,true,now() where not exists (select 1 from tenant_addons where tenant_id='tenant-helios' and addon_key=$1)", [k]);
+      for (const [k,ti,b] of [["rep-gridconnect","Grid-Connect Solar Installation — Compliance Report","<h1>Grid-Connect Solar Installation — Compliance Report</h1><p>AS/NZS 5033 · 4777.1 · 3000</p>"],["rep-instmanual","Solar Installation Manual & Handover Pack","<h1>Solar Installation Manual & Handover Pack</h1><p>Full AS/NZS-compliant install procedure, photos, sign-off.</p>"]])
+        await run("insert into report_templates (key,category,title,body_html) select $1,'compliance',$2,$3 where not exists (select 1 from report_templates where key=$1)", [k,ti,b]);
+      await run("insert into invoices (id,tenant_id,client_id,number,amount,status,is_demo) select 'inv-2048','tenant-helios','c-adam','INV-2048',5880,'due',true where not exists (select 1 from invoices where id='inv-2048')");
+      console.log("Sample tenant 'Helios Solar' ensured (functional example for the reseller portal).");
     }
 
     // Safety: the seeded demo invoice must never be chargeable on live Stripe keys.
