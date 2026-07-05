@@ -755,7 +755,7 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 // ============================================================
 // TENANT LIFECYCLE (reseller-only): list, provision, plan, suspend
 // ============================================================
-const PLAN_PRICES = { Starter: 179, Growth: 499, Scale: 899 };
+const PLAN_PRICES = { Starter: 199, Growth: 499, Scale: 899 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants order by created_at");
