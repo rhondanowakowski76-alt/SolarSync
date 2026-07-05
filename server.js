@@ -142,6 +142,18 @@ app.post("/api/tenants/:id/addons/:key", A.authRequired, A.requireRole("reseller
   ok(res, { ok: true });
 }));
 
+// Reseller "Support view": the owner can step into the tenant/contractor/
+// client portal shells to test that the app's mechanics work — WITHOUT ever
+// seeing a real tenant's private records. Every data read for a reseller token
+// is scoped to the reseller's own 'reseller-platform' book by tenantOf(), so no
+// customer PII, money, documents or messages are ever served here. Entering
+// support view is a deliberate, audited action.
+app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const portal = (req.body && req.body.portal) || null;
+  await audit(req.user.sub, "support_view_enter", portal, "reseller-platform", { ua: req.headers["user-agent"] || null });
+  ok(res, { ok: true });
+}));
+
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
 // Uses the Anthropic API when ANTHROPIC_API_KEY is set in the
