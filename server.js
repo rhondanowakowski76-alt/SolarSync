@@ -937,7 +937,7 @@ app.get("/api/branding", A.authRequired, h(async (req, res) => {
   ok(res, (t && t.branding) || {});
 }));
 
-app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin"), h(async (req, res) => {
+app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
   const tid = tenantOf(req);
   const d = req.body || {};
   const branding = {
@@ -945,7 +945,13 @@ app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin"), h(async 
     glow: d.glow, name: d.name, tagline: d.tagline, logo_url: d.logo_url,
   };
   Object.keys(branding).forEach(k => branding[k] === undefined && delete branding[k]);
-  await run("update tenants set branding=$1::jsonb where id=$2", [JSON.stringify(branding), tid]);
+  // The reseller edits its OWN platform brand under the fixed "reseller-platform" book,
+  // which has no tenants row until first save, so upsert it.
+  if (tid === "reseller-platform") {
+    await run("insert into tenants (id, name, branding) values ($1, $2, $3::jsonb) on conflict (id) do update set branding = excluded.branding", [tid, "SolarSync", JSON.stringify(branding)]);
+  } else {
+    await run("update tenants set branding=$1::jsonb where id=$2", [JSON.stringify(branding), tid]);
+  }
   await audit(req.user.sub, "update_branding", tid, tid);
   ok(res, branding);
 }));
