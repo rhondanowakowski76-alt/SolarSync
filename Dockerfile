@@ -1,25 +1,38 @@
-FROM node:22-bookworm-slim
-
-# CA certs for outbound HTTPS (Stripe, DigitalOcean Spaces, etc.)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates && rm -rf /var/lib/apt/lists/*
+# Multi-stage build - Builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+# Copy and install dependencies only
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY . .
+# Multi-stage build - Runtime
+FROM node:22-alpine
 
-# Local data dir. NOTE: on DigitalOcean App Platform the container filesystem is
-# ephemeral and is wiped on every deploy/restart. For persistent data use a
-# DigitalOcean Managed Postgres database and point the app at it via env vars
-# (e.g. DATABASE_URL) instead of relying on this path.
-RUN mkdir -p /data
-ENV DB_PATH=/data/solarsync.db
+# Install only necessary system packages
+RUN apk add --no-cache ca-certificates
+
+# Create non-root user for security
+RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
+
+WORKDIR /app
+
+# Copy node_modules from builder
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy application code with proper ownership
+COPY --chown=app:app . .
+
+# Create data directory
+RUN mkdir -p /data && chown -R app:app /data
+
+# Switch to non-root user
+USER app
+
 ENV NODE_ENV=production
+ENV DB_PATH=/data/solarsync.db
 
 EXPOSE 3000
 
-# Seed only if the database doesn't exist yet, then start.
 CMD ["sh", "-c", "node seed-if-empty.js && node server.js"]
