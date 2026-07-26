@@ -1,39 +1,27 @@
-# Multi-stage build - Builder
-FROM node:22-alpine AS builder
-
+# ---- deps stage: install with npm, then discard npm itself ----
+FROM node:22-alpine AS deps
 WORKDIR /app
-
-# Copy and install dependencies only
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-# Multi-stage build - Runtime
+# ---- runtime stage: no npm/npx/corepack shipped, no Perl, no glibc ----
 FROM node:22-alpine
-
 RUN apk add --no-cache ca-certificates \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
-              /usr/local/lib/node_modules/corepack /usr/local/bin/corepack
-
-# Create non-root user for security
-RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
+              /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+    && addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 
-# Copy node_modules from builder
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy application code with proper ownership
-COPY --chown=app:app . .
-
-# Create data directory
-RUN mkdir -p /data && chown -R app:app /data
-
-# Switch to non-root user
-USER app
-
-ENV NODE_ENV=production
+RUN mkdir -p /data && chown -R app:app /app /data
 ENV DB_PATH=/data/solarsync.db
+ENV NODE_ENV=production
 
+USER app
 EXPOSE 3000
 
 CMD ["sh", "-c", "node seed-if-empty.js && node server.js"]
+
+
