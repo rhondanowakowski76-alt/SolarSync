@@ -305,6 +305,15 @@ async function migrate() {
     `alter table beta_testers add column if not exists revoked_at timestamptz`,
     `alter table beta_testers add column if not exists last_seen timestamptz`,
     `alter table beta_testers add column if not exists use_count int default 0`,
+    // staff-seats: per-tenant staff/contractor seat management.
+    `alter table tenants add column if not exists staff_seat_limit int not null default 3`,
+    `create table if not exists tenant_staff (
+      id text primary key, tenant_id text not null, name text not null, email text,
+      role text not null default 'staff', member_type text not null default 'employee',
+      counts_seat boolean not null default true, status text not null default 'active',
+      pin_hash text, created_by text, created_at timestamptz default now(),
+      constraint tenant_staff_email_unique unique (tenant_id, email))`,
+    `create index if not exists tenant_staff_idx on tenant_staff (tenant_id, status)`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

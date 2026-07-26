@@ -5,20 +5,25 @@
 //   const staffSeats = require('./staff-seats');
 //   app.use('/api/staff', staffSeats);           // after your auth middleware
 //
-// ── ASSUMPTIONS TO CONFIRM (edit if your names differ) ───────────────────
-//   1. `./db` exports an async `query(sql, params)` returning { rows }.
-//      If db.js exports a pg Pool instead, change: const db = require('./db');
-//      to `const pool = require('./db'); const db = { query: (s,p)=>pool.query(s,p) };`
-//   2. Your auth middleware sets req.user = { id, role, tenant_id }.
-//      role values here: 'reseller' (super) can touch any tenant;
-//      'admin' is a tenant admin bounded by seat limit.
-//   3. Tenant table is "tenants" with column staff_seat_limit (see the .sql).
+// Wired into server.js as:
+//   app.use('/api/staff', A.authRequired, require('./staff-seats'));
+//
+// Matches this app's actual conventions (confirmed against auth.js/db.js):
+//   - req.user = { sub, app_role, tenant_id, display_name } (from auth.js JWT).
+//   - app_role values: 'reseller' (super, any tenant) | 'tenant_admin' (bounded
+//     by seat limit) | 'staff' | 'contractor' | 'client'.
+//   - All IDs (tenants.id, tenant_staff.id) are text, generated with db.js's
+//     rid() — not integers/SERIAL.
+//   - db.js exports query(sql, params) returning { rows }, plus rid().
+//   - staff_seat_limit column + tenant_staff table are created automatically
+//     by db.js's migrate() (runs on every boot) — no manual SQL needed.
 // ─────────────────────────────────────────────────────────────────────────
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
 const db = require('./db');
+const { rid } = db;
 
 // Map subscription plan -> number of staff seats. Tune to your Stripe prices.
 const PLAN_SEATS = {
@@ -32,10 +37,10 @@ const PLAN_SEATS = {
 // Reseller may pass ?tenant_id / body.tenant_id for any tenant; others are locked
 // to their own token's tenant_id.
 function resolveTenantId(req) {
-  const isReseller = req.user && req.user.role === 'reseller';
+  const isReseller = req.user && req.user.app_role === 'reseller';
   const requested = req.body.tenant_id || req.query.tenant_id;
-  if (isReseller && requested) return Number(requested);
-  return req.user ? Number(req.user.tenant_id) : null;
+  if (isReseller && requested) return String(requested);
+  return req.user ? req.user.tenant_id || null : null;
 }
 
 function requireAuth(req, res, next) {
@@ -45,8 +50,8 @@ function requireAuth(req, res, next) {
 
 // Only reseller or a tenant admin may manage staff.
 function requireManager(req, res, next) {
-  const role = req.user && req.user.role;
-  if (role === 'reseller' || role === 'admin') return next();
+  const role = req.user && req.user.app_role;
+  if (role === 'reseller' || role === 'tenant_admin') return next();
   return res.status(403).json({ error: 'Not allowed to manage staff' });
 }
 
@@ -92,7 +97,7 @@ router.post('/', requireAuth, requireManager, async (req, res) => {
 
   try {
     // Reseller bypasses the seat limit; tenant admins are bounded by it.
-    if (req.user.role !== 'reseller' && counts_seat) {
+    if (req.user.app_role !== 'reseller' && counts_seat) {
       const usage = await getSeatUsage(tenantId);
       if (usage.seats_used >= usage.seat_limit) {
         return res.status(409).json({
@@ -105,14 +110,14 @@ router.post('/', requireAuth, requireManager, async (req, res) => {
     }
 
     const pin_hash = pin ? await bcrypt.hash(String(pin), 10) : null;
-    const created_by = req.user.email || req.user.id || 'system';
+    const created_by = req.user.display_name || req.user.sub || 'system';
 
     const ins = await db.query(
       `INSERT INTO tenant_staff
-         (tenant_id, name, email, role, member_type, counts_seat, pin_hash, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (id, tenant_id, name, email, role, member_type, counts_seat, pin_hash, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id, name, email, role, member_type, counts_seat, status, created_at`,
-      [tenantId, name, email, role, member_type, counts_seat, pin_hash, created_by]
+      [rid(), tenantId, name, email, role, member_type, counts_seat, pin_hash, created_by]
     );
     const usage = await getSeatUsage(tenantId);
     res.status(201).json({ member: ins.rows[0], ...usage });
@@ -131,7 +136,7 @@ router.delete('/:id', requireAuth, requireManager, async (req, res) => {
     await db.query(
       `UPDATE tenant_staff SET status = 'removed'
         WHERE id = $1 AND tenant_id = $2`,
-      [Number(req.params.id), tenantId]
+      [req.params.id, tenantId]
     );
     const usage = await getSeatUsage(tenantId);
     res.json({ ok: true, ...usage });

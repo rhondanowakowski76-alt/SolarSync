@@ -7,6 +7,7 @@ const { rows, one, run, rid, audit } = require("./db");
 const A = require("./auth");
 const QRCode = require("qrcode");
 const erp = require("./erp");
+const staffSeats = require("./staff-seats");
 
 const app = express();
 app.use(express.json({ limit: "12mb" }));
@@ -1469,6 +1470,11 @@ app.get("/api/roof-image", (req, res) => {
 // financial reports, BAS, bank rec, Xero/MYOB export (erp.js)
 // ============================================================
 erp.register(app, { h, ok, tenantOf });
+
+// ============================================================
+// Staff & contractor seat management (staff-seats.js)
+// ============================================================
+app.use("/api/staff", A.authRequired, staffSeats);
 
 // ============================================================
 // Health + serve the front-end
