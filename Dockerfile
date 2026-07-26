@@ -10,8 +10,9 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # Multi-stage build - Runtime
 FROM node:22-alpine
 
-# Install only necessary system packages
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+              /usr/local/lib/node_modules/corepack /usr/local/bin/corepack
 
 # Create non-root user for security
 RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
