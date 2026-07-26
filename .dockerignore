@@ -1,1 +1,17 @@
-node_modules npm-debug.log .git .gitignore .env .env.local .env.*.local dist build .DS_Store *.log .vscode .idea coverage .nyc_output
+node_modules
+data
+*.log
+.env
+.git
+.github
+.gitignore
+README.md
+DEPLOY-SETUP.md
+CHANGES-fly-removal.md
+*.doc
+GITKEE~1.TXT
+MIGRAT~1.SQL
+index (1).html
+index.html (2).html
+index.html.html
+public/index (1).html
