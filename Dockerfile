@@ -15,8 +15,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN mkdir -p /data && chown -R app:app /app /data
-ENV DB_PATH=/data/solarsync.db
+RUN mkdir -p /app/data/pg && chown -R app:app /app
 ENV NODE_ENV=production
 
 USER app
