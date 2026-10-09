@@ -1,7 +1,7 @@
 // SolarSync — tenant subscriptions through Stripe.
 //
 //   Plans (AUD per month, ex-GST; GST is added at checkout):
-//     Starter $199 · 5 seats   Growth $499 · 25 seats   Scale $899 · unlimited
+//     Solo $79 · 2 seats   Starter $199 · 5 seats   Growth $499 · 25 seats   Scale $899 · unlimited
 //   Extra seat: $15/month each. Add-ons from the `addons` table (AI assistant $19).
 //
 //   - A seat is any active tenant login: tenant admins, staff and contractors.
@@ -17,6 +17,7 @@ const { rows, one, run, audit } = require("./db");
 const A = require("./auth");
 
 const PLANS = {
+  Solo: { price: 79, seats: 2 },
   Starter: { price: 199, seats: 5 },
   Growth: { price: 499, seats: 25 },
   Scale: { price: 899, seats: null },   // unlimited

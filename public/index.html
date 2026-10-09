@@ -707,6 +707,7 @@ button { font-family: var(--font-head); cursor: pointer; }
 
 /* ---------- plan / priority tags ---------- */
 .plan-tag, .pri-tag { font-family: var(--font-head); font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.02em; }
+.plan-tag.solo { color: var(--tx-dim); background: rgba(200,200,200,0.08); box-shadow: inset 0 0 0 1px rgba(200,200,200,0.16); }
 .plan-tag.starter { color: var(--silver); background: rgba(200,200,200,0.12); box-shadow: inset 0 0 0 1px rgba(200,200,200,0.2); }
 .plan-tag.growth { color: var(--blue-light); background: rgba(58,125,255,0.12); box-shadow: inset 0 0 0 1px rgba(58,125,255,0.25); }
 .plan-tag.scale { color: #fff; background: var(--accent); }
@@ -11532,8 +11533,9 @@ const R_ACTIVITY = [
 ];
 
 const PLANS = [
-  { name:"Starter", price:199, feats:["1 portal","5 contractors","Email support"] },
-  { name:"Growth",  price:499, feats:["White-label","25 contractors","Client portal","Priority support"] },
+  { name:"Solo",    price:79,  feats:["1 portal","2 seats","Email support"] },
+  { name:"Starter", price:199, feats:["1 portal","5 seats","Email support"] },
+  { name:"Growth",  price:499, feats:["White-label","25 seats","Client portal","Priority support"] },
   { name:"Scale",   price:899, feats:["Full white-label","Unlimited seats","Financials & payroll","Dedicated CSM"], pop:true },
 ];
 
@@ -12542,6 +12544,7 @@ function ResellerTenants() {
             <select className="field-input" value={planFilter} onChange={e=>setPlanFilter(e.target.value)}
               style={{ height:34,padding:"0 12px",width:130,fontSize:13 }}>
               <option value="all">All plans</option>
+              <option value="solo">Solo</option>
               <option value="starter">Starter</option>
               <option value="growth">Growth</option>
               <option value="scale">Scale</option>
@@ -13430,6 +13433,9 @@ function downloadDocAsWord(title, htmlBody) {
 
 const RDOC_INITIAL = [
   /* ── Subscription Plans ─ */
+  { id: "pkg-solo", category: "packages", price: "$79 / mo", title: "Solo Plan — Sales Sheet",
+    desc: "For sole traders and two-person teams.",
+    body: `<h1>SolarSync Solo Plan</h1><p><strong>$79 per month (ex-GST) &bull; No lock-in contract &bull; 14-day free trial</strong></p><hr><h2>Everything a sole trader needs — in one place</h2><p>Quotes with the PV designer and STC rebate, job scheduling, onsite AS/NZS compliance forms with digital sign-off, site photos, invoicing and a branded customer portal. No juggling three or four separate tools.</p><h2>What's Included</h2><ul><li><strong>2 seats</strong> — you and one other person (extra seats $15/month)</li><li><strong>1 branded portal</strong> plus a customer login portal</li><li><strong>Job pipeline, scheduling and contractor app</strong></li><li><strong>AS/NZS compliance checklists</strong> and document storage</li><li><strong>Email support</strong></li></ul><h2>Grow when you're ready</h2><p>Move up to Starter (5 seats), Growth (25) or Scale (unlimited) at any time — the difference is charged pro-rata.</p><table><tr><th>Plan</th><th>Monthly Price</th><th>Seats</th><th>Portals</th></tr><tr><td>Solo</td><td>$79 / month</td><td>2 seats</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel or upgrade anytime.</em></p>` },
   { id: "pkg-starter", category: "packages", price: "$199 / mo", title: "Starter Plan — Sales Sheet",
     desc: "One-page overview of the Starter plan for prospective tenants.",
     body: `<h1>SolarSync Starter Plan</h1><p><strong>$199 per month &bull; No lock-in contract</strong></p><hr><h2>Your complete solar business portal — from day one</h2><p>The Starter plan gives small solar businesses everything they need to run a professional, branded operation. Manage jobs, clients, and compliance in one place — with your logo on every page.</p><h2>What's Included</h2><ul><li><strong>1 white-labeled portal</strong> — your branding, your colours, your domain</li><li><strong>5 contractor seats</strong> — manage your install team with role-based access</li><li><strong>Client login portal</strong> — clients can view their system, documents, and job status</li><li><strong>Job pipeline</strong> — enquiry to handover in one visual workflow</li><li><strong>AS/NZS compliance checklists</strong> — grid-connect, off-grid, battery, replacement</li><li><strong>Photo documentation</strong> — upload and tag install photos per job</li><li><strong>Onsite report forms with digital sign-off</strong></li><li><strong>Email support</strong> — 2 business day response</li></ul><h2>Best For</h2><p>Solar businesses completing 1–15 installs per month that want to look professional, stay compliant, and centralise job management without a large tech overhead.</p><h2>Pricing</h2><table><tr><th>Plan</th><th>Monthly Price</th><th>Contractors</th><th>Portals</th></tr><tr><td>Starter</td><td>$199 / month</td><td>5 seats</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel or upgrade anytime.</em></p>` },
@@ -19409,7 +19415,7 @@ function ResellerAnalytics() {
         { l: "Logo Churn (90d)", v: "0%", d: "0 cancellations", i: "check" },
       ];
   // Plan distribution from the live tenant set (demo includes the showcase).
-  const planRows = [["Scale", "var(--blue-mid)"], ["Growth", "var(--blue-light)"], ["Starter", "var(--silver)"]]
+  const planRows = [["Scale", "var(--blue-mid)"], ["Growth", "var(--blue-light)"], ["Starter", "var(--silver)"], ["Solo", "var(--tx-dim)"]]
     .map(([name, col]) => [name, agg.count ? Math.round(agg.ids.filter(id => (BRANDS[id] || {}).plan === name).length / agg.count * 100) : 0, col]);
   const topTenants = [...agg.ids].sort((a, b) => ((BRANDS[b] || {}).mrr || 0) - ((BRANDS[a] || {}).mrr || 0)).slice(0, 5);
   return (

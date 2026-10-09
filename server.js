@@ -863,7 +863,7 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 // ============================================================
 // TENANT LIFECYCLE (reseller-only): list, provision, plan, suspend
 // ============================================================
-const PLAN_PRICES = { Starter: 199, Growth: 499, Scale: 899 };
+const PLAN_PRICES = { Solo: 79, Starter: 199, Growth: 499, Scale: 899 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants where id <> 'reseller-platform' order by created_at");
@@ -950,7 +950,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   const name = String(b.name || "").trim();
   const domain = String(b.domain || "").trim().toLowerCase();
   const region = String(b.region || "").trim();
-  const plan = ["Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
+  const plan = ["Solo", "Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
   const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) return res.status(400).json({ error: "name_required" });
   if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
@@ -977,7 +977,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
 
 app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const plan = String((req.body || {}).plan || "");
-  if (!["Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
+  if (!["Solo", "Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
   const cur = await one("select id from tenants where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
   await run("update tenants set plan=$1 where id=$2", [plan, cur.id]);
