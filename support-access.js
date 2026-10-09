@@ -16,6 +16,7 @@
 //     so masked placeholder values can never be saved back over real records.
 //   - Requesting, entering, every change, exiting, revoking and closing are audited.
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 const { rows, one, run, rid, audit } = require("./db");
 const A = require("./auth");
 
@@ -53,6 +54,15 @@ const PATH_KEYS = [
   [/^\/api\/(clients|team|staff|users)/, ["name", "display_name", "licence"]],
   [/^\/api\/bookings/, ["title"]],
 ];
+
+// Per-client request caps. `api` is a generous ceiling for every /api call (the
+// app loads many endpoints at once); `strict` covers support-access and branding
+// changes, which nobody needs to hit more than a few times a minute.
+const limits = {
+  api: rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false }),
+  strict: rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+    message: { error: "rate_limited" } }),
+};
 
 const matches = (p, list) => list.some(x => x.endsWith("/") ? p.startsWith(x) : p === x);
 
@@ -122,6 +132,8 @@ function register(app, { h, ok }) {
   const isTenantAdmin = req => req.user.app_role === "tenant_admin" && !req.user.support;
 
   // Tenant opens a request — this is their consent, for a limited time.
+  app.use("/api/support-requests", limits.strict);
+
   app.post("/api/support-requests", A.authRequired, A.requireRole("tenant_admin"), h(async (req, res) => {
     if (!isTenantAdmin(req)) return res.status(403).json({ error: "forbidden" });
     const message = String((req.body && req.body.message) || "").trim().slice(0, 2000);
@@ -192,4 +204,4 @@ function register(app, { h, ok }) {
   }));
 }
 
-module.exports = { guard, register, maskDeep };
+module.exports = { guard, register, maskDeep, limits };

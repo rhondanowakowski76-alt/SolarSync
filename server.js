@@ -11,9 +11,12 @@ const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
 
 const app = express();
+// One proxy hop in front in production (DigitalOcean App Platform), so client IPs
+// come from X-Forwarded-For — needed for per-client rate limits.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "12mb" }));
 // Tenant-requested support sessions: restrict + mask every /api call they make.
-app.use("/api", supportAccess.guard());
+app.use("/api", supportAccess.limits.api, supportAccess.guard());
 
 const ok = (res, body) => res.json(body);
 // The reseller keeps its OWN ERP book under the fixed id "reseller-platform"
@@ -962,7 +965,7 @@ function cleanBranding(d) {
   return { branding };
 }
 
-app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
+app.put("/api/branding", supportAccess.limits.strict, A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
   const tid = tenantOf(req);
   const c = cleanBranding(req.body);
   if (c.error) return res.status(c.status).json({ error: c.error });
@@ -979,7 +982,7 @@ app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller
 }));
 
 // Reseller sets up a tenant's branding on their behalf (tenant can change it later).
-app.put("/api/tenants/:id/branding", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+app.put("/api/tenants/:id/branding", supportAccess.limits.strict, A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const t = await one("select id from tenants where id=$1 and id <> 'reseller-platform'", [req.params.id]);
   if (!t) return res.status(404).json({ error: "not_found" });
   const c = cleanBranding(req.body);
