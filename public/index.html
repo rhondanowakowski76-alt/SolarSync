@@ -13625,11 +13625,11 @@ window.ssAutofillForm = function (html, c) {
   // to the published copy the customer sees (see DocFillFlow), not in the editor.
   var bodyMatch = out.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   var bodyInner = bodyMatch ? bodyMatch[1] : out.replace(/<!doctype[\s\S]*?>/i, "").replace(/<\/?html[^>]*>/gi, "").replace(/<head[\s\S]*?<\/head>/i, "");
-  bodyInner = bodyInner
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<button[^>]*(?:print-btn|no-print)[\s\S]*?<\/button>/gi, "");
-  return bodyInner;
+  // Parse rather than regex-strip, so oddly written closing tags can't slip through.
+  var tpl = document.createElement("template");
+  tpl.innerHTML = bodyInner;
+  tpl.content.querySelectorAll("script, style, button.print-btn, button.no-print, .no-print button").forEach(function (el) { el.remove(); });
+  return tpl.innerHTML;
 };
 
 // Pull the <style> blocks out of a form's HTML so the published copy can be re-styled
@@ -17005,7 +17005,7 @@ function wrapForm(brand, title, standard, refPrefix, body, client) {
   <div style="text-align:right;color:#5a6678;font-size:12.5px;">${client.phone ? `<div>${client.phone}</div>` : ""}${client.email ? `<div>${client.email}</div>` : ""}${client.system ? `<div style="color:#8a9ab5;">${client.system}</div>` : ""}</div>
 </div>` : "";
   const autofill = (client && client.name) ? `
-<scr${""}ipt>(function(){var C=${JSON.stringify(client)};function f(){document.querySelectorAll('label').forEach(function(l){var t=(l.textContent||'').toLowerCase();var p=l.parentElement;var i=p&&p.querySelector('input.il,input,textarea');if(!i||i.value)return;var v='';if(/electrician|installer|designer|witness|inspector|accreditation|licence|license/.test(t))return;if(/client|property owner|customer|^owner|prepared for/.test(t))v=C.contact?(C.name+' — '+C.contact):C.name;else if(/site|installation address|property address|^address|premises/.test(t))v=C.address||'';else if(/phone|mobile|contact number|contact phone/.test(t))v=C.phone||'';else if(/email/.test(t))v=C.email||'';if(v){i.value=v;i.setAttribute('value',v);}});}if(document.readyState!=='loading')f();else document.addEventListener('DOMContentLoaded',f);})();<\/scr${""}ipt>` : "";
+<scr${""}ipt>(function(){var C=${JSON.stringify(client).replace(/</g, "\\u003c")};function f(){document.querySelectorAll('label').forEach(function(l){var t=(l.textContent||'').toLowerCase();var p=l.parentElement;var i=p&&p.querySelector('input.il,input,textarea');if(!i||i.value)return;var v='';if(/electrician|installer|designer|witness|inspector|accreditation|licence|license/.test(t))return;if(/client|property owner|customer|^owner|prepared for/.test(t))v=C.contact?(C.name+' — '+C.contact):C.name;else if(/site|installation address|property address|^address|premises/.test(t))v=C.address||'';else if(/phone|mobile|contact number|contact phone/.test(t))v=C.phone||'';else if(/email/.test(t))v=C.email||'';if(v){i.value=v;i.setAttribute('value',v);}});}if(document.readyState!=='loading')f();else document.addEventListener('DOMContentLoaded',f);})();<\/scr${""}ipt>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>${title} — ${brand.name}</title>
 <style>:root{--acc:${acc};}${FORM_CSS}</style>
