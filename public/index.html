@@ -10255,7 +10255,7 @@ async function calSaveWithCrewCheck(send, body) {
 
 function calMe() {
   const u = window.ssApi && window.ssApi.getUser ? window.ssApi.getUser() : null;
-  return u || { display_name: "Dan Webb", app_role: "contractor" };   // design preview
+  return u ? { ...u, sub: u.id } : { display_name: "Dan Webb", app_role: "contractor" };   // design preview
 }
 
 // Team member names for crew pickers (falls back to the preview crew when signed out).
@@ -10310,7 +10310,7 @@ function calAvailEvents(list) {
     const d = new Date(a.date_from + "T00:00:00"), end = new Date((a.date_to || a.date_from) + "T00:00:00");
     for (let n = 0; d <= end && n < 92; n++, d.setDate(d.getDate() + 1)) {
       out.push({ id: a.id + "@" + n, _av: a, type: a.kind === "unavailable" ? "unavailable" : "personal",
-        title: a.kind === "unavailable" ? a.person + " — away" : (a.title || "Personal"),
+        title: a.kind === "unavailable" ? "Away: " + a.person : (a.title || "Personal"),
         date: calFmt(d.getFullYear(), d.getMonth(), d.getDate()), time: a.time || "", end: a.end_time || "",
         installer: a.person, status: "confirmed", notes: a.notes || "" });
     }
@@ -15132,7 +15132,7 @@ function ContractorDocs({ brand }) {
   React.useEffect(() => {
     if (!authed) return undefined;
     let alive = true;
-    api.get("/field-docs?scope=compliance").then(r => { if (alive && Array.isArray(r)) setDocs(r.filter(d => d.user_id === me.sub)); }).catch(() => {});
+    api.get("/field-docs?scope=compliance").then(r => { if (alive && Array.isArray(r)) setDocs(r.filter(d => d.user_id === me.id)); }).catch(() => {});
     api.get("/bookings").then(r => {
       if (!alive || !Array.isArray(r)) return;
       const mine = r.filter(b => String(b.installer || "").split(",").map(x => x.trim()).includes(me.display_name));
@@ -15229,7 +15229,7 @@ function ContractorDocs({ brand }) {
             {job && uploadButtons({ scope: "job", job_id: job })}
           </div>
           {job && jobDocs.length === 0 && <div className="card-sub" style={{ padding: "10px 4px" }}>No documents on this job yet.</div>}
-          {jobDocs.map(d => docRow(d, d.user_id === me.sub))}
+          {jobDocs.map(d => docRow(d, d.user_id === me.id))}
         </div>
       )}
     </div>
