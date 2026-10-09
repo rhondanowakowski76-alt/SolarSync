@@ -947,9 +947,16 @@ app.get("/api/branding", A.authRequired, h(async (req, res) => {
 app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
   const tid = tenantOf(req);
   const d = req.body || {};
+  const hex = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
+  if (Array.isArray(d.accent) && !d.accent.slice(0, 3).every(c => hex.test(String(c)))) return res.status(400).json({ error: "bad_colour" });
+  if (d.logo_url != null && (typeof d.logo_url !== "string" || !/^(data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,|https:\/\/)/.test(d.logo_url))) return res.status(400).json({ error: "bad_logo" });
+  if (d.logo_url && d.logo_url.length > 1500000) return res.status(413).json({ error: "logo_too_large" });
   const branding = {
-    accent: Array.isArray(d.accent) ? d.accent.slice(0, 3) : undefined,
-    glow: d.glow, name: d.name, tagline: d.tagline, logo_url: d.logo_url,
+    accent: Array.isArray(d.accent) ? d.accent.slice(0, 3).map(String) : undefined,
+    glow: typeof d.glow === "string" && /^\d{1,3},\d{1,3},\d{1,3}$/.test(d.glow) ? d.glow : undefined,
+    name: d.name != null ? String(d.name).slice(0, 80) : undefined,
+    tagline: d.tagline != null ? String(d.tagline).slice(0, 140) : undefined,
+    logo_url: d.logo_url || undefined,
   };
   Object.keys(branding).forEach(k => branding[k] === undefined && delete branding[k]);
   // The reseller edits its OWN platform brand under the fixed "reseller-platform" book,

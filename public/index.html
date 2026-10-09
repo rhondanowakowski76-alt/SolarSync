@@ -42756,18 +42756,40 @@ function BrandingEditor({ brand }) {
   const [name, setName] = useBR(brand.name);
   const [tagline, setTagline] = useBR(brand.tagline || "Premium solar solutions");
   const [showPB, setShowPB] = useBR(false);
-  const [logoUrl, setLogoUrl] = useBR(null);
+  // Start from what's already published, so re-publishing never drops the saved logo.
+  const [logoUrl, setLogoUrl] = useBR(brand.logo_url || null);
   const [customHex, setCustomHex] = useBR("");
+  // Full custom colour set: [light, main, dark]. Null = use the palette above.
+  const [custom, setCustom] = useBR(() => (brand.accent && !PALETTES.some(p => p.accent[1] === brand.accent[1]) && !brand.realLogo) ? brand.accent.slice(0, 3) : null);
   const [photoAssets, setPhotoAssets] = useBR([]);
   const fileRef = useRefBR(null);
   const photoRef = useRefBR(null);
   const photoCamRef = useRefBR(null);
 
+  // Logos: SVG kept as-is (up to 300 KB); photos/PNGs are scaled to fit 600px
+  // and kept as PNG so transparency survives. Keeps every portal load light.
   const handleLogoFile = e => {
     const file = e.target.files[0];
+    e.target.value = "";
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => setLogoUrl(ev.target.result);
+    reader.onload = ev => {
+      const src = ev.target.result;
+      if (file.type === "image/svg+xml") {
+        if (src.length > 400000) return window.ssToast && window.ssToast("That SVG is too large — keep it under 300 KB");
+        return setLogoUrl(src);
+      }
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 600 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        setLogoUrl(c.toDataURL("image/png"));
+      };
+      img.onerror = () => window.ssToast && window.ssToast("Couldn't read that image — try PNG, JPG or SVG");
+      img.src = src;
+    };
     reader.readAsDataURL(file);
   };
   const handlePhotoFile = e => {
@@ -42780,8 +42802,13 @@ function BrandingEditor({ brand }) {
   };
 
   const isValidHex = h => /^#[0-9a-f]{6}$/i.test(h);
-  const hexPal = isValidHex(customHex)
-    ? { id: "custom", name: "Custom", accent: [customHex, customHex + "bb", customHex + "66"], glow: "127,127,127" }
+  const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mix = (h, to, t) => "#" + hexRgb(h).map(v => Math.round(v + (to - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
+  // One colour → a matching light / main / dark set.
+  const shadesOf = h => [mix(h, 255, 0.45), h.toUpperCase(), mix(h, 0, 0.45)];
+  const customSet = custom || (isValidHex(customHex) ? shadesOf(customHex) : null);
+  const hexPal = customSet
+    ? { id: "custom", name: "Custom", accent: customSet, glow: hexRgb(customSet[1]).join(",") }
     : null;
 
   const pal = hexPal || PALETTES.find(p => p.id === palette) || PALETTES[0];
@@ -42791,12 +42818,15 @@ function BrandingEditor({ brand }) {
   // Persist to the backend and apply live across every portal (ss:branding-changed
   // is handled in main.jsx, which re-themes the running app immediately).
   const saveBrand = async () => {
-    const branding = { accent: pal.accent, glow: pal.glow, name, tagline };
-    if (logoUrl) branding.logo_url = logoUrl;
+    const branding = { accent: pal.accent, glow: pal.glow, name, tagline, logo_url: logoUrl || null };
     const api = window.ssApi;
     if (api && api.getToken && api.getToken()) {
       try { await api.put("/branding", branding); }
-      catch (e) { window.ssToast && window.ssToast("Could not save branding — check your connection"); return; }
+      catch (e) {
+        const code = e && e.data && e.data.error;
+        window.ssToast && window.ssToast(code === "logo_too_large" ? "Logo is too large — try a smaller file" : code === "support_read_only" ? "Not allowed in this session" : "Could not save branding — check your connection");
+        return;
+      }
     }
     window.dispatchEvent(new CustomEvent("ss:branding-changed", { detail: branding }));
     window.ssToast && window.ssToast("Brand published — all portals updated for " + name);
@@ -42844,7 +42874,7 @@ function BrandingEditor({ brand }) {
                   if (!p) return null;
                   const isOn = !hexPal && palette === p.id;
                   return (
-                    <button key={p.id} onClick={() => { setPalette(p.id); setCustomHex(""); }}
+                    <button key={p.id} onClick={() => { setPalette(p.id); setCustomHex(""); setCustom(null); }}
                       title={p.name}
                       style={{ border: isOn ? "2px solid var(--blue-light)" : "1px solid var(--line-strong)", borderRadius: 9, padding: "7px 8px", background: isOn ? "rgba(58,125,255,0.06)" : "rgba(255,255,255,0.02)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 5, alignItems: "center", minWidth: 52 }}>
                       <span style={{ display: "flex", gap: 2 }}>
@@ -42857,18 +42887,31 @@ function BrandingEditor({ brand }) {
               </div>
             </div>
           ))}
-          <label className="field" style={{ marginBottom: 18 }}>
-            <span className="field-label">Custom hex color <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— editable, overrides palette</span></span>
+          <label className="field" style={{ marginBottom: 12 }}>
+            <span className="field-label">Your brand colour <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— hex code or picker; builds light &amp; dark shades for you</span></span>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="color" aria-label="Pick brand colour" value={isValidHex(customHex) ? customHex : (customSet ? customSet[1] : pal.accent[1].slice(0, 7))}
+                onChange={e => { setCustomHex(e.target.value.toUpperCase()); setCustom(null); }}
+                style={{ width: 42, height: 38, padding: 2, border: "1px solid var(--line-strong)", borderRadius: 9, background: "transparent", cursor: "pointer", flexShrink: 0 }} />
               <input className="field-input" placeholder="#3A7DFF" value={customHex}
-                onChange={e => setCustomHex(e.target.value.startsWith("#") ? e.target.value : "#" + e.target.value)}
+                onChange={e => { const v = e.target.value.trim(); setCustomHex(!v ? "" : v.startsWith("#") ? v : "#" + v); setCustom(null); }}
                 style={{ fontFamily: "var(--font-head)", letterSpacing: "0.04em", flex: 1 }} />
-              {isValidHex(customHex) && (
-                <div style={{ width: 36, height: 36, borderRadius: 9, background: customHex, border: "2px solid rgba(255,255,255,0.18)", flexShrink: 0 }} />
-              )}
-              {customHex && <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => setCustomHex("")}>Clear</button>}
+              {(customHex || custom) && <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => { setCustomHex(""); setCustom(null); }}>Clear</button>}
             </div>
           </label>
+          <div className="field" style={{ marginBottom: 18 }}>
+            <span className="field-label">Fine-tune each shade <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— highlights, buttons, headers &amp; dark accents</span></span>
+            <div style={{ display: "flex", gap: 10 }}>
+              {["Light", "Main", "Dark"].map((lbl, i) => (
+                <label key={lbl} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, alignItems: "center", fontSize: 11, color: "var(--tx-dim)", fontFamily: "var(--font-head)" }}>
+                  <input type="color" aria-label={lbl + " shade"} data-testid={"brand-shade-" + i} value={pal.accent[i].slice(0, 7)}
+                    onChange={e => { const next = pal.accent.map(c => c.slice(0, 7)); next[i] = e.target.value.toUpperCase(); setCustom(next); }}
+                    style={{ width: "100%", height: 34, padding: 2, border: "1px solid var(--line-strong)", borderRadius: 8, background: "transparent", cursor: "pointer" }} />
+                  {lbl} · {pal.accent[i].slice(0, 7).toUpperCase()}
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div className="field-label" style={{ marginBottom: 10 }}>Logo</div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, padding: 14, border: logoUrl ? "1px solid rgba(58,125,255,0.3)" : "1.5px dashed var(--line-strong)", borderRadius: 12, background: logoUrl ? "rgba(58,125,255,0.04)" : "transparent" }}>
@@ -42886,7 +42929,7 @@ function BrandingEditor({ brand }) {
               </button>
               {logoUrl && <button className="btn" style={{ padding: "7px 10px", fontSize: 12.5 }} onClick={() => setLogoUrl(null)}>Remove</button>}
             </div>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleLogoFile} />
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-testid="brand-logo-input" style={{ display: "none" }} onChange={handleLogoFile} />
           </div>
 
           <div className="field-label" style={{ marginBottom: 10, marginTop: 18 }}>Brand photos</div>
