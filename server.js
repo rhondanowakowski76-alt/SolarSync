@@ -855,41 +855,68 @@ app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req,
 // use without seeing anyone's private information.
 app.get("/api/tenants/health", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const ts = await rows("select id, name, status, created_at from tenants where id <> 'reseller-platform' order by created_at");
-  const by = async (sql) => { const m = {}; for (const r of await rows(sql)) m[r.tenant_id] = r; return m; };
-  const users = await by(`select tenant_id, count(*)::int as total,
-      count(*) filter (where app_role='tenant_admin')::int as admins,
-      count(*) filter (where app_role='staff')::int as staff,
-      count(*) filter (where app_role='contractor')::int as contractors,
-      count(*) filter (where app_role='client')::int as clients
-    from users where status='active' and tenant_id is not null group by tenant_id`);
-  const logins = await by(`select tenant_id, max(created_at) as last_login,
-      count(*) filter (where created_at > now() - interval '7 days')::int as logins_7d
-    from audit_log where action in ('login','login_backup_code') and tenant_id is not null group by tenant_id`);
+  const by = async (sql, key = r => r.tenant_id) => { const m = {}; for (const r of await rows(sql)) m[key(r)] = r; return m; };
+  const k = (t, role) => t + "|" + role;
+  // Active users and logins per tenant + role (staff/admins = tenant portal).
+  const users = await by(`select tenant_id, app_role, count(*)::int as n from users
+    where status='active' and tenant_id is not null group by tenant_id, app_role`, r => k(r.tenant_id, r.app_role));
+  const logins = await by(`select u.tenant_id, u.app_role, max(a.created_at) as last_login,
+      count(*) filter (where a.created_at > now() - interval '7 days')::int as logins_7d
+    from audit_log a join users u on u.id = a.actor_id
+    where a.action in ('login','login_backup_code') and u.tenant_id is not null
+    group by u.tenant_id, u.app_role`, r => k(r.tenant_id, r.app_role));
   const activity = await by("select tenant_id, max(created_at) as last_activity from audit_log where tenant_id is not null group by tenant_id");
-  const count = (table) => by(`select tenant_id, count(*)::int as n from ${table} where tenant_id is not null group by tenant_id`);
-  const [deals, quotes, invoices, bookings, products, letterheads] = await Promise.all(
-    ["deals", "quotes", "invoices", "bookings", "products", "letterheads"].map(count));
+  const count = (table, where = "true") => by(`select tenant_id, count(*)::int as n from ${table} where tenant_id is not null and ${where} group by tenant_id`);
+  const [deals, quotes, invoices, bookings, products, letterheads, clientsAll, clientsLinked, docs, photos, onsite] = await Promise.all([
+    count("deals"), count("quotes"), count("invoices"), count("bookings"), count("products"), count("letterheads"),
+    count("clients"), count("clients", "user_id is not null"), count("document_publications"),
+    count("job_photos"), count("onsite_reports")]);
   const support = await by("select tenant_id, count(*)::int as n from support_requests where status='open' and expires_at > now() group by tenant_id");
   const n = (m, id) => (m[id] && m[id].n) || 0;
   const DAY = 86400000;
+  const latest = (...ds) => ds.filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null;
+  const stale = d => !d || Date.now() - new Date(d).getTime() > 14 * DAY;
+
   ok(res, ts.map(t => {
-    const u = users[t.id] || {};
-    const lastLogin = logins[t.id] && logins[t.id].last_login;
-    const issues = [];
-    if (t.status !== "active") issues.push("Account " + (t.status || "inactive"));
-    if (!u.admins) issues.push("No active admin");
-    if (!lastLogin) issues.push("Nobody has logged in yet");
-    else if (Date.now() - new Date(lastLogin).getTime() > 14 * DAY) issues.push("No logins for 14+ days");
-    if (!n(letterheads, t.id)) issues.push("Company details (letterhead) not set");
-    if (!n(products, t.id)) issues.push("No products in catalogue");
+    const role = r => ({ n: (users[k(t.id, r)] || {}).n || 0, last: (logins[k(t.id, r)] || {}).last_login || null, w: (logins[k(t.id, r)] || {}).logins_7d || 0 });
+    const adm = role("tenant_admin"), stf = role("staff"), con = role("contractor"), cli = role("client");
+
+    const tenantIssues = [];
+    if (t.status !== "active") tenantIssues.push("Account " + (t.status || "inactive"));
+    if (!adm.n) tenantIssues.push("No active admin");
+    const tLast = latest(adm.last, stf.last);
+    if (!tLast) tenantIssues.push("Nobody has logged in yet");
+    else if (stale(tLast)) tenantIssues.push("No logins for 14+ days");
+    if (!n(letterheads, t.id)) tenantIssues.push("Company details (letterhead) not set");
+    if (!n(products, t.id)) tenantIssues.push("No products in catalogue");
+
+    const conIssues = [];
+    if (!con.n) conIssues.push("No contractor logins set up");
+    else if (!con.last) conIssues.push("Contractors haven't logged in yet");
+    else if (stale(con.last)) conIssues.push("No contractor logins for 14+ days");
+
+    const cliIssues = [];
+    const total = n(clientsAll, t.id), linked = n(clientsLinked, t.id);
+    if (!total) cliIssues.push("No customers yet");
+    else if (!linked) cliIssues.push("No customers have a portal login");
+    else if (linked < total) cliIssues.push((total - linked) + " of " + total + " customers have no portal login");
+    if (linked && !cli.last) cliIssues.push("Customers haven't logged in yet");
+
+    const portal = (users_, last, w, issues, extra) => ({ users: users_, last_login: last, logins_7d: w, issues, health: issues.length ? "check" : "ok", ...extra });
+    const portals = {
+      tenant: portal(adm.n + stf.n, tLast, adm.w + stf.w, tenantIssues,
+        { admins: adm.n, staff: stf.n, counts: { jobs: n(deals, t.id), quotes: n(quotes, t.id), invoices: n(invoices, t.id), bookings: n(bookings, t.id), products: n(products, t.id) } }),
+      contractor: portal(con.n, con.last, con.w, conIssues,
+        { counts: { photos: n(photos, t.id), onsite_reports: n(onsite, t.id) } }),
+      customer: portal(cli.n, cli.last, cli.w, cliIssues,
+        { customers_total: total, customers_with_login: linked, counts: { documents_sent: n(docs, t.id) } }),
+    };
+    const any = Object.values(portals).some(p => p.health !== "ok");
     return {
       id: t.id, name: t.name, status: t.status, created_at: t.created_at,
-      users: { total: u.total || 0, admins: u.admins || 0, staff: u.staff || 0, contractors: u.contractors || 0, clients: u.clients || 0 },
-      last_login: lastLogin || null, logins_7d: (logins[t.id] && logins[t.id].logins_7d) || 0,
       last_activity: (activity[t.id] && activity[t.id].last_activity) || null,
-      counts: { jobs: n(deals, t.id), quotes: n(quotes, t.id), invoices: n(invoices, t.id), bookings: n(bookings, t.id), products: n(products, t.id) },
       open_support_requests: n(support, t.id),
-      issues, health: issues.length ? "check" : "ok",
+      portals, health: any ? "check" : "ok",
     };
   }));
 }));

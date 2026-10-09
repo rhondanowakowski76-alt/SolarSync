@@ -45026,6 +45026,7 @@ function ResellerOverview() {
 function TenantHealthPanel() {
   const [list, setList] = React.useState(null);
   const [err, setErr] = React.useState(false);
+  const [open, setOpen] = React.useState({});
   const load = () => window.ssApi.get("/tenants/health").then(r => { setList(Array.isArray(r) ? r : []); setErr(false); }).catch(() => setErr(true));
   React.useEffect(() => { load(); }, []);
   const ago = d => {
@@ -45033,37 +45034,51 @@ function TenantHealthPanel() {
     const m = Math.round((Date.now() - new Date(d).getTime()) / 60000);
     return m < 60 ? m + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
   };
-  const cell = { padding: "9px 8px", borderTop: "1px solid var(--line)", fontSize: 13, verticalAlign: "top" };
+  const badge = h => <span className={"comp-note " + (h === "ok" ? "ok" : "warn")} style={{ fontSize: 12, whiteSpace: "nowrap" }}>{h === "ok" ? "All good" : "Needs a look"}</span>;
+  const PORTALS = [
+    ["tenant", "Tenant portal", p => p.admins + " admin · " + p.staff + " staff", p => p.counts.jobs + " jobs · " + p.counts.quotes + " quotes · " + p.counts.invoices + " invoices · " + p.counts.products + " products"],
+    ["contractor", "Contractor app", p => p.users + " contractor" + (p.users === 1 ? "" : "s"), p => p.counts.photos + " site photos · " + p.counts.onsite_reports + " onsite reports"],
+    ["customer", "Customer portal", p => p.customers_with_login + " of " + p.customers_total + " customers with a login", p => p.counts.documents_sent + " documents sent"],
+  ];
+  const row = { display: "grid", gridTemplateColumns: "150px 110px 1fr 120px 1.2fr", gap: 10, padding: "8px 4px", borderTop: "1px solid var(--line)", fontSize: 13, alignItems: "start" };
+  const dim = { fontSize: 11.5, color: "var(--tx-dim)" };
   return (
     <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }} data-testid="tenant-health">
       <div className="card-head">
         <div><div className="card-title">Portal health</div>
-          <div className="card-sub">Is each tenant's portal set up and in use? Counts and dates only — no customer, staff or contractor details.</div></div>
+          <div className="card-sub">Each tenant's own portal, contractor app and customer portal. Counts and dates only — no customer, staff or contractor details.</div></div>
         <button className="btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={load}>Refresh</button>
       </div>
       {err ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Couldn't load portal health.</div>
         : list === null ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Loading…</div>
         : !list.length ? <div style={{ fontSize: 13, color: "var(--muted)" }}>No tenants yet.</div>
-        : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr style={{ textAlign: "left", fontSize: 11.5, color: "var(--tx-dim)" }}>
-              <th style={{ padding: "6px 8px" }}>Tenant</th><th style={{ padding: "6px 8px" }}>Health</th>
-              <th style={{ padding: "6px 8px" }}>Users</th><th style={{ padding: "6px 8px" }}>Last login</th>
-              <th style={{ padding: "6px 8px" }}>Last activity</th><th style={{ padding: "6px 8px" }}>Records</th>
-            </tr></thead>
-            <tbody>{list.map(t => (
-              <tr key={t.id}>
-                <td style={cell}><b>{t.name}</b>{t.open_support_requests > 0 && <div style={{ fontSize: 11.5, color: "var(--blue-light)" }}>{t.open_support_requests} open support request</div>}</td>
-                <td style={cell}>
-                  <span className={"comp-note " + (t.health === "ok" ? "ok" : "warn")} style={{ fontSize: 12 }}>{t.health === "ok" ? "All good" : "Needs a look"}</span>
-                  {t.issues.map(i => <div key={i} style={{ fontSize: 11.5, color: "var(--tx-dim)", marginTop: 3 }}>• {i}</div>)}
-                </td>
-                <td style={cell}>{t.users.total}<div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.users.admins} admin · {t.users.staff} staff · {t.users.contractors} contractor · {t.users.clients} customer</div></td>
-                <td style={cell}>{ago(t.last_login)}<div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.logins_7d} logins in 7 days</div></td>
-                <td style={cell}>{ago(t.last_activity)}</td>
-                <td style={cell}><div style={{ fontSize: 12 }}>{t.counts.jobs} jobs · {t.counts.quotes} quotes · {t.counts.invoices} invoices</div><div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.counts.bookings} bookings · {t.counts.products} products</div></td>
-              </tr>
-            ))}</tbody>
-          </table></div>}
+        : <div style={{ overflowX: "auto" }}><div style={{ minWidth: 720 }}>
+          {list.map(t => {
+            const isOpen = open[t.id] != null ? open[t.id] : t.health !== "ok";
+            return (
+              <div key={t.id} data-testid={"health-" + t.id} style={{ borderTop: "1px solid var(--line-strong)", padding: "10px 0" }}>
+                <button onClick={() => setOpen(o => ({ ...o, [t.id]: !isOpen }))}
+                  style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: 0, padding: "2px 4px", cursor: "pointer", color: "inherit", textAlign: "left" }}>
+                  <b style={{ fontSize: 14 }}>{t.name}</b>{badge(t.health)}
+                  <span style={dim}>last activity {ago(t.last_activity)}{t.open_support_requests > 0 ? " · " + t.open_support_requests + " open support request" : ""}</span>
+                  <span style={{ marginLeft: "auto", ...dim }}>{isOpen ? "Hide" : "Show"} portals</span>
+                </button>
+                {isOpen && PORTALS.map(([key, label, who, recs]) => {
+                  const p = t.portals[key];
+                  return (
+                    <div key={key} style={row} data-testid={"health-" + t.id + "-" + key}>
+                      <div style={{ paddingLeft: 12 }}>{label}</div>
+                      <div>{badge(p.health)}</div>
+                      <div>{who(p)}{p.issues.map(i => <div key={i} style={{ ...dim, marginTop: 3 }}>• {i}</div>)}</div>
+                      <div>{ago(p.last_login)}<div style={dim}>{p.logins_7d} logins in 7 days</div></div>
+                      <div style={dim}>{recs(p)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div></div>}
     </div>
   );
 }
