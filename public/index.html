@@ -36056,10 +36056,13 @@ function LoginScreen({ onLogin }) {
 
   // STEP 1 — authenticator code first. Resolve the account and hold the code; the
   // code and PIN are verified together once the PIN is entered on step 2.
+  const nameRef = useRef(null);
   const submitCode = async (val) => {
     const digits = val.replace(/\D/g, "").slice(0, 6);
     setTotp(digits);
     if (digits.length !== 6) return;
+    // Code is entered first; if no name is chosen yet, move on to the name field.
+    if (!userId && name.trim().length < 3) { setError(""); nameRef.current && nameRef.current.focus(); return; }
     setBusy(true); setError("");
     const uid = await resolveUid();
     setBusy(false);
@@ -36205,7 +36208,23 @@ function LoginScreen({ onLogin }) {
           <div className="login-title">Sign in</div>
           <div className="login-sub">{backupMode
             ? "Enter one of your recovery codes."
-            : (known.length && !typingNew ? "Pick your name, then your authenticator code." : "Type your name, then your authenticator code.")}</div>
+            : (known.length && !typingNew ? "Enter your authenticator code, then pick your name." : "Enter your authenticator code, then type your name.")}</div>
+
+          {!backupMode ? <>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>AUTHENTICATOR CODE</div>
+            <div className="totp-wrap">
+              <input ref={codeRef} className="totp-input" type="text" inputMode="numeric" maxLength={6}
+                placeholder="000000" value={totp} onChange={e => submitCode(e.target.value)} autoFocus />
+            </div>
+            <div className="login-sub" style={{ fontSize:12, marginTop:8 }}>Open your authenticator app and type the current 6-digit code — then your name and PIN.</div>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"16px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>YOUR NAME</div>
+          </> : <>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>RECOVERY CODE</div>
+            <input type="text" placeholder="XXXX-XXXX" value={backupCode}
+              onChange={e => setBackupCode(e.target.value.toUpperCase())}
+              style={{ width:"100%", padding:"11px 13px", borderRadius:11, border:"1px solid var(--line-strong)", background:"rgba(255,255,255,0.05)", color:"var(--tx-hi)", fontSize:16, letterSpacing:"0.12em", textAlign:"center", fontFamily:"var(--font-head)" }} />
+            <button className="btn btn-primary" disabled={busy} style={{ width:"100%", marginTop:12, justifyContent:"center" }} onClick={submitBackup}>{busy ? "Checking…" : "Sign in with recovery code"}</button>
+          </>}
 
           {known.length > 0 && !typingNew
             ? <select value={userId}
@@ -36218,7 +36237,8 @@ function LoginScreen({ onLogin }) {
                 {known.map(a => <option key={a.id} value={a.id} style={{ background: "#0e1822", color: "#eaf4ff" }}>{a.display_name} — {ROLE_LABEL[a.app_role] || a.app_role}</option>)}
                 <option value="__new__" style={{ background: "#0e1822", color: "#eaf4ff" }}>Someone else — type my name…</option>
               </select>
-            : <input value={name} placeholder="Your full name (e.g. Sarah Chen)" autoComplete="username"
+            : <input ref={nameRef} value={name} placeholder="Your full name (e.g. Sarah Chen)" autoComplete="username"
+                onKeyDown={e => { if (e.key === "Enter" && !backupMode) submitCode(totp); }}
                 onChange={e => { setName(e.target.value); setUserId(""); setMatches([]); setError(""); }}
                 style={{ width: "100%", padding: "11px 13px", marginBottom: 14, borderRadius: 11, border: "1px solid var(--line-strong)",
                   background: "rgba(255,255,255,0.05)", color: "var(--tx-hi)", fontSize: 15, fontFamily: "var(--font-body)" }} />}
@@ -36230,21 +36250,10 @@ function LoginScreen({ onLogin }) {
             </select>
           )}
 
-          {!backupMode ? <>
-            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>AUTHENTICATOR CODE</div>
-            <div className="totp-wrap">
-              <input ref={codeRef} className="totp-input" type="text" inputMode="numeric" maxLength={6}
-                placeholder="000000" value={totp} onChange={e => submitCode(e.target.value)} autoFocus />
-            </div>
-            <div className="login-sub" style={{ fontSize:12, marginTop:8 }}>Open your authenticator app and type the current 6-digit code — you'll enter your PIN next.</div>
-          </> : <>
-            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>RECOVERY CODE</div>
-            <input type="text" placeholder="XXXX-XXXX" value={backupCode}
-              onChange={e => setBackupCode(e.target.value.toUpperCase())}
-              style={{ width:"100%", padding:"11px 13px", borderRadius:11, border:"1px solid var(--line-strong)", background:"rgba(255,255,255,0.05)", color:"var(--tx-hi)", fontSize:16, letterSpacing:"0.12em", textAlign:"center", fontFamily:"var(--font-head)" }} />
-            <button className="btn btn-primary" disabled={busy} style={{ width:"100%", marginTop:12, justifyContent:"center" }} onClick={submitBackup}>{busy ? "Checking…" : "Sign in with recovery code"}</button>
-          </>}
-
+          {!backupMode && (
+            <button className="btn btn-primary" disabled={busy || totp.length !== 6 || (!userId && name.trim().length < 3)}
+              style={{ width:"100%", justifyContent:"center", marginBottom:4 }} onClick={() => submitCode(totp)}>Continue</button>
+          )}
           {error && <div style={{ color: "var(--amber)", fontSize: 12.5, textAlign: "center", marginTop: 8, fontFamily: "var(--font-head)" }}>{error}</div>}
 
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:14 }}>
