@@ -9574,6 +9574,7 @@ function TenantSubscription() {
   const isAdmin = me.app_role === "tenant_admin";
   const [b, setB] = React.useState(null);
   const [busy, setBusy] = React.useState("");
+  const [iv, setIv] = React.useState(null);     // billing period chosen before starting
   const load = () => api.get("/billing").then(setB).catch(() => setB({ error: true }));
   React.useEffect(() => {
     if (api && api.getToken && api.getToken()) load(); else setB({ preview: true });
@@ -9592,7 +9593,7 @@ function TenantSubscription() {
       : "Couldn't " + what + " — try again", "error");
   };
   const go = async (what, fn) => { setBusy(what); try { await fn(); } catch (e) { fail(e, what); } finally { setBusy(""); } };
-  const redirect = path => go("open Stripe", async () => { const r = await api.post(path, {}); if (r && r.url) location.href = r.url; });
+  const redirect = (path, body) => go("open Stripe", async () => { const r = await api.post(path, body || {}); if (r && r.url) location.href = r.url; });
 
   if (!b) return <div className="panel panel-pad chrome-top"><div className="card-sub">Loading…</div></div>;
   if (b.preview) return <div className="panel panel-pad chrome-top"><div className="card-title">Subscription</div><div className="card-sub">Sign in to manage your plan.</div></div>;
@@ -9604,17 +9605,29 @@ function TenantSubscription() {
   const statusText = { none: "Not started", trialing: "Free trial — ends " + fmtD(b.trial_ends_at), active: "Active — renews " + fmtD(b.current_period_end),
     past_due: "Payment overdue — update your card", canceled: "Cancelled", incomplete: "Waiting for payment", unpaid: "Unpaid" }[b.status] || b.status;
   const plan = b.plans[s.plan];
+  // Live subscriptions keep their period; before starting, the admin picks one.
+  const period = live ? b.interval : (iv || b.interval || "month");
+  const yearly = period === "year";
+  const amt = m => yearly ? m * b.annual_months : m;
+  const per = yearly ? "/year" : "/month";
   return (
     <div className="fade-in" data-testid="tenant-subscription">
       <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
         <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
-          <div><div className="card-title">{s.plan} plan · ${plan.price}/month + GST</div>
+          <div><div className="card-title">{s.plan} plan · ${amt(plan.price).toLocaleString("en-AU")}{per} + GST</div>
             <div className="card-sub" style={{ color: b.status === "past_due" ? "var(--amber)" : undefined }}>{statusText}</div></div>
           {isAdmin && (live
             ? <button className="btn" disabled={!!busy} onClick={() => redirect("/billing/portal")}>Manage card &amp; invoices</button>
-            : <button className="btn btn-primary" disabled={!!busy || !b.configured} onClick={() => redirect("/billing/checkout")}>
-                Start {b.trial_days}-day free trial</button>)}
+            : <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4 }} data-testid="billing-period">
+                  {[["month", "Monthly"], ["year", "Annual — 2 months free"]].map(([k, l]) => (
+                    <button key={k} type="button" className={"btn" + (period === k ? " btn-primary" : "")} style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={() => setIv(k)}>{l}</button>))}
+                </div>
+                <button className="btn btn-primary" disabled={!!busy || !b.configured} onClick={() => redirect("/billing/checkout", { interval: period })}>
+                  Start {b.trial_days}-day free trial</button>
+              </div>)}
         </div>
+        {yearly && <div className="card-sub" style={{ marginBottom: 6 }}>Annual: 12 months for the price of {b.annual_months}. Extra seats and add-ons are billed yearly too.</div>}
         {!b.configured && <div className="card-sub">Online payments aren't switched on for this platform yet.</div>}
         {b.founder && <div className="comp-note ok" style={{ display: "inline-block", marginBottom: 8 }}>Founding customer — {b.founder_offer.percent}% off everything{b.founder_until ? " until " + fmtD(b.founder_until) : ""}</div>}
         {!live && !b.founder && b.founder_offer.left > 0 && (
@@ -9630,9 +9643,9 @@ function TenantSubscription() {
             <div className="card-sub">Everyone who signs in uses a seat — admins, office staff and contractors. Your customers never do.</div></div>
           {isAdmin && live && s.limit != null && (
             <button className="btn" disabled={!!busy} onClick={() => {
-              if (!window.confirm("Add 1 extra seat for $" + b.seat_price + "/month + GST? Your card is charged now (pro-rata).")) return;
+              if (!window.confirm("Add 1 extra seat for $" + amt(b.seat_price) + per + " + GST? Your card is charged now (pro-rata).")) return;
               go("add a seat", async () => { await api.post("/billing/seats", { count: 1 }); toast("Extra seat added"); await load(); });
-            }}>+ Extra seat (${b.seat_price}/mo)</button>)}
+            }}>+ Extra seat (${amt(b.seat_price)}{yearly ? "/yr" : "/mo"})</button>)}
         </div>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 14 }}>
           <div><div className="card-sub">In use</div><div className="kpi-value" style={{ fontSize: 26 }}>{s.used}</div></div>
@@ -9648,11 +9661,11 @@ function TenantSubscription() {
           {Object.entries(b.plans).map(([name, p]) => (
             <div key={name} className={"plan-card" + (name === s.plan ? " pop" : "")}>
               <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>{name}</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue-light)" }}>${p.price}<span className="card-sub">/mo + GST</span></div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue-light)" }}>${amt(p.price).toLocaleString("en-AU")}<span className="card-sub">{yearly ? "/yr" : "/mo"} + GST</span></div>
               <div className="card-sub">{p.seats == null ? "Unlimited seats" : p.seats + " seats included"}</div>
               {isAdmin && name !== s.plan && (
                 <button className="btn" style={{ marginTop: 8 }} disabled={!!busy} onClick={() => {
-                  if (!window.confirm("Switch to " + name + " ($" + p.price + "/month + GST)?" + (live ? " The difference is charged or credited pro-rata now." : ""))) return;
+                  if (!window.confirm("Switch to " + name + " ($" + amt(p.price).toLocaleString("en-AU") + per + " + GST)?" + (live ? " The difference is charged or credited pro-rata now." : ""))) return;
                   go("change plan", async () => { await api.post("/billing/plan", { plan: name }); toast("Plan changed to " + name); await load(); });
                 }}>Switch to {name}</button>)}
             </div>
@@ -9665,13 +9678,13 @@ function TenantSubscription() {
         {b.addons.filter(a => Number(a.price) > 0).map(a => (
           <div key={a.key} className="comp-row" style={{ padding: "10px 4px" }}>
             <div style={{ minWidth: 0 }}><div className="comp-label">{a.name}</div>
-              <div className="card-sub">${Number(a.price)}/month + GST{a.key === "ai-assistant" ? " · up to " + b.ai_monthly_cap + " replies a month" : ""}</div></div>
+              <div className="card-sub">${amt(Number(a.price))}{per} + GST{a.key === "ai-assistant" ? " · up to " + b.ai_monthly_cap + " replies a month" : ""}</div></div>
             {isAdmin && a.active && !a.billed && <span className="comp-note ok" style={{ marginLeft: "auto" }}>Included</span>}
             {isAdmin && !(a.active && !a.billed) && <button className={"btn" + (a.active ? "" : " btn-primary")} style={{ marginLeft: "auto" }} disabled={!!busy || !live}
               title={live ? "" : "Start your subscription first"}
               onClick={() => {
                 const on = !a.active;
-                if (!window.confirm(on ? "Add " + a.name + " for $" + Number(a.price) + "/month + GST? Your card is charged now (pro-rata)." : "Remove " + a.name + "?")) return;
+                if (!window.confirm(on ? "Add " + a.name + " for $" + amt(Number(a.price)) + per + " + GST? Your card is charged now (pro-rata)." : "Remove " + a.name + "?")) return;
                 go(on ? "add it" : "remove it", async () => { await api.post("/billing/addons/" + a.key, { active: on }); toast(on ? a.name + " added" : a.name + " removed"); await load(); });
               }}>{a.active ? "Remove" : "Add"}</button>}
             {!isAdmin && <span className="card-sub" style={{ marginLeft: "auto" }}>{a.active ? "On" : "Off"}</span>}
@@ -19942,7 +19955,7 @@ function InviteMemberModal({ portal, brand, onClose }) {
         // Every seat on the plan is used: offer an extra seat (charged now), then retry.
         if (!(e && e.data && e.data.error === "seat_limit")) throw e;
         const d = e.data;
-        if (!window.confirm("All " + d.limit + " seats on your " + d.plan + " plan are in use.\n\nBuy an extra seat for $" + d.seat_price + "/month + GST? Your card is charged now (pro-rata) and the seat unlocks once payment goes through.")) return;
+        if (!window.confirm("All " + d.limit + " seats on your " + d.plan + " plan are in use.\n\nBuy an extra seat for $" + d.seat_price + "/" + (d.seat_period || "month") + " + GST? Your card is charged now (pro-rata) and the seat unlocks once payment goes through.")) return;
         try { await window.ssApi.post("/billing/seats", { count: 1 }); }
         catch (pe) {
           const c = pe && pe.data && pe.data.error;
