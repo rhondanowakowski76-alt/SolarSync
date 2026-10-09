@@ -26,6 +26,12 @@ jobs:
           node --check erp.js
           node --check db.js
           node --check seed.js
+          for f in billing.js field-work.js stc.js platform-health.js support-access.js build.js; do node --check "$f"; done
+
+      - name: Precompile the app (same step the Docker build runs)
+        run: |
+          node build.js
+          test -s dist/index.html
 
       - name: Boot backend on PGlite and hit health check
         env:

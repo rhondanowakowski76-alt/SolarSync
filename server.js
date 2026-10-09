@@ -1628,7 +1628,11 @@ app.use("/api/staff", A.authRequired, staffSeats);
 // ============================================================
 app.get("/api/health", h(async (req, res) => ok(res, { ok: true, ts: Date.now() })));
 
-const BUNDLE = path.join(__dirname, "public", "index.html");
+// The precompiled app (node build.js → dist/index.html) when present; otherwise the
+// source page, which compiles itself in the browser.
+const BUILT = path.join(__dirname, "dist", "index.html");
+const BUNDLE = fs.existsSync(BUILT) ? BUILT : path.join(__dirname, "public", "index.html");
+console.log("[app] serving " + path.relative(__dirname, BUNDLE));
 const LANDING = path.join(__dirname, "public", "landing.html");
 const PRIVACY = path.join(__dirname, "public", "privacy.html");
 const TERMS = path.join(__dirname, "public", "terms.html");

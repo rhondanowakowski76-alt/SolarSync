@@ -4,6 +4,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
+# ---- build stage: precompile the app's JSX (no packages needed; see build.js) ----
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY build.js ./
+COPY public/index.html ./public/index.html
+COPY public/vendor/babel-standalone.min.js ./public/vendor/babel-standalone.min.js
+RUN node build.js
+
 # ---- runtime stage: no npm/npx/corepack shipped, no Perl, no glibc ----
 FROM node:22-alpine
 RUN apk add --no-cache ca-certificates \
@@ -14,6 +22,7 @@ RUN apk add --no-cache ca-certificates \
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+COPY --from=build /app/dist ./dist
 
 RUN mkdir -p /app/data/pg && chown -R app:app /app
 ENV NODE_ENV=production

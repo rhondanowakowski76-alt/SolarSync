@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
+    "build": "node build.js",
     "seed": "node seed.js"
   },
   "dependencies": {
