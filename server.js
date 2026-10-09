@@ -11,6 +11,8 @@ const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
 
 const app = express();
+// Gzip responses — the single-page app is several MB of text and compresses ~3x.
+app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
