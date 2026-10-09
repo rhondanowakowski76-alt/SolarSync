@@ -321,6 +321,34 @@ async function migrate() {
       status text not null default 'open', expires_at timestamptz not null,
       closed_at timestamptz, closed_by text, created_at timestamptz default now())`,
     `create index if not exists support_requests_idx on support_requests (tenant_id, created_at desc)`,
+    // Field work: staff/contractor availability + their own compliance and job documents.
+    `create table if not exists availability (
+      id text primary key, tenant_id text not null, user_id text, person text not null,
+      kind text not null default 'unavailable', title text, date_from text not null, date_to text not null,
+      time text, end_time text, notes text, created_at timestamptz default now())`,
+    `create index if not exists availability_idx on availability (tenant_id, date_from)`,
+    `create table if not exists field_documents (
+      id text primary key, tenant_id text not null, user_id text, person text,
+      scope text not null default 'compliance', job_id text, category text, name text not null,
+      mime text, size int, expiry text, data text not null, created_at timestamptz default now())`,
+    `create index if not exists field_documents_idx on field_documents (tenant_id, user_id)`,
+    // Stripe subscriptions (billing.js).
+    `alter table tenants add column if not exists stripe_customer_id text`,
+    `alter table tenants add column if not exists stripe_subscription_id text`,
+    `alter table tenants add column if not exists billing_status text default 'none'`,
+    `alter table tenants add column if not exists trial_ends_at timestamptz`,
+    `alter table tenants add column if not exists current_period_end timestamptz`,
+    `alter table tenants add column if not exists extra_seats int default 0`,
+    `alter table tenants add column if not exists founder boolean default false`,
+    `alter table tenants add column if not exists founder_until timestamptz`,
+    `alter table tenant_addons add column if not exists billed boolean default false`,
+    `create table if not exists platform_settings ( key text primary key, value text )`,
+    `create table if not exists ai_usage ( tenant_id text not null, month text not null, count int default 0, primary key (tenant_id, month))`,
+    `insert into addons (key, name, price) select 'ai-assistant', 'AI Assistant', 19 where not exists (select 1 from addons where key='ai-assistant')`,
+    // STC calculator (stc.js): regulator postcode → zone table and per-tenant rates.
+    `create table if not exists stc_postcode_zones ( pc_from int not null, pc_to int not null, zone int not null, loaded_at timestamptz default now())`,
+    `create index if not exists stc_pc_idx on stc_postcode_zones (pc_from, pc_to)`,
+    `alter table tenants add column if not exists stc_settings jsonb default '{}'`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

@@ -9,6 +9,9 @@ const QRCode = require("qrcode");
 const erp = require("./erp");
 const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
+const fieldWork = require("./field-work");
+const billing = require("./billing");
+const stc = require("./stc");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -16,7 +19,10 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "12mb" }));
+// The Stripe webhook needs the raw body to verify its signature, so it's skipped
+// here and parsed by its own express.raw() handler instead.
+const jsonBody = express.json({ limit: "12mb" });
+app.use((req, res, next) => req.path === "/api/webhooks/stripe" ? next() : jsonBody(req, res, next));
 // Tenant-requested support sessions: restrict + mask every /api call they make.
 app.use("/api", supportAccess.limits.api, supportAccess.guard());
 
@@ -227,6 +233,12 @@ app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(asyn
 
 // Tenant-requested support access (request → enter → masked, audited session).
 supportAccess.register(app, { h, ok });
+// Staff/contractor availability, crew clash checks and field documents.
+fieldWork.register(app, { h, ok });
+// Tenant subscriptions: plans, extra seats, add-ons, 14-day trial (Stripe).
+billing.register(app, { h, ok });
+// STC calculator: postcode zones, tenant STC/battery rates.
+stc.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
@@ -236,6 +248,11 @@ supportAccess.register(app, { h, ok });
 app.post("/api/ai/assist", A.authRequired, h(async (req, res) => {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return ok(res, { configured: false });
+  // Paid add-on ($19/mo) with a monthly cap; the reseller's own use is free.
+  if (!isReseller(req)) {
+    const blocked = await billing.aiBlock(req.user.tenant_id);
+    if (blocked) return res.status(blocked.status).json(blocked);
+  }
   const { messages, persona, brand_name } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: "messages_required" });
   const clean = messages.slice(-20).map(m => ({
@@ -496,6 +513,8 @@ app.post("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff",
     tenant_id = c.tenant_id; client_id = c.id; client = c.name; source = "client"; status = "pending";
   } else {
     tenant_id = tenantOf(req);
+    const clashes = d.force ? [] : await fieldWork.crewClashes(tenant_id, d.installer, d.date);
+    if (clashes.length) return res.status(409).json({ error: "crew_unavailable", clashes });
   }
   await run(`insert into bookings (id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, created_by)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
@@ -517,6 +536,12 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
     return res.status(404).json({ error: "not_found" });
   }
   const d = req.body || {};
+  if (req.user.app_role !== "client" && !d.force) {
+    const clashes = await fieldWork.crewClashes(cur.tenant_id, d.installer ?? cur.installer, d.date ?? cur.date);
+    // Only block when this edit changes who or when; never block an unrelated status update.
+    const changed = (d.installer != null && d.installer !== cur.installer) || (d.date != null && d.date !== cur.date);
+    if (clashes.length && changed) return res.status(409).json({ error: "crew_unavailable", clashes });
+  }
   await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, updated_at=now() where id=$12`,
     [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
      (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,
@@ -841,7 +866,7 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 // ============================================================
 // TENANT LIFECYCLE (reseller-only): list, provision, plan, suspend
 // ============================================================
-const PLAN_PRICES = { Starter: 199, Growth: 499, Scale: 899 };
+const PLAN_PRICES = { Solo: 79, Starter: 199, Growth: 499, Scale: 899 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants where id <> 'reseller-platform' order by created_at");
@@ -928,7 +953,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   const name = String(b.name || "").trim();
   const domain = String(b.domain || "").trim().toLowerCase();
   const region = String(b.region || "").trim();
-  const plan = ["Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
+  const plan = ["Solo", "Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
   const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) return res.status(400).json({ error: "name_required" });
   if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
@@ -955,7 +980,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
 
 app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const plan = String((req.body || {}).plan || "");
-  if (!["Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
+  if (!["Solo", "Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
   const cur = await one("select id from tenants where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
   await run("update tenants set plan=$1 where id=$2", [plan, cur.id]);
@@ -1002,6 +1027,12 @@ app.post("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin")
   if (displayName.length < 3 || !displayName.includes(" ")) return res.status(400).json({ error: "full_name_required" });
   if (await one("select id from users where status='active' and lower(display_name)=lower($1)", [displayName]))
     return res.status(409).json({ error: "name_taken" });
+  // Every tenant login except end customers uses a plan seat; when all are used,
+  // the tenant must buy an extra seat first.
+  if (!isRes && role !== "client") {
+    const blocked = await billing.seatBlock(tenantId);
+    if (blocked) return res.status(402).json(blocked);
+  }
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
   await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,$3,$4,$5)",
@@ -1189,8 +1220,11 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
   let event = null;
   const sig = req.headers["stripe-signature"];
   const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  try { event = (stripe && whSecret) ? stripe.webhooks.constructEvent(req.body, sig, whSecret) : JSON.parse(req.body); }
-  catch (e) { return res.status(400).send(`bad sig: ${e.message}`); }
+  // Never trust an unsigned event: without the signing secret anyone could mark invoices paid.
+  if (!stripe || !whSecret) return res.status(503).json({ error: "stripe_webhook_not_configured" });
+  try { event = stripe.webhooks.constructEvent(req.body, sig, whSecret); }
+  catch (e) { console.error("stripe webhook signature check failed:", e.message); return res.status(400).json({ error: "bad_signature" }); }
+  billing.handleEvent(event).catch(e => console.error("subscription webhook failed:", e && e.message));
   if (event.type === "payment_intent.succeeded" || event.type === "checkout.session.completed") {
     const obj = event.data.object;
     const invId = obj.metadata && obj.metadata.invoice_id;
