@@ -45021,6 +45021,53 @@ function ResellerOverview() {
 }
 
 /* ── ResellerTenants ────────────────────────────────────────── */
+// Portal health — counts and dates only (no customer/staff names or details), so
+// the reseller can confirm every tenant's portal is set up and being used.
+function TenantHealthPanel() {
+  const [list, setList] = React.useState(null);
+  const [err, setErr] = React.useState(false);
+  const load = () => window.ssApi.get("/tenants/health").then(r => { setList(Array.isArray(r) ? r : []); setErr(false); }).catch(() => setErr(true));
+  React.useEffect(() => { load(); }, []);
+  const ago = d => {
+    if (!d) return "never";
+    const m = Math.round((Date.now() - new Date(d).getTime()) / 60000);
+    return m < 60 ? m + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
+  };
+  const cell = { padding: "9px 8px", borderTop: "1px solid var(--line)", fontSize: 13, verticalAlign: "top" };
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }} data-testid="tenant-health">
+      <div className="card-head">
+        <div><div className="card-title">Portal health</div>
+          <div className="card-sub">Is each tenant's portal set up and in use? Counts and dates only — no customer, staff or contractor details.</div></div>
+        <button className="btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={load}>Refresh</button>
+      </div>
+      {err ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Couldn't load portal health.</div>
+        : list === null ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Loading…</div>
+        : !list.length ? <div style={{ fontSize: 13, color: "var(--muted)" }}>No tenants yet.</div>
+        : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ textAlign: "left", fontSize: 11.5, color: "var(--tx-dim)" }}>
+              <th style={{ padding: "6px 8px" }}>Tenant</th><th style={{ padding: "6px 8px" }}>Health</th>
+              <th style={{ padding: "6px 8px" }}>Users</th><th style={{ padding: "6px 8px" }}>Last login</th>
+              <th style={{ padding: "6px 8px" }}>Last activity</th><th style={{ padding: "6px 8px" }}>Records</th>
+            </tr></thead>
+            <tbody>{list.map(t => (
+              <tr key={t.id}>
+                <td style={cell}><b>{t.name}</b>{t.open_support_requests > 0 && <div style={{ fontSize: 11.5, color: "var(--blue-light)" }}>{t.open_support_requests} open support request</div>}</td>
+                <td style={cell}>
+                  <span className={"comp-note " + (t.health === "ok" ? "ok" : "warn")} style={{ fontSize: 12 }}>{t.health === "ok" ? "All good" : "Needs a look"}</span>
+                  {t.issues.map(i => <div key={i} style={{ fontSize: 11.5, color: "var(--tx-dim)", marginTop: 3 }}>• {i}</div>)}
+                </td>
+                <td style={cell}>{t.users.total}<div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.users.admins} admin · {t.users.staff} staff · {t.users.contractors} contractor · {t.users.clients} customer</div></td>
+                <td style={cell}>{ago(t.last_login)}<div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.logins_7d} logins in 7 days</div></td>
+                <td style={cell}>{ago(t.last_activity)}</td>
+                <td style={cell}><div style={{ fontSize: 12 }}>{t.counts.jobs} jobs · {t.counts.quotes} quotes · {t.counts.invoices} invoices</div><div style={{ fontSize: 11.5, color: "var(--tx-dim)" }}>{t.counts.bookings} bookings · {t.counts.products} products</div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>}
+    </div>
+  );
+}
+
 function ResellerTenants() {
   const [provision, setProvision] = useStateR(false);
   const [openTenant, setOpenTenant] = useStateR(null);
@@ -45045,6 +45092,7 @@ function ResellerTenants() {
         <RKpi i={2} label="Total Seats"            value={agg.users}    icon="user"    delta="across tenants" trend="flat" />
         <RKpi i={3} label="Avg. Installs / Tenant" value={agg.avgInstalls} icon="panel" trend="flat"   delta={demo?"+12%":"live"} />
       </div>
+      <TenantHealthPanel />
       <div className="panel panel-pad chrome-top">
         <div className="card-head">
           <div><div className="card-title">All Subscriber Tenants</div><div className="card-sub">Click a row to manage</div></div>

@@ -850,6 +850,50 @@ app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req,
   ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, installs: imap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
 }));
 
+// Portal health for each tenant — counts and dates only, never names, contact
+// details or record contents, so the reseller can see a portal is set up and in
+// use without seeing anyone's private information.
+app.get("/api/tenants/health", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const ts = await rows("select id, name, status, created_at from tenants where id <> 'reseller-platform' order by created_at");
+  const by = async (sql) => { const m = {}; for (const r of await rows(sql)) m[r.tenant_id] = r; return m; };
+  const users = await by(`select tenant_id, count(*)::int as total,
+      count(*) filter (where app_role='tenant_admin')::int as admins,
+      count(*) filter (where app_role='staff')::int as staff,
+      count(*) filter (where app_role='contractor')::int as contractors,
+      count(*) filter (where app_role='client')::int as clients
+    from users where status='active' and tenant_id is not null group by tenant_id`);
+  const logins = await by(`select tenant_id, max(created_at) as last_login,
+      count(*) filter (where created_at > now() - interval '7 days')::int as logins_7d
+    from audit_log where action in ('login','login_backup_code') and tenant_id is not null group by tenant_id`);
+  const activity = await by("select tenant_id, max(created_at) as last_activity from audit_log where tenant_id is not null group by tenant_id");
+  const count = (table) => by(`select tenant_id, count(*)::int as n from ${table} where tenant_id is not null group by tenant_id`);
+  const [deals, quotes, invoices, bookings, products, letterheads] = await Promise.all(
+    ["deals", "quotes", "invoices", "bookings", "products", "letterheads"].map(count));
+  const support = await by("select tenant_id, count(*)::int as n from support_requests where status='open' and expires_at > now() group by tenant_id");
+  const n = (m, id) => (m[id] && m[id].n) || 0;
+  const DAY = 86400000;
+  ok(res, ts.map(t => {
+    const u = users[t.id] || {};
+    const lastLogin = logins[t.id] && logins[t.id].last_login;
+    const issues = [];
+    if (t.status !== "active") issues.push("Account " + (t.status || "inactive"));
+    if (!u.admins) issues.push("No active admin");
+    if (!lastLogin) issues.push("Nobody has logged in yet");
+    else if (Date.now() - new Date(lastLogin).getTime() > 14 * DAY) issues.push("No logins for 14+ days");
+    if (!n(letterheads, t.id)) issues.push("Company details (letterhead) not set");
+    if (!n(products, t.id)) issues.push("No products in catalogue");
+    return {
+      id: t.id, name: t.name, status: t.status, created_at: t.created_at,
+      users: { total: u.total || 0, admins: u.admins || 0, staff: u.staff || 0, contractors: u.contractors || 0, clients: u.clients || 0 },
+      last_login: lastLogin || null, logins_7d: (logins[t.id] && logins[t.id].logins_7d) || 0,
+      last_activity: (activity[t.id] && activity[t.id].last_activity) || null,
+      counts: { jobs: n(deals, t.id), quotes: n(quotes, t.id), invoices: n(invoices, t.id), bookings: n(bookings, t.id), products: n(products, t.id) },
+      open_support_requests: n(support, t.id),
+      issues, health: issues.length ? "check" : "ok",
+    };
+  }));
+}));
+
 app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || "").trim();
