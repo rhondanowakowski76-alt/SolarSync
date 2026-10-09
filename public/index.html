@@ -3748,6 +3748,7 @@ const PORTAL_NAV = {
     { id: "forms", label: "AS Forms", icon: "compliance" },
     { id: "branding", label: "Branding", icon: "palette" },
     { id: "reports", label: "Reports", icon: "reports" },
+    { id: "subscription", label: "Subscription", icon: "card" },
   ],
   contractor: [
     { id: "today", label: "Today", icon: "dashboard" },
@@ -9562,6 +9563,117 @@ function TenantTeam() {
   );
 }
 window.TenantTeam = TenantTeam;
+
+// The tenant's own SolarSync subscription: plan, seats, add-ons, trial, card.
+function TenantSubscription() {
+  const api = window.ssApi;
+  const me = (api && api.getUser && api.getUser()) || {};
+  const isAdmin = me.app_role === "tenant_admin";
+  const [b, setB] = React.useState(null);
+  const [busy, setBusy] = React.useState("");
+  const load = () => api.get("/billing").then(setB).catch(() => setB({ error: true }));
+  React.useEffect(() => {
+    if (api && api.getToken && api.getToken()) load(); else setB({ preview: true });
+    const q = new URLSearchParams(location.search).get("billing");
+    if (q === "done") window.ssToast && window.ssToast("Subscription started — your free trial is running");
+    if (q) history.replaceState(null, "", location.pathname);
+  }, []);
+  const toast = (m, k) => window.ssToast && window.ssToast(m, k);
+  const fail = (e, what) => {
+    const c = e && e.data && e.data.error;
+    toast(c === "stripe_not_configured" ? "Online payments aren't switched on yet — contact SolarSync"
+      : c === "payment_failed" ? "Payment didn't go through — update your card (Manage card & invoices) and try again"
+      : c === "no_subscription" ? "Start your subscription first"
+      : c === "too_many_people" ? "That plan has fewer seats than the people you have now — remove sign-ins first"
+      : c === "portal_not_set_up" ? (e.data.message || "Card management isn't set up yet")
+      : "Couldn't " + what + " — try again", "error");
+  };
+  const go = async (what, fn) => { setBusy(what); try { await fn(); } catch (e) { fail(e, what); } finally { setBusy(""); } };
+  const redirect = path => go("open Stripe", async () => { const r = await api.post(path, {}); if (r && r.url) location.href = r.url; });
+
+  if (!b) return <div className="panel panel-pad chrome-top"><div className="card-sub">Loading…</div></div>;
+  if (b.preview) return <div className="panel panel-pad chrome-top"><div className="card-title">Subscription</div><div className="card-sub">Sign in to manage your plan.</div></div>;
+  if (b.error) return <div className="panel panel-pad chrome-top"><div className="card-title">Subscription</div><div className="card-sub">Couldn't load billing — try again shortly.</div></div>;
+
+  const live = ["trialing", "active", "past_due"].includes(b.status);
+  const s = b.seats;
+  const fmtD = d => d ? new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "";
+  const statusText = { none: "Not started", trialing: "Free trial — ends " + fmtD(b.trial_ends_at), active: "Active — renews " + fmtD(b.current_period_end),
+    past_due: "Payment overdue — update your card", canceled: "Cancelled", incomplete: "Waiting for payment", unpaid: "Unpaid" }[b.status] || b.status;
+  const plan = b.plans[s.plan];
+  return (
+    <div className="fade-in" data-testid="tenant-subscription">
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
+        <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
+          <div><div className="card-title">{s.plan} plan · ${plan.price}/month + GST</div>
+            <div className="card-sub" style={{ color: b.status === "past_due" ? "var(--amber)" : undefined }}>{statusText}</div></div>
+          {isAdmin && (live
+            ? <button className="btn" disabled={!!busy} onClick={() => redirect("/billing/portal")}>Manage card &amp; invoices</button>
+            : <button className="btn btn-primary" disabled={!!busy || !b.configured} onClick={() => redirect("/billing/checkout")}>
+                Start {b.trial_days}-day free trial</button>)}
+        </div>
+        {!b.configured && <div className="card-sub">Online payments aren't switched on for this platform yet.</div>}
+        {!live && b.configured && <div className="card-sub">You'll add a card on Stripe's secure page. Nothing is charged until the {b.trial_days}-day trial ends; cancel any time before then.</div>}
+      </div>
+
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
+        <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
+          <div><div className="card-title">Seats</div>
+            <div className="card-sub">Everyone who signs in uses a seat — admins, office staff and contractors. Your customers never do.</div></div>
+          {isAdmin && live && s.limit != null && (
+            <button className="btn" disabled={!!busy} onClick={() => {
+              if (!window.confirm("Add 1 extra seat for $" + b.seat_price + "/month + GST? Your card is charged now (pro-rata).")) return;
+              go("add a seat", async () => { await api.post("/billing/seats", { count: 1 }); toast("Extra seat added"); await load(); });
+            }}>+ Extra seat (${b.seat_price}/mo)</button>)}
+        </div>
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 14 }}>
+          <div><div className="card-sub">In use</div><div className="kpi-value" style={{ fontSize: 26 }}>{s.used}</div></div>
+          <div><div className="card-sub">Your limit</div><div className="kpi-value" style={{ fontSize: 26 }}>{s.limit == null ? "Unlimited" : s.limit}</div></div>
+          {s.extra > 0 && <div><div className="card-sub">Extra seats bought</div><div className="kpi-value" style={{ fontSize: 26 }}>{s.extra}</div></div>}
+        </div>
+        {s.limit != null && s.used >= s.limit && <div className="card-sub" style={{ color: "var(--amber)", marginTop: 8 }}>All seats are in use — buy an extra seat or move up a plan to add more people.</div>}
+      </div>
+
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
+        <div className="card-title" style={{ marginBottom: 10 }}>Plans</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+          {Object.entries(b.plans).map(([name, p]) => (
+            <div key={name} className={"plan-card" + (name === s.plan ? " pop" : "")}>
+              <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>{name}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue-light)" }}>${p.price}<span className="card-sub">/mo + GST</span></div>
+              <div className="card-sub">{p.seats == null ? "Unlimited seats" : p.seats + " seats included"}</div>
+              {isAdmin && name !== s.plan && (
+                <button className="btn" style={{ marginTop: 8 }} disabled={!!busy} onClick={() => {
+                  if (!window.confirm("Switch to " + name + " ($" + p.price + "/month + GST)?" + (live ? " The difference is charged or credited pro-rata now." : ""))) return;
+                  go("change plan", async () => { await api.post("/billing/plan", { plan: name }); toast("Plan changed to " + name); await load(); });
+                }}>Switch to {name}</button>)}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel panel-pad chrome-top">
+        <div className="card-title" style={{ marginBottom: 10 }}>Add-ons</div>
+        {b.addons.filter(a => Number(a.price) > 0).map(a => (
+          <div key={a.key} className="comp-row" style={{ padding: "10px 4px" }}>
+            <div style={{ minWidth: 0 }}><div className="comp-label">{a.name}</div>
+              <div className="card-sub">${Number(a.price)}/month + GST{a.key === "ai-assistant" ? " · up to " + b.ai_monthly_cap + " replies a month" : ""}</div></div>
+            {isAdmin && a.active && !a.billed && <span className="comp-note ok" style={{ marginLeft: "auto" }}>Included</span>}
+            {isAdmin && !(a.active && !a.billed) && <button className={"btn" + (a.active ? "" : " btn-primary")} style={{ marginLeft: "auto" }} disabled={!!busy || !live}
+              title={live ? "" : "Start your subscription first"}
+              onClick={() => {
+                const on = !a.active;
+                if (!window.confirm(on ? "Add " + a.name + " for $" + Number(a.price) + "/month + GST? Your card is charged now (pro-rata)." : "Remove " + a.name + "?")) return;
+                go(on ? "add it" : "remove it", async () => { await api.post("/billing/addons/" + a.key, { active: on }); toast(on ? a.name + " added" : a.name + " removed"); await load(); });
+              }}>{a.active ? "Remove" : "Add"}</button>}
+            {!isAdmin && <span className="card-sub" style={{ marginLeft: "auto" }}>{a.active ? "On" : "Off"}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+window.TenantSubscription = TenantSubscription;
 
 // Compliance documents uploaded by staff and contractors themselves (licences,
 // insurance, SWMS ...), with expiry warnings. Only the tenant admin sees everyone's.
@@ -19621,7 +19733,24 @@ function InviteMemberModal({ portal, brand, onClose }) {
     try {
       const body = { display_name: name.trim(), app_role: role };
       if (me.app_role === "reseller" && !isRes) body.tenant_id = String(brand.id || "").startsWith("tenant-") ? brand.id : "tenant-" + (brand.id || "");
-      const r = await window.ssApi.post("/users", body);
+      let r;
+      try { r = await window.ssApi.post("/users", body); }
+      catch (e) {
+        // Every seat on the plan is used: offer an extra seat (charged now), then retry.
+        if (!(e && e.data && e.data.error === "seat_limit")) throw e;
+        const d = e.data;
+        if (!window.confirm("All " + d.limit + " seats on your " + d.plan + " plan are in use.\n\nBuy an extra seat for $" + d.seat_price + "/month + GST? Your card is charged now (pro-rata) and the seat unlocks once payment goes through.")) return;
+        try { await window.ssApi.post("/billing/seats", { count: 1 }); }
+        catch (pe) {
+          const c = pe && pe.data && pe.data.error;
+          window.ssToast && window.ssToast(
+            c === "no_subscription" ? "Start your subscription first — open Subscription in the menu"
+            : c === "payment_failed" ? "Payment didn't go through — update your card under Subscription" : "Couldn't add a seat — try again", "error");
+          return;
+        }
+        window.ssToast && window.ssToast("Extra seat added");
+        r = await window.ssApi.post("/users", body);
+      }
       setMade(r);
       window.dispatchEvent(new CustomEvent("ss:users-changed"));
     } catch (e) {
@@ -20415,6 +20544,7 @@ const TITLES = {
     forms:        ["AS Forms", "Australian Standards compliance forms"],
     branding:     ["Branding", "Your portal & client-facing brand"],
     reports:      ["Reports", "Performance analytics"],
+    subscription: ["Subscription", "Your SolarSync plan, seats & add-ons"],
     settings:     ["Settings", "Account & branding"],
   },
   contractor: {
@@ -20507,6 +20637,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "forms":         return <TenantForms brand={brand} />;
       case "branding":      return <BrandingEditor brand={brand} />;
       case "reports":       return <TenantReports />;
+      case "subscription":  return <TenantSubscription />;
       case "settings":      return <Settings portal={portal} brand={brand} user={user} />;
       default:              return <Placeholder id={screen} portal={portal} />;
     }
@@ -20583,7 +20714,11 @@ function AIAssist({ portal, brand }) {
         setMsgs(m => [...m, { role: "assistant", content: (r && r.reply) || "Sorry — I couldn't come up with a reply. Please try again." }]);
       }
     } catch (e) {
-      setMsgs(m => [...m, { role: "assistant", content: "Sorry — I couldn't reach the assistant just now. Check your connection and try again." }]);
+      const c = e && e.data && e.data.error;
+      setMsgs(m => [...m, { role: "assistant", content:
+        c === "addon_required" ? (persona === "client" ? "Chat help isn't available just now — please message us instead." : "The AI Assistant is an add-on ($19/month). Your admin can add it under Subscription.")
+        : c === "ai_monthly_limit" ? "This month's AI Assistant limit has been reached — it resets on the 1st."
+        : "Sorry — I couldn't reach the assistant just now. Check your connection and try again." }]);
     }
     setBusy(false);
   };

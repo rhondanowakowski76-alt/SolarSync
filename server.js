@@ -10,6 +10,7 @@ const erp = require("./erp");
 const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
 const fieldWork = require("./field-work");
+const billing = require("./billing");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -17,7 +18,10 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "12mb" }));
+// The Stripe webhook needs the raw body to verify its signature, so it's skipped
+// here and parsed by its own express.raw() handler instead.
+const jsonBody = express.json({ limit: "12mb" });
+app.use((req, res, next) => req.path === "/api/webhooks/stripe" ? next() : jsonBody(req, res, next));
 // Tenant-requested support sessions: restrict + mask every /api call they make.
 app.use("/api", supportAccess.limits.api, supportAccess.guard());
 
@@ -230,6 +234,8 @@ app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(asyn
 supportAccess.register(app, { h, ok });
 // Staff/contractor availability, crew clash checks and field documents.
 fieldWork.register(app, { h, ok });
+// Tenant subscriptions: plans, extra seats, add-ons, 14-day trial (Stripe).
+billing.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
@@ -239,6 +245,11 @@ fieldWork.register(app, { h, ok });
 app.post("/api/ai/assist", A.authRequired, h(async (req, res) => {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return ok(res, { configured: false });
+  // Paid add-on ($19/mo) with a monthly cap; the reseller's own use is free.
+  if (!isReseller(req)) {
+    const blocked = await billing.aiBlock(req.user.tenant_id);
+    if (blocked) return res.status(blocked.status).json(blocked);
+  }
   const { messages, persona, brand_name } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: "messages_required" });
   const clean = messages.slice(-20).map(m => ({
@@ -1013,6 +1024,12 @@ app.post("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin")
   if (displayName.length < 3 || !displayName.includes(" ")) return res.status(400).json({ error: "full_name_required" });
   if (await one("select id from users where status='active' and lower(display_name)=lower($1)", [displayName]))
     return res.status(409).json({ error: "name_taken" });
+  // Every tenant login except end customers uses a plan seat; when all are used,
+  // the tenant must buy an extra seat first.
+  if (!isRes && role !== "client") {
+    const blocked = await billing.seatBlock(tenantId);
+    if (blocked) return res.status(402).json(blocked);
+  }
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
   await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,$3,$4,$5)",
@@ -1204,6 +1221,7 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
   if (!stripe || !whSecret) return res.status(503).json({ error: "stripe_webhook_not_configured" });
   try { event = stripe.webhooks.constructEvent(req.body, sig, whSecret); }
   catch (e) { console.error("stripe webhook signature check failed:", e.message); return res.status(400).json({ error: "bad_signature" }); }
+  billing.handleEvent(event).catch(e => console.error("subscription webhook failed:", e && e.message));
   if (event.type === "payment_intent.succeeded" || event.type === "checkout.session.completed") {
     const obj = event.data.object;
     const invId = obj.metadata && obj.metadata.invoice_id;
