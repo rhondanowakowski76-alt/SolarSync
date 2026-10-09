@@ -11709,15 +11709,6 @@ const PLANS = [
   { name:"Scale",   price:899, feats:["Full white-label","Unlimited seats","Financials & payroll","Dedicated CSM"], pop:true },
 ];
 
-const SERVICES = [
-  { name:"API Gateway",          status:"operational", ms:42  },
-  { name:"Auth Service",         status:"operational", ms:31  },
-  { name:"Branding Engine",      status:"operational", ms:55  },
-  { name:"File Storage (S3)",    status:"operational", ms:88  },
-  { name:"Notification Service", status:"degraded",    ms:210 },
-  { name:"Database (PostgreSQL)",status:"operational", ms:12  },
-];
-
 const TICKETS_INIT = [].concat([
   { id:"T-2051",tenant:"azure",  subj:"Custom domain SSL renewal",         pri:"high",status:"Open",       age:"1h",
     notes:"SSL cert expired on portal.azimuthsolar.com.au. Auto-renewal failed last week. Needs urgent action." },
@@ -13093,50 +13084,78 @@ function ResellerBranding({ brand }) {
 
 /* ── ResellerHealth ─────────────────────────────────────────── */
 function ResellerHealth() {
-  return (
-    <div className="fade-in">
+  const api = window.ssApi;
+  const [d, setD] = useStateR(null);
+  const [err, setErr] = useStateR(false);
+  const load = () => api.get("/platform/health").then(r => { setD(r); setErr(false); }).catch(() => setErr(true));
+  React.useEffect(() => {
+    if (!(api && api.getToken && api.getToken())) return undefined;
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, []);
+  const bytes = n => n == null ? "—" : n < 1024 * 1024 ? (n / 1024).toFixed(0) + " KB" : n < 1024 ** 3 ? (n / 1024 / 1024).toFixed(1) + " MB" : (n / 1024 ** 3).toFixed(2) + " GB";
+  const dur = s => s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? (s / 3600).toFixed(1) + " h" : (s / 86400).toFixed(1) + " days";
+  const head = (
+    <>
       <StcPostcodeUpload />
+      {err && <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}><div className="card-sub">Couldn't load platform health — retrying every minute.</div></div>}
+    </>
+  );
+  if (!d) return <div className="fade-in">{head}{!err && <div className="panel panel-pad chrome-top"><div className="card-sub">Loading live health…</div></div>}</div>;
+  const bad = d.services.filter(s => s.status !== "operational" && s.status !== "not configured");
+  const maxStore = Math.max(1, ...d.storage_by_tenant.map(t => t.bytes));
+  return (
+    <div className="fade-in" data-testid="platform-health">
+      {head}
       <div className="kpi-row">
-        <RKpi i={0} label="Uptime (90d)"      value="99.98%" icon="pulse"    trend="flat" delta="SLA 99.9%"            />
-        <RKpi i={1} label="Avg. API Latency"  value="64ms"   icon="zap"      trend="flat" delta="p95 142ms"            />
-        <RKpi i={2} label="Storage Used"      value="2.1 TB" icon="docs"     trend="up"   delta="of 5 TB"              />
-        <RKpi i={3} label="Open Incidents"    value="1"      icon="alert"    trend="flat" delta="degraded notifications"/>
+        <RKpi i={0} label="Server running" value={dur(d.uptime_s)} icon="pulse" trend="flat" delta={"since " + new Date(d.started_at).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} />
+        <RKpi i={1} label="Avg. API response" value={d.latency_ms.avg == null ? "—" : Math.round(d.latency_ms.avg) + "ms"} icon="zap" trend="flat" delta={d.latency_ms.p95 == null ? "no requests yet" : "p95 " + Math.round(d.latency_ms.p95) + "ms"} />
+        <RKpi i={2} label="Database size" value={bytes(d.db_bytes)} icon="docs" trend="flat" delta="live" />
+        <RKpi i={3} label="Server errors (24h)" value={String(d.errors_24h)} icon="alert" trend="flat" delta={d.requests_24h.toLocaleString("en-AU") + " requests"} />
       </div>
       <div className="dash-grid">
         <div className="panel panel-pad chrome-top">
-          <div className="card-head"><div className="card-title">Service Status</div><span className="comp-note ok">Mostly operational</span></div>
-          {SERVICES.map(s=>(
-            <div key={s.name} className="comp-row" style={{ padding:"15px 4px" }}>
-              <span className={"comp-check "+(s.status==="operational"?"ok":"warn")}>
-                <Icon d={s.status==="operational"?ICONS.check:ICONS.alert} size={14} stroke={2.4} />
-              </span>
-              <span className="comp-label">{s.name}</span>
-              <span style={{ marginLeft:"auto",display:"flex",gap:14,alignItems:"center" }}>
-                <span className="card-sub">{s.ms}ms</span>
-                <span className={"comp-note "+(s.status==="operational"?"ok":"warn")} style={{ textTransform:"capitalize" }}>{s.status}</span>
-              </span>
+          <div className="card-head"><div className="card-title">Service Status</div>
+            <span className={"comp-note " + (bad.length ? "warn" : "ok")}>{bad.length ? bad.length + " need attention" : "All configured services operational"}</span></div>
+          {d.services.map(s => {
+            const okS = s.status === "operational";
+            return (
+              <div key={s.name} className="comp-row" style={{ padding: "13px 4px" }}>
+                <span className={"comp-check " + (okS ? "ok" : "warn")}><Icon d={okS ? ICONS.check : ICONS.alert} size={14} stroke={2.4} /></span>
+                <div style={{ minWidth: 0 }}><div className="comp-label">{s.name}</div><div className="card-sub">{s.detail}</div></div>
+                <span className={"comp-note " + (okS ? "ok" : "warn")} style={{ marginLeft: "auto", textTransform: "capitalize", whiteSpace: "nowrap" }}>{s.status}</span>
+              </div>
+            );
+          })}
+          {d.recent_errors.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div className="card-title" style={{ fontSize: 14, marginBottom: 6 }}>Recent server errors</div>
+              {d.recent_errors.slice(0, 5).map((e, i) => (
+                <div key={i} className="card-sub" style={{ fontFamily: "monospace", fontSize: 12 }}>
+                  {new Date(e.at).toLocaleTimeString("en-AU")} · {e.status} · {e.method} {e.path}</div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
         <div className="stack">
           <div className="panel panel-pad chrome-top">
-            <div className="card-title" style={{ marginBottom:14 }}>API Requests (24h)</div>
-            <Bars data={[42,55,61,70,88,120,140,135,150,162,158,170]} h={80} />
-            <div className="card-sub" style={{ marginTop:8 }}>1.4M requests · peak 170k/hr at 1 PM</div>
+            <div className="card-title" style={{ marginBottom: 14 }}>API Requests (last 24h, per hour)</div>
+            <Bars data={d.series.map(s => s.n)} h={80} />
+            <div className="card-sub" style={{ marginTop: 8 }}>{d.requests_24h.toLocaleString("en-AU")} requests · counted since the server last started</div>
           </div>
           <div className="panel panel-pad chrome-top">
-            <div className="card-title" style={{ marginBottom:14 }}>Storage by Tenant</div>
-            {window.__SS_DEMO ? TENANT_IDS.map(id=>{
-              const b = BRANDS[id]; const pct = [42,18,78][TENANT_IDS.indexOf(id)];
-              return (
-                <div key={id} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5 }}>
-                    <span style={{ color:"var(--tx)" }}>{b.name}</span><span className="card-sub">{pct}%</span>
-                  </div>
-                  <div className="bar-track"><div className="bar-fill" style={{ width:pct+"%",background:pct>70?"var(--amber)":"var(--blue-light)" }} /></div>
+            <div className="card-title" style={{ marginBottom: 14 }}>Storage by Tenant</div>
+            <div className="card-sub" style={{ marginBottom: 10 }}>Photos and documents held in the database</div>
+            {d.storage_by_tenant.length === 0 && <div className="card-sub">No tenants yet.</div>}
+            {d.storage_by_tenant.slice(0, 8).map(t => (
+              <div key={t.id} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                  <span style={{ color: "var(--tx)" }}>{t.name}</span><span className="card-sub">{bytes(t.bytes)}</span>
                 </div>
-              );
-            }) : <div style={{ padding:"10px 0",color:"var(--tx-dim)",fontSize:13 }}>Per-tenant storage usage appears here as tenants upload documents and photos.</div>}
+                <div className="bar-track"><div className="bar-fill" style={{ width: Math.max(1, t.bytes / maxStore * 100) + "%", background: "var(--blue-light)" }} /></div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

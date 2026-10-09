@@ -12,6 +12,7 @@ const supportAccess = require("./support-access");
 const fieldWork = require("./field-work");
 const billing = require("./billing");
 const stc = require("./stc");
+const platformHealth = require("./platform-health");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -19,6 +20,8 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
+// Measure /api traffic, response times and errors for the reseller's Platform Health screen.
+app.use(platformHealth.track);
 // The Stripe webhook needs the raw body to verify its signature, so it's skipped
 // here and parsed by its own express.raw() handler instead.
 const jsonBody = express.json({ limit: "12mb" });
@@ -239,6 +242,8 @@ fieldWork.register(app, { h, ok });
 billing.register(app, { h, ok });
 // STC calculator: postcode zones, tenant STC/battery rates.
 stc.register(app, { h, ok });
+// Real platform health (reseller).
+platformHealth.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
