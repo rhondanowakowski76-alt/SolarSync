@@ -9616,6 +9616,11 @@ function TenantSubscription() {
                 Start {b.trial_days}-day free trial</button>)}
         </div>
         {!b.configured && <div className="card-sub">Online payments aren't switched on for this platform yet.</div>}
+        {b.founder && <div className="comp-note ok" style={{ display: "inline-block", marginBottom: 8 }}>Founding customer — {b.founder_offer.percent}% off everything{b.founder_until ? " until " + fmtD(b.founder_until) : ""}</div>}
+        {!live && !b.founder && b.founder_offer.left > 0 && (
+          <div data-testid="founder-offer" style={{ padding: "10px 14px", borderRadius: 10, marginBottom: 8, background: "rgba(255,201,60,0.10)", border: "1px solid rgba(255,201,60,0.35)", fontSize: 13.5 }}>
+            <b>Founding customer offer:</b> {b.founder_offer.percent}% off your plan, seats and add-ons for {b.founder_offer.months} months — only {b.founder_offer.left} of {b.founder_offer.slots} places left. Applied automatically when you start.
+          </div>)}
         {!live && b.configured && <div className="card-sub">You'll add a card on Stripe's secure page. Nothing is charged until the {b.trial_days}-day trial ends; cancel any time before then.</div>}
       </div>
 

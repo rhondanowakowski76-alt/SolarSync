@@ -339,6 +339,8 @@ async function migrate() {
     `alter table tenants add column if not exists trial_ends_at timestamptz`,
     `alter table tenants add column if not exists current_period_end timestamptz`,
     `alter table tenants add column if not exists extra_seats int default 0`,
+    `alter table tenants add column if not exists founder boolean default false`,
+    `alter table tenants add column if not exists founder_until timestamptz`,
     `alter table tenant_addons add column if not exists billed boolean default false`,
     `create table if not exists platform_settings ( key text primary key, value text )`,
     `create table if not exists ai_usage ( tenant_id text not null, month text not null, count int default 0, primary key (tenant_id, month))`,

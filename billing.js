@@ -24,6 +24,12 @@ const PLANS = {
 };
 const SEAT_PRICE = 15;
 const TRIAL_DAYS = 14;
+// Founding customers: the first FOUNDER_SLOTS tenants to start a subscription get
+// FOUNDER_PERCENT off everything for FOUNDER_MONTHS. A place is taken only when the
+// subscription actually starts, not when someone opens the checkout page.
+const FOUNDER_SLOTS = 15;
+const FOUNDER_PERCENT = 30;
+const FOUNDER_MONTHS = 6;
 const AI_MONTHLY_CAP = 300;             // assistant replies per tenant per month
 const SEAT_ROLES = ["tenant_admin", "staff", "contractor"];
 const LIVE_STATUSES = ["trialing", "active", "past_due"];
@@ -64,6 +70,17 @@ async function priceFor(key, name, dollars) {
   await setSetting(k, p.id);
   return p.id;
 }
+async function founderCoupon() {
+  const k = `stripe_coupon:founder:${FOUNDER_PERCENT}:${FOUNDER_MONTHS}`;
+  let id = await setting(k);
+  if (id) return id;
+  const c = await stripe().coupons.create({ name: "Founding customer", percent_off: FOUNDER_PERCENT,
+    duration: "repeating", duration_in_months: FOUNDER_MONTHS });
+  await setSetting(k, c.id);
+  return c.id;
+}
+const foundersTaken = async () => (await one("select count(*)::int as n from tenants where founder=true")).n;
+
 const planPrice = (plan) => priceFor("plan-" + plan.toLowerCase(), plan + " plan", PLANS[plan].price);
 const seatPrice = () => priceFor("seat", "extra seat", SEAT_PRICE);
 async function addonPrice(key) {
@@ -140,7 +157,10 @@ async function handleEvent(event) {
   if (event.type === "checkout.session.completed" && o.mode === "subscription" && o.subscription) {
     const sub = await stripe().subscriptions.retrieve(o.subscription, { expand: ["items.data.price"] });
     await syncSubscription(sub);
-    await audit(null, "subscription_started", sub.id, sub.metadata && sub.metadata.tenant_id);
+    const tid = sub.metadata && sub.metadata.tenant_id;
+    if (tid && sub.metadata.founder === "1")
+      await run(`update tenants set founder=true, founder_until=now() + interval '${FOUNDER_MONTHS} months' where id=$1`, [tid]);
+    await audit(null, "subscription_started", sub.id, tid, { founder: sub.metadata.founder === "1" });
     return true;
   }
   if (event.type.startsWith("customer.subscription.")) {
@@ -166,6 +186,9 @@ function register(app, { h, ok }) {
       configured: !!stripe(), status: t.billing_status || "none", trial_ends_at: t.trial_ends_at,
       current_period_end: t.current_period_end, plans: PLANS, seat_price: SEAT_PRICE, trial_days: TRIAL_DAYS,
       seats: await seatUsage(t.id), addons, ai_monthly_cap: AI_MONTHLY_CAP,
+      founder: !!t.founder, founder_until: t.founder_until,
+      founder_offer: { percent: FOUNDER_PERCENT, months: FOUNDER_MONTHS, slots: FOUNDER_SLOTS,
+        left: Math.max(0, FOUNDER_SLOTS - await foundersTaken()) },
     });
   }));
 
@@ -184,15 +207,17 @@ function register(app, { h, ok }) {
     const line_items = [{ price: await planPrice(plan), quantity: 1, tax_rates: tax }];
     // Carry over seats/add-ons already in use (e.g. switched on before billing started).
     if (t.extra_seats > 0) line_items.push({ price: await seatPrice(), quantity: t.extra_seats, tax_rates: tax });
+    const founder = !t.founder && (await foundersTaken()) < FOUNDER_SLOTS;
     const session = await stripe().checkout.sessions.create({
       mode: "subscription", customer, line_items,
       payment_method_collection: "always",
-      subscription_data: { trial_period_days: TRIAL_DAYS, metadata: { tenant_id: t.id } },
+      ...(founder ? { discounts: [{ coupon: await founderCoupon() }] } : {}),
+      subscription_data: { trial_period_days: TRIAL_DAYS, metadata: { tenant_id: t.id, founder: founder ? "1" : "0" } },
       metadata: { tenant_id: t.id },
       success_url: baseUrl(req) + "/app?billing=done",
       cancel_url: baseUrl(req) + "/app?billing=cancelled",
     });
-    await audit(req.user.sub, "billing_checkout", session.id, t.id, { plan });
+    await audit(req.user.sub, "billing_checkout", session.id, t.id, { plan, founder });
     ok(res, { url: session.url });
   }));
 
