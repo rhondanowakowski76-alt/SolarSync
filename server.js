@@ -874,12 +874,14 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 const PLAN_PRICES = { Solo: 79, Starter: 199, Growth: 499, Scale: 899 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
-  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants where id <> 'reseller-platform' order by created_at");
+  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at, comp_lifetime, comp_until, comp_note, comp_seats, billing_status from tenants where id <> 'reseller-platform' order by created_at");
   const counts = await rows("select tenant_id, count(*)::int as n from users where status='active' and tenant_id is not null group by tenant_id");
   const cmap = {}; for (const c of counts) cmap[c.tenant_id] = c.n;
   const inst = await rows("select tenant_id, count(*)::int as n from deals where stage='installed' and tenant_id is not null group by tenant_id");
   const imap = {}; for (const c of inst) imap[c.tenant_id] = c.n;
-  ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, installs: imap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
+  // Complimentary tenants pay nothing, so they add nothing to revenue.
+  ok(res, ts.map(t => ({ ...t, complimentary: billing.compActive(t), users: cmap[t.id] || 0, installs: imap[t.id] || 0,
+    mrr: billing.compActive(t) ? 0 : (PLAN_PRICES[t.plan] || 0) })));
 }));
 
 // Portal health for each tenant — counts and dates only, never names, contact
@@ -991,6 +993,26 @@ app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(as
   const fail = await billing.changePlan(cur, plan, req.user.sub);
   if (fail) return res.status(fail.status).json(fail.body);
   ok(res, { id: cur.id, plan });
+}));
+
+// Free portal use for a tenant: { mode: "none" | "until" | "lifetime", until, note,
+// extra_seats } — the free seats only count while the free access lasts. Not a tester account — the tenant sees a normal portal.
+app.put("/api/tenants/:id/complimentary", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  const cur = await one("select * from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  const mode = ["none", "until", "lifetime"].includes(d.mode) ? d.mode : null;
+  if (!mode) return res.status(400).json({ error: "bad_mode" });
+  if (mode === "until" && !(d.until && new Date(d.until) > new Date())) return res.status(400).json({ error: "until_must_be_future" });
+  // A paying subscription would keep charging them; cancel it in Stripe first.
+  if (mode !== "none" && cur.stripe_subscription_id && ["trialing", "active", "past_due"].includes(cur.billing_status))
+    return res.status(409).json({ error: "has_subscription" });
+  const seats = mode === "none" ? 0 : Math.max(0, Math.min(500, parseInt(d.extra_seats, 10) || 0));
+  await run("update tenants set comp_lifetime=$1, comp_until=$2, comp_note=$3, comp_seats=$4 where id=$5",
+    [mode === "lifetime", mode === "until" ? new Date(d.until) : null, mode === "none" ? null : String(d.note || "").slice(0, 200) || null, seats, cur.id]);
+  await audit(req.user.sub, "tenant_complimentary", cur.id, cur.id, { mode, until: d.until || null, comp_seats: seats });
+  const t = await one("select id, comp_lifetime, comp_until, comp_note, comp_seats from tenants where id=$1", [cur.id]);
+  ok(res, { ...t, extra_seats: t.comp_seats });
 }));
 
 app.put("/api/tenants/:id/status", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {

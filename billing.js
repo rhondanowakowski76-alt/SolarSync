@@ -89,6 +89,11 @@ async function founderCoupon() {
 }
 const foundersTaken = async () => (await one("select count(*)::int as n from tenants where founder=true")).n;
 
+// Free portal use granted by the reseller (lifetime, or until a date). These tenants
+// are never billed; the reseller sets their plan and any free extra seats.
+const compActive = (t) => !!t && (t.comp_lifetime === true || (t.comp_until && new Date(t.comp_until) > new Date()));
+const compInfo = (t) => compActive(t) ? { lifetime: t.comp_lifetime === true, until: t.comp_lifetime ? null : t.comp_until } : null;
+
 const intervalOf = (t) => (t && t.billing_interval === "year") ? "year" : "month";
 const planPrice = (plan, interval) => priceFor("plan-" + plan.toLowerCase(), plan + " plan", PLANS[plan].price, interval);
 const seatPrice = (interval) => priceFor("seat", "extra seat", SEAT_PRICE, interval);
@@ -99,10 +104,11 @@ async function addonPrice(key, interval) {
 }
 
 async function seatUsage(tenantId) {
-  const t = await one("select plan, extra_seats from tenants where id=$1", [tenantId]);
+  const t = await one("select plan, extra_seats, comp_seats, comp_lifetime, comp_until from tenants where id=$1", [tenantId]);
   const plan = PLANS[t && t.plan] ? t.plan : "Growth";
   const base = PLANS[plan].seats;
-  const extra = Number(t && t.extra_seats) || 0;
+  // Paid extra seats, plus any free seats while complimentary access lasts.
+  const extra = (Number(t && t.extra_seats) || 0) + (compActive(t) ? Number(t.comp_seats) || 0 : 0);
   const used = (await one(`select count(*)::int as n from users where tenant_id=$1 and status='active' and app_role = any($2)`,
     [tenantId, SEAT_ROLES])).n;
   return { plan, included: base, extra, limit: base == null ? null : base + extra, used };
@@ -112,8 +118,10 @@ async function seatUsage(tenantId) {
 async function seatBlock(tenantId) {
   const u = await seatUsage(tenantId);
   if (u.limit == null || u.used < u.limit) return null;
-  const yearly = intervalOf(await one("select billing_interval from tenants where id=$1", [tenantId])) === "year";
-  return { error: "seat_limit", ...u, seat_price: SEAT_PRICE * (yearly ? ANNUAL_MONTHS : 1), seat_period: yearly ? "year" : "month" };
+  const t = await one("select billing_interval, comp_lifetime, comp_until from tenants where id=$1", [tenantId]);
+  const yearly = intervalOf(t) === "year";
+  return { error: "seat_limit", ...u, complimentary: compActive(t),
+    seat_price: SEAT_PRICE * (yearly ? ANNUAL_MONTHS : 1), seat_period: yearly ? "year" : "month" };
 }
 
 // AI assistant: needs the add-on, and is capped per month. Returns null when allowed.
@@ -227,7 +235,7 @@ function register(app, { h, ok }) {
     ok(res, {
       configured: !!stripe(), status: t.billing_status || "none", trial_ends_at: t.trial_ends_at,
       current_period_end: t.current_period_end, plans: PLANS, seat_price: SEAT_PRICE, trial_days: TRIAL_DAYS,
-      interval: intervalOf(t), annual_months: ANNUAL_MONTHS,
+      interval: intervalOf(t), annual_months: ANNUAL_MONTHS, complimentary: compInfo(t),
       seats: await seatUsage(t.id), addons, ai_monthly_cap: AI_MONTHLY_CAP,
       founder: !!t.founder, founder_until: t.founder_until,
       founder_offer: { percent: FOUNDER_PERCENT, months: FOUNDER_MONTHS, slots: FOUNDER_SLOTS,
@@ -240,6 +248,7 @@ function register(app, { h, ok }) {
     if (!need(res)) return;
     const t = await tenantRow(req);
     if (liveSub(t)) return res.status(409).json({ error: "already_subscribed" });
+    if (compActive(t)) return res.status(409).json({ error: "complimentary" });
     const plan = PLANS[t.plan] ? t.plan : "Growth";
     const interval = INTERVALS.includes(req.body && req.body.interval) ? req.body.interval : "month";
     let customer = t.stripe_customer_id;
@@ -339,4 +348,4 @@ function register(app, { h, ok }) {
   }));
 }
 
-module.exports = { register, handleEvent, changePlan, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
+module.exports = { register, handleEvent, changePlan, compActive, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
