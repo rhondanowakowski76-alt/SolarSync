@@ -38612,17 +38612,12 @@ const SYSTEMS = [
   { id: "s20", rows: 4, cols: 5 },
 ];
 
-function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredPanelId }) {
-  // Panels come from the tenant's live catalog when the quote builder passes it in,
-  // so the design uses the products actually being quoted (seed list otherwise).
-  const PANEL_LIST = (panelOptions && panelOptions.length) ? panelOptions : PANELS;
+function PVDesigner({ embedded, onSpec, initialAddress }) {
   const [activeSys, setActiveSys] = usePV("s20");
   const [rows, setRows] = usePV(4);
   const [cols, setCols] = usePV(5);
   const [orient, setOrient] = usePV("portrait");
-  const [panelId, setPanelId] = usePV(() => String(preferredPanelId != null ? preferredPanelId : PANEL_LIST[0].id));
-  // Follow the panel chosen on the quote's line items (Step 1).
-  useEffPV(() => { if (preferredPanelId != null) setPanelId(String(preferredPanelId)); }, [preferredPanelId]);
+  const [panelId, setPanelId] = usePV(PANELS[0].id);
   const [mode, setMode] = usePV("grid");
   const [batteryKwh, setBatteryKwh] = usePV(13.5);
   const [address, setAddress] = usePV(initialAddress || "27 Edgeware Rd, Enmore NSW 2042");
@@ -38791,7 +38786,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   const clearMeasures = () => { setMeasures([]); setPending(null); setHoverPt(null); };
   const applyOrientation = () => { if (!measures.length) return; const d = segDeg(measures[measures.length - 1]); setRot(Math.max(-45, Math.min(45, d))); };
 
-  const panel = PANEL_LIST.find(p => String(p.id) === String(panelId)) || PANEL_LIST[0];
+  const panel = PANELS.find(p => p.id === panelId);
   const maxPanels = rows * cols;
   const placedCount = placed.reduce((s, a) => s + a.on.length, 0);
   const count = on.size + placedCount;
@@ -39062,7 +39057,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
           </div>
           <label className="field" style={{ marginTop: 14 }}>
             <span className="field-label">Panel model (from your catalog)</span>
-            <select className="field-input" value={panelId} onChange={e => setPanelId(e.target.value)}>{PANEL_LIST.map(p => <option key={p.id} value={String(p.id)}>{p.name} — {p.watts}W · ${p.price}</option>)}</select>
+            <select className="field-input" value={panelId} onChange={e => setPanelId(e.target.value)}>{PANELS.map(p => <option key={p.id} value={p.id}>{p.name} — {p.watts}W · ${p.price}</option>)}</select>
           </label>
           {mode !== "grid" && <div style={{ marginTop: 14 }}><Stepper label="Battery capacity (kWh)" value={batteryKwh} set={v => setBatteryKwh(Math.round(v * 10) / 10)} min={5} max={40} suffix=" kWh" /></div>}
         </div>
@@ -39403,10 +39398,10 @@ function StepClient({ cust, setCust, lines, setLines, enq, setEnq, status, setSt
 }
 
 /* ── Step 2: PV Designer ── */
-function StepDesign({ onSpec, clientAddress, panelOptions, preferredPanelId }) {
+function StepDesign({ onSpec, clientAddress }) {
   return (
     <div style={{ padding: "var(--gap) 28px" }}>
-      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} panelOptions={panelOptions} preferredPanelId={preferredPanelId} />
+      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} />
     </div>
   );
 }
@@ -39609,12 +39604,6 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             {busy ? <span className="pv-spin" /> : <Icon d={ICONS.docs} size={14} stroke={2} />}
             {busy ? "Preparing…" : "Print / PDF"}
           </button>
-
-          {spec.count > 0 && !spec.designImage && (
-            <div className="card-sub" style={{ fontSize:11, marginTop:10, color:"var(--warn, #FA913D)" }}>
-              No rooftop image yet — open System Design (search the client's address or upload a roof photo), then come back here to capture it.
-            </div>
-          )}
 
           {/* Product spec sheets — tenant uploads PDF or images, embedded in the proposal */}
           <div style={{ height:1, background:"var(--bdr)", margin:"14px 0" }} />
@@ -40309,36 +40298,7 @@ function QuoteSystem() {
     return items;
   });
   const [spec, setSpec] = useQS({});
-  // Live tenant catalog, so the designer offers the panels the tenant actually sells.
-  const { products: liveProducts } = window.useProducts ? window.useProducts() : { products: [] };
-  const catalogPanels = (liveProducts && liveProducts.length ? liveProducts : PRODUCTS).filter(p => p.cat === "Panel" && Number(p.watts) > 0);
   const [upgrades, setUpgrades] = useQS(() => QUOTE_UPGRADES.map(u => ({ ...u, accepted: false })));
-  const panelLine = lines.find(l => l.cat === "Panel");
-  const preferredPanelId = panelLine ? panelLine.id : undefined;
-  // Only accept designer output once the user has actually viewed System Design, so a
-  // reopened quote's saved design (and roof image) isn't replaced by the designer's defaults.
-  const designViewed = useRefQS(false);
-  const specRef = useRefQS(spec);
-  specRef.current = spec;
-  const onDesignSpec = s => {
-    if (!designViewed.current) return;
-    // Replacing the spec drops any captured roof image: the layout changed, so that
-    // picture is out of date. It is retaken when the user leaves System Design.
-    setSpec(s);
-    // Keep the quote's panel line item in step with the design: same product, qty = panels placed.
-    if (s.panel && s.count > 0) {
-      setLines(ls => {
-        const i = ls.findIndex(l => l.cat === "Panel");
-        if (i === -1) return [{ ...s.panel, qty: s.count }, ...ls];
-        const cur = ls[i];
-        const sameProduct = String(cur.id) === String(s.panel.id);
-        if (sameProduct && cur.qty === s.count) return ls;
-        const next = sameProduct ? { ...cur, qty: s.count } : { ...s.panel, qty: s.count };
-        const out = ls.filter((l, j) => j === i || String(l.id) !== String(next.id));
-        return out.map(l => l === cur ? next : l);
-      });
-    }
-  };
   const [specSheets, setSpecSheets] = useQS([]);
   const [quoteId, setQuoteId] = useQS(null);   // set when editing a saved quote
   const [saving, setSaving] = useQS(false);
@@ -40378,12 +40338,11 @@ function QuoteSystem() {
     return {
       id: quoteId || undefined,
       customer: cust, enq, status: statusVal || status, validity, notes,
-      lines, spec: { ...specRef.current, upgrades, specSheets }, total: Math.round(subtotal * 1.1),
+      lines, spec: { ...spec, upgrades, specSheets }, total: Math.round(subtotal * 1.1),
     };
   };
   const saveCurrent = async (statusVal) => {
     setSaving(true);
-    if (step === 2) await captureRoof();
     if (statusVal) setStatus(statusVal);
     const saved = await saveQuote(buildPayload(statusVal));
     setSaving(false);
@@ -40408,8 +40367,6 @@ function QuoteSystem() {
     setUpgrades((q.spec && Array.isArray(q.spec.upgrades) && q.spec.upgrades.length) ? q.spec.upgrades : QUOTE_UPGRADES.map(u => ({ ...u, accepted: false })));
     setSpecSheets((q.spec && Array.isArray(q.spec.specSheets)) ? q.spec.specSheets : []);
     designedAddr.current = (q.customer && q.customer.address) || "";
-    designViewed.current = false;
-    setDesignKey(k => k + 1);
     reached.current = { 1: true, 2: !!(q.spec && Object.keys(q.spec).length), 3: true };
     setStep(1);
     window.ssToast && window.ssToast("Opened " + (q.number || "quote"));
@@ -40422,7 +40379,6 @@ function QuoteSystem() {
   const [designKey, setDesignKey] = useQS(0);
   const reached = useRefQS({ 1: true });
   reached.current[step] = true;
-  if (step === 2) designViewed.current = true;
 
   // The PV designer is built for one site. If the tenant changes the client's
   // address, re-locate the designer to the new site (a fresh design) so the layout
@@ -40439,17 +40395,7 @@ function QuoteSystem() {
 
   const canProceed = step === 1 ? true : step === 2 ? true : true;
 
-  // Every way of leaving System Design (Next, Back, the step bar, Save) retakes the
-  // rooftop image first, while the designer is still visible, so the proposal always
-  // shows the CURRENT layout on the client's roof.
-  const [capturing, setCapturing] = useQS(false);
-  const changeStep = async n => {
-    n = Math.max(1, Math.min(3, n));
-    if (capturing) return;
-    if (step === 2 && n !== 2) { setCapturing(true); await captureRoof(); setCapturing(false); }
-    setStep(n);
-  };
-  const go = dir => changeStep(step + dir);
+  const go = dir => setStep(s => Math.max(1, Math.min(3, s + dir)));
 
   // Capture the live satellite roof + panel layout as an image for the proposal,
   // so the client sees panels on THEIR actual rooftop (not a generic schematic).
@@ -40477,12 +40423,9 @@ function QuoteSystem() {
       if (!roofImg) return;
 
       // Capture ONLY the panel overlay, transparent background (ignore tiles, photo, all chrome).
-      // The stage and aerial layers have solid dark CSS backgrounds; clear them in the
-      // clone, otherwise they paint over the real satellite photo composited below.
       const panels = await window.html2canvas(stage, {
         useCORS: true, backgroundColor: null, scale: 1.6, logging: false,
-        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-toolbar, .pv-tools, .pv-array-tag, .pv-pin, .pv-pin-pulse"),
-        onclone: doc => doc.querySelectorAll(".pv-stage, .pv-aerial").forEach(el => { el.style.background = "transparent"; }),
+        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-toolbar, .pv-tools, .pv-array-tag"),
       });
 
       // Composite: roof photo (cover-fit) first, then the panels on top.
@@ -40498,13 +40441,13 @@ function QuoteSystem() {
       ctx.drawImage(panels, 0, 0);
 
       const img = out.toDataURL("image/jpeg", 0.85);
-      if (img && img.length > 2000) { specRef.current = { ...specRef.current, designImage: img }; setSpec(s => ({ ...s, designImage: img })); }
+      if (img && img.length > 2000) setSpec(s => ({ ...s, designImage: img }));
     } catch (e) { /* capture failed — proposal falls back to the schematic layout */ }
   };
-  const generateProposal = () => changeStep(3);
+  const generateProposal = async () => { await captureRoof(); go(1); };
 
   React.useEffect(() => {
-    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designViewed.current = false; designedAddr.current = ""; setDesignKey(k => k + 1); };
+    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designedAddr.current = ""; setDesignKey(k => k + 1); };
     window.addEventListener("ss:new-quote", h);
     return () => window.removeEventListener("ss:new-quote", h);
   }, []);
@@ -40515,7 +40458,7 @@ function QuoteSystem() {
       {/* Step bar + navigation */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 28px", flexWrap:"wrap", gap:12 }}>
         <div style={{ flex:1 }}>
-          <StepBar step={step} onStep={changeStep} />
+          <StepBar step={step} onStep={setStep} />
         </div>
         <div style={{ display:"flex", gap:10, paddingTop:18 }}>
           {step > 1 && (
@@ -40524,8 +40467,8 @@ function QuoteSystem() {
             </button>
           )}
           {step < 3 && (
-            <button className="btn btn-primary" disabled={capturing} onClick={() => step === 2 ? generateProposal() : go(1)}>
-              {capturing ? <><span className="pv-spin" /> Capturing roof…</> : step === 2 ? <><Icon d={ICONS.sparkle} size={14} fill={true} stroke={0} /> Generate Proposal</> : <>Next <Icon d={ICONS.chevR} size={14} stroke={2} /></>}
+            <button className="btn btn-primary" onClick={() => step === 2 ? generateProposal() : go(1)}>
+              {step === 2 ? <><Icon d={ICONS.sparkle} size={14} fill={true} stroke={0} /> Generate Proposal</> : <>Next <Icon d={ICONS.chevR} size={14} stroke={2} /></>}
             </button>
           )}
           <button className="btn" disabled={saving} onClick={() => saveCurrent()}>
@@ -40549,8 +40492,7 @@ function QuoteSystem() {
       )}
       {reached.current[2] && (
         <div style={{ display: step === 2 ? "block" : "none" }}>
-          <StepDesign key={designKey} onSpec={onDesignSpec} clientAddress={cust.address}
-            panelOptions={catalogPanels} preferredPanelId={preferredPanelId} />
+          <StepDesign key={designKey} onSpec={setSpec} clientAddress={cust.address} />
         </div>
       )}
       {reached.current[3] && (
