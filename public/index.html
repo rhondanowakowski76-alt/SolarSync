@@ -35697,7 +35697,9 @@ const BRANDS = {
     domain: "portal.azimuth.solar", region: "NSW", users: 44, installs: 531, mrr: 899,
   },
 };
-const TENANT_IDS = ["helios", "voltaic", "azure"];
+// Demo mode (/app?demo=1, off with ?demo=0) shows all three showcase tenants for
+// sales demos; the live app keeps only Helios as the sample tenant.
+const TENANT_IDS = window.__SS_DEMO ? ["helios", "voltaic", "azure"] : ["helios"];
 
 // Brand → CSS vars.
 //   themeVars(brand)        → ONLY exposes brand-prefixed tokens (--brand-light/-mid/-deep/-glow).
@@ -42751,7 +42753,8 @@ const PALETTES = [
 ];
 
 /* Branding editor — live preview, works for tenant & reseller oversight */
-function BrandingEditor({ brand }) {
+// tenantId set → the reseller is editing that tenant's brand on their behalf.
+function BrandingEditor({ brand, tenantId, onSaved }) {
   const [palette, setPalette] = useBR(brand.realLogo ? "sky" : (PALETTES.find(p => p.accent[1] === brand.accent[1])?.id || "azure"));
   const [name, setName] = useBR(brand.name);
   const [tagline, setTagline] = useBR(brand.tagline || "Premium solar solutions");
@@ -42821,12 +42824,18 @@ function BrandingEditor({ brand }) {
     const branding = { accent: pal.accent, glow: pal.glow, name, tagline, logo_url: logoUrl || null };
     const api = window.ssApi;
     if (api && api.getToken && api.getToken()) {
-      try { await api.put("/branding", branding); }
+      try { await api.put(tenantId ? "/tenants/" + encodeURIComponent(tenantId) + "/branding" : "/branding", branding); }
       catch (e) {
         const code = e && e.data && e.data.error;
         window.ssToast && window.ssToast(code === "logo_too_large" ? "Logo is too large — try a smaller file" : code === "support_read_only" ? "Not allowed in this session" : "Could not save branding — check your connection");
         return;
       }
+    }
+    if (tenantId) {
+      window.dispatchEvent(new Event("ss:tenants-changed"));
+      window.ssToast && window.ssToast("Saved — " + name + "'s portals now use this brand");
+      onSaved && onSaved();
+      return;
     }
     window.dispatchEvent(new CustomEvent("ss:branding-changed", { detail: branding }));
     window.ssToast && window.ssToast("Brand published — all portals updated for " + name);
@@ -44112,7 +44121,7 @@ const SERVICES = [
   { name:"Database (PostgreSQL)",status:"operational", ms:12  },
 ];
 
-const TICKETS_INIT = [
+const TICKETS_INIT = [].concat([
   { id:"T-2051",tenant:"azure",  subj:"Custom domain SSL renewal",         pri:"high",status:"Open",       age:"1h",
     notes:"SSL cert expired on portal.azimuthsolar.com.au. Auto-renewal failed last week. Needs urgent action." },
   { id:"T-2049",tenant:"helios", subj:"Add 5 contractor seats to plan",    pri:"med", status:"In Progress", age:"4h",
@@ -44121,7 +44130,7 @@ const TICKETS_INIT = [
     notes:"Voltaic Energy wants Xero OAuth2 integration for monthly financial exports." },
   { id:"T-2043",tenant:"helios", subj:"Logo not showing on client emails",  pri:"med", status:"Resolved",   age:"2d",
     notes:"Logo URL was HTTP not HTTPS in email template. Fixed CDN URL. Verified on Gmail and Outlook." },
-];
+]).filter(x => (window.__SS_DEMO || !["voltaic", "azure"].includes(x.tenant)));
 
 const ADDONS = [
   { id:"compliance-suite", name:"Compliance Reports Suite", desc:"8 branded AS/NZS documents — full installation manual & handover pack plus grid-connect, battery, off-grid, site inspection, inverter commissioning, cleaning & operational testing reports. Editable, photo-enabled & Word-downloadable by tenant staff and contractors.", price:69, category:"Compliance & Reporting", badge:"Australian Standards", badgeColor:"var(--amber)" },
@@ -45067,13 +45076,13 @@ function ResellerTenants() {
 }
 
 /* ── InvoiceModal ───────────────────────────────────────────── */
-const RESELLER_INVOICES = [
+const RESELLER_INVOICES = [].concat([
   { id:"INV-3041", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3040", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3039", tenant:"voltaic", plan:"Growth", amount:499, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3022", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
   { id:"INV-3021", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
-];
+]).filter(x => (window.__SS_DEMO || !["voltaic", "azure"].includes(x.tenant)));
 
 const PLAN_ITEMS = {
   Scale:  [["SolarSync Scale Plan — monthly licence",1,699],["Unlimited contractor seats",1,150],["Dedicated CSM",1,50]],
@@ -45331,9 +45340,10 @@ function ResellerBilling() {
 }
 
 /* ── ResellerBranding ───────────────────────────────────────── */
-function ResellerBranding() {
+function ResellerBranding({ brand }) {
   const [tab, setTab] = useStateR("own");
   const [previewId, setPreviewId] = useStateR(null);
+  const [editId, setEditId] = useStateR(null);
   const realIds = useRealTenants();
   const tenantIds = [...realIds, ...SHOWCASE_IDS];
   // Arriving via the tenant drawer's "View Branding" button: land on the
@@ -45356,9 +45366,19 @@ function ResellerBranding() {
         </div>
       </div>
 
-      {tab === "own" && <BrandingEditor brand={BRANDS.solarsync} />}
+      {tab === "own" && <BrandingEditor brand={brand || BRANDS.solarsync} />}
 
-      {tab === "tenants" && (
+      {tab === "tenants" && editId && BRANDS[editId] && (
+        <>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:"var(--gap)" }}>
+            <button className="btn" onClick={()=>setEditId(null)}>← All tenants</button>
+            <span className="card-sub">Editing <b>{BRANDS[editId].name}</b>'s brand for them — they can still change it themselves.</span>
+          </div>
+          <BrandingEditor key={editId} brand={BRANDS[editId]} tenantId={editId} onSaved={()=>setEditId(null)} />
+        </>
+      )}
+
+      {tab === "tenants" && !editId && (
         <>
           {tenantIds.length===0 && <div className="panel panel-pad chrome-top" style={{ textAlign:"center",color:"var(--tx-dim)",fontSize:13,padding:"26px 0" }}>Your tenants' white-label brands appear here once they customise their portals.</div>}
           <div className="brand-grid">
@@ -45385,7 +45405,10 @@ function ResellerBranding() {
                   </div>
                   <div style={{ display:"flex",gap:8,marginTop:14 }}>
                     <span className="comp-note ok" style={{ fontSize:12 }}><Icon d={ICONS.check} size={13} stroke={2.4} style={{ verticalAlign:"-2px" }} /> Approved</span>
-                    <button className="btn" style={{ marginLeft:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setPreviewId(id)}>
+                    {b.real && <button className="btn btn-primary" style={{ marginLeft:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setEditId(id)}>
+                      <Icon d={ICONS.palette} size={14} stroke={2} /> Edit branding
+                    </button>}
+                    <button className="btn" style={{ marginLeft:b.real?0:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setPreviewId(id)}>
                       <Icon d={ICONS.eye} size={14} stroke={2} /> Preview
                     </button>
                   </div>
@@ -49558,7 +49581,7 @@ const MSG_THREADS = {
       { who: "them", t: "Custom domain SSL is up for renewal — can you handle it?", time: "Mon 2:14 PM" },
       { who: "me", t: "On it — auto-renew is now enabled, no action needed on your side.", time: "Mon 2:20 PM" },
     ] },
-  ],
+  ].filter(x => window.__SS_DEMO || !["r-voltaic", "r-azure"].includes(x.id)),
   tenant: [
     { id: "t-smith", who: "Smith Residence", role: "Client · SS-1042", online: true, msgs: [
       { who: "them", t: "Hi, just checking the install is still on for Monday?", time: "Today 8:40 AM" },
@@ -52966,7 +52989,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "finance":   return <TenantAccounting />;
       case "accounting": return <TenantAccounting />;
       case "timeclock": return <TimeClock heading="Reseller Time Clock" subheading="Clock on and off for your reseller staff — GPS-tagged for accurate timesheets and payroll" />;
-      case "branding":  return <ResellerBranding />;
+      case "branding":  return <ResellerBranding brand={brand} />;
       case "health":    return <ResellerHealth />;
       case "analytics": return <ResellerAnalytics />;
       case "support":   return <ResellerSupport />;
@@ -53267,11 +53290,12 @@ function App() {
 
   const canGoBack = navHistory.length > 0;
 
-  // Tenant's saved white-label branding (colours/name), fetched from the backend
-  // and applied live across every portal. Reseller stays on the SolarSync brand.
+  // Saved white-label branding (colours/name/logo), fetched from the backend and
+  // applied live. Tenants: across their portals. Reseller: on its own portal.
   const [brandOverride, setBrandOverride] = useM({});
+  const ownResellerBrand = portal === "reseller" && !!authUser && authUser.app_role === "reseller";
   useEffM(() => {
-    if (!authed || portal === "reseller") { setBrandOverride({}); return; }
+    if (!authed || (portal === "reseller" && !ownResellerBrand)) { setBrandOverride({}); return; }
     const api = window.ssApi;
     if (api && api.getToken && api.getToken()) {
       api.get("/branding").then(b => { if (b && typeof b === "object") setBrandOverride(b); }).catch(() => {});
@@ -53329,7 +53353,7 @@ function App() {
 
   // brand = SolarSync for reseller portal, selected tenant (+ saved branding) otherwise
   const base = portal === "reseller" ? BRANDS.solarsync : BRANDS[tenant];
-  const ov = portal === "reseller" ? null : brandOverride;
+  const ov = portal === "reseller" && !ownResellerBrand ? null : brandOverride;
   const brand = !ov ? base : {
     ...base,
     ...(ov.accent ? { accent: ov.accent } : {}),
@@ -53340,7 +53364,7 @@ function App() {
   };
   // Full token override so the tenant's brand colour re-themes the whole portal
   // (buttons, charts, accents) — not just the brand-prefixed tokens.
-  const themed = portal === "reseller" ? {} : (window.themeVarsPreview ? window.themeVarsPreview(brand) : themeVars(brand));
+  const themed = portal === "reseller" && !(ownResellerBrand && brandOverride.accent) ? {} : (window.themeVarsPreview ? window.themeVarsPreview(brand) : themeVars(brand));
 
   const titleEntry = TITLES[portal]?.[screen] || [screen, ""];
   const [title, sub] = titleEntry;
