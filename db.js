@@ -343,6 +343,10 @@ async function migrate() {
     `create table if not exists platform_settings ( key text primary key, value text )`,
     `create table if not exists ai_usage ( tenant_id text not null, month text not null, count int default 0, primary key (tenant_id, month))`,
     `insert into addons (key, name, price) select 'ai-assistant', 'AI Assistant', 19 where not exists (select 1 from addons where key='ai-assistant')`,
+    // STC calculator (stc.js): regulator postcode → zone table and per-tenant rates.
+    `create table if not exists stc_postcode_zones ( pc_from int not null, pc_to int not null, zone int not null, loaded_at timestamptz default now())`,
+    `create index if not exists stc_pc_idx on stc_postcode_zones (pc_from, pc_to)`,
+    `alter table tenants add column if not exists stc_settings jsonb default '{}'`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

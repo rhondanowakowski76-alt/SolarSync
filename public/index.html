@@ -3736,6 +3736,7 @@ const PORTAL_NAV = {
     { id: "schedule", label: "Schedule", icon: "cal" },
     { id: "journey", label: "Client Journey", icon: "route" },
     { id: "quotes", label: "Quotes & PV-AI", icon: "sparkle" },
+    { id: "stc", label: "STC Calculator", icon: "sun" },
     { id: "catalog", label: "Product Catalog", icon: "panel" },
     { id: "inventory", label: "Inventory", icon: "battery" },
     { id: "cleaning", label: "Cleaning & Testing", icon: "clean" },
@@ -3755,6 +3756,7 @@ const PORTAL_NAV = {
     { id: "today", label: "Today", icon: "dashboard" },
     { id: "jobs", label: "My Jobs", icon: "pin" },
     { id: "pvdesign", label: "PV Designer", icon: "sun" },
+    { id: "stc", label: "STC Calculator", icon: "zap" },
     { id: "onsite", label: "Onsite Forms", icon: "compliance" },
     { id: "photos", label: "Site Photos", icon: "photo" },
     { id: "schedule", label: "Calendar", icon: "cal" },
@@ -9676,6 +9678,169 @@ function TenantSubscription() {
 }
 window.TenantSubscription = TenantSubscription;
 
+/* ══════════════════════════════════════════════════════════════════
+   STC Calculator — same method as the Clean Energy Regulator:
+   STCs = kW × postcode zone rating × deeming years (rounded down).
+   ══════════════════════════════════════════════════════════════════ */
+const STC_ZONE_INFO = { 1: "Zone 1 · 1.622", 2: "Zone 2 · 1.536", 3: "Zone 3 · 1.382", 4: "Zone 4 · 1.185" };
+
+function StcCalculator() {
+  const api = window.ssApi;
+  const authed = !!(api && api.getToken && api.getToken());
+  const me = (api && api.getUser && api.getUser()) || {};
+  const [cfg, setCfg] = React.useState({ zone_ratings: { 1: 1.622, 2: 1.536, 3: 1.382, 4: 1.185 }, scheme_end: 2030, battery_max_kwh: 50, postcode_rows: 0 });
+  const [postcode, setPostcode] = React.useState("");
+  const [zone, setZone] = React.useState(3);
+  const [zoneSrc, setZoneSrc] = React.useState("manual");     // "postcode" when looked up
+  const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [mode, setMode] = React.useState("kw");
+  const [kw, setKw] = React.useState("6.6");
+  const [panels, setPanels] = React.useState("15");
+  const [watts, setWatts] = React.useState("440");
+  const [batt, setBatt] = React.useState("");
+  const [price, setPrice] = React.useState("38");
+  const [factor, setFactor] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!authed) return;
+    api.get("/stc/settings").then(r => {
+      setCfg(c => ({ ...c, ...r }));
+      if (r.stc_price != null) setPrice(String(r.stc_price));
+      if (r.battery_factor != null) setFactor(String(r.battery_factor));
+    }).catch(() => {});
+  }, []);
+  React.useEffect(() => {
+    if (!authed || !/^\d{4}$/.test(postcode)) { setZoneSrc("manual"); return undefined; }
+    let alive = true;
+    api.get("/stc/zone?postcode=" + postcode).then(r => {
+      if (!alive) return;
+      if (r.zone) { setZone(r.zone); setZoneSrc("postcode"); } else setZoneSrc(r.table_loaded ? "unknown" : "manual");
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [postcode]);
+
+  const year = Number(date.slice(0, 4)) || new Date().getFullYear();
+  const deeming = Math.max(0, cfg.scheme_end - year + 1);
+  const sysKw = mode === "kw" ? Number(kw) || 0 : ((Number(panels) || 0) * (Number(watts) || 0)) / 1000;
+  const rating = cfg.zone_ratings[zone] || 0;
+  const panelStc = Math.floor(sysKw * rating * deeming);
+  const battKwh = Math.min(Number(batt) || 0, cfg.battery_max_kwh);
+  const battStc = factor !== "" ? Math.floor(battKwh * Number(factor)) : 0;
+  const total = panelStc + battStc;
+  const p = Number(price) || 0;
+  const money = n => "$" + Math.round(n).toLocaleString("en-AU");
+
+  const saveRates = async () => {
+    setSaving(true);
+    try { await api.put("/stc/settings", { stc_price: price, battery_factor: factor }); window.ssToast && window.ssToast("Rates saved for your whole team"); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't save the rates", "error"); }
+    setSaving(false);
+  };
+
+  const box = { padding: "14px 16px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" };
+  const seg = (val, cur, set, label) => (
+    <button type="button" className={"btn" + (cur === val ? " btn-primary" : "")} style={{ flex: 1, padding: "7px 10px" }} onClick={() => set(val)}>{label}</button>
+  );
+  return (
+    <div className="fade-in" data-testid="stc-calculator">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: "var(--gap)", alignItems: "start" }}>
+        <div className="panel panel-pad chrome-top">
+          <div className="card-title" style={{ marginBottom: 4 }}>System details</div>
+          <div className="card-sub" style={{ marginBottom: 14 }}>Same method as the Clean Energy Regulator's REC Registry calculator.</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <label className="field"><span className="field-label">Install postcode</span>
+                <input className="field-input" inputMode="numeric" maxLength={4} placeholder="e.g. 4000" value={postcode} onChange={e => setPostcode(e.target.value.replace(/\D/g, ""))} /></label>
+              <label className="field"><span className="field-label">Install date</span>
+                <input className="field-input" type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
+            </div>
+            <div className="field"><span className="field-label">Zone {zoneSrc === "postcode" ? "— from postcode" : zoneSrc === "unknown" ? "— postcode not found, pick one" : "— pick (postcode lookup needs the zone file loaded)"}</span>
+              <div style={{ display: "flex", gap: 6 }}>{[1, 2, 3, 4].map(z => seg(z, zone, v => { setZone(v); setZoneSrc("manual"); }, "Zone " + z))}</div>
+            </div>
+            <div className="field"><span className="field-label">Solar panels</span>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>{seg("kw", mode, setMode, "System size (kW)")}{seg("panels", mode, setMode, "Panels × watts")}</div>
+              {mode === "kw"
+                ? <input className="field-input" inputMode="decimal" value={kw} onChange={e => setKw(e.target.value)} placeholder="Rated output in kW, e.g. 6.6" />
+                : <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <input className="field-input" inputMode="numeric" value={panels} onChange={e => setPanels(e.target.value)} placeholder="Number of panels" />
+                    <input className="field-input" inputMode="numeric" value={watts} onChange={e => setWatts(e.target.value)} placeholder="Watts per panel" />
+                  </div>}
+            </div>
+            <label className="field"><span className="field-label">Battery usable capacity (kWh) — optional</span>
+              <input className="field-input" inputMode="decimal" value={batt} onChange={e => setBatt(e.target.value)} placeholder="e.g. 13.5" /></label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <label className="field"><span className="field-label">STC price ($ each)</span>
+                <input className="field-input" inputMode="decimal" value={price} onChange={e => setPrice(e.target.value)} /></label>
+              <label className="field"><span className="field-label">Battery STCs per kWh</span>
+                <input className="field-input" inputMode="decimal" value={factor} onChange={e => setFactor(e.target.value)} placeholder="from the regulator" /></label>
+            </div>
+            {me.app_role === "tenant_admin" && <button className="btn" disabled={saving} onClick={saveRates}>Save these rates for my team</button>}
+          </div>
+        </div>
+
+        <div className="panel panel-pad chrome-top" style={{ background: "linear-gradient(160deg, rgba(58,125,255,0.16), rgba(58,125,255,0.02))" }}>
+          <div className="card-sub" style={{ textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 700 }}>Estimated certificates</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "6px 0 2px" }}>
+            <div data-testid="stc-total" style={{ fontFamily: "var(--font-head)", fontWeight: 800, fontSize: 64, lineHeight: 1, color: "var(--tx-hi)" }}>{total}</div>
+            <div className="card-sub" style={{ fontSize: 16 }}>STCs</div>
+          </div>
+          <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 28, color: "var(--blue-light)" }}>{money(total * p)} <span className="card-sub" style={{ fontSize: 14 }}>off the price at ${p || 0}/STC</span></div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18 }}>
+            <div style={box}><div className="card-sub">Solar panels</div><div style={{ fontSize: 22, fontWeight: 700, color: "var(--tx-hi)" }}>{panelStc}</div>
+              <div className="card-sub">{sysKw.toFixed(2)} kW × {rating} × {deeming} yr</div></div>
+            <div style={box}><div className="card-sub">Battery</div><div style={{ fontSize: 22, fontWeight: 700, color: "var(--tx-hi)" }}>{battStc}</div>
+              <div className="card-sub">{battKwh ? (factor !== "" ? battKwh + " kWh × " + factor : "enter the per-kWh rate") : "no battery"}</div></div>
+          </div>
+
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+            <div className="card-sub"><b>{STC_ZONE_INFO[zone]}</b> MWh per kW · <b>{deeming}</b> deeming year{deeming === 1 ? "" : "s"} for a {year} install (scheme ends {cfg.scheme_end})</div>
+            {deeming === 0 && <div style={{ color: "var(--amber)" }}>Installs after {cfg.scheme_end} don't earn STCs under the current scheme.</div>}
+            {Number(batt) > cfg.battery_max_kwh && <div style={{ color: "var(--amber)" }}>Only the first {cfg.battery_max_kwh} kWh of a battery earns STCs.</div>}
+            <div className="card-sub" style={{ fontStyle: "italic" }}>An estimate — the final number is set when the certificates are created in the REC Registry. STC prices move daily.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+window.StcCalculator = StcCalculator;
+
+// Reseller: load the Clean Energy Regulator's postcode → zone file for every tenant.
+function StcPostcodeUpload() {
+  const api = window.ssApi;
+  const [info, setInfo] = React.useState(null);
+  const ref = React.useRef(null);
+  const load = () => api.get("/stc/settings").then(setInfo).catch(() => {});
+  React.useEffect(() => { if (api && api.getToken && api.getToken()) load(); }, []);
+  const onPick = async e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const r = await api.post("/stc/postcodes", { csv: await f.text() });
+      window.ssToast && window.ssToast(r.rows + " postcode ranges loaded");
+      load();
+    } catch (err) {
+      window.ssToast && window.ssToast(err && err.data && err.data.error === "not_a_postcode_file" ? "That doesn't look like the regulator's postcode file — save it as CSV and try again" : "Upload failed", "error");
+    }
+  };
+  if (!info) return null;
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }} data-testid="stc-postcodes">
+      <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
+        <div><div className="card-title">STC postcode zones</div>
+          <div className="card-sub">{info.postcode_rows
+            ? info.postcode_rows + " postcode ranges loaded" + (info.postcodes_loaded_at ? " · " + new Date(info.postcodes_loaded_at).toLocaleDateString("en-AU") : "") + " — the STC calculator looks up zones automatically"
+            : "Not loaded — tenants pick the zone by hand. Download the postcode zone file from the Clean Energy Regulator, save it as CSV and upload it here."}</div></div>
+        <input ref={ref} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={onPick} />
+        <button className="btn" onClick={() => ref.current && ref.current.click()}>{info.postcode_rows ? "Replace file" : "Upload CSV"}</button>
+      </div>
+    </div>
+  );
+}
+window.StcPostcodeUpload = StcPostcodeUpload;
+
 // Compliance documents uploaded by staff and contractors themselves (licences,
 // insurance, SWMS ...), with expiry warnings. Only the tenant admin sees everyone's.
 function TeamComplianceDocs() {
@@ -12918,6 +13083,7 @@ function ResellerBranding({ brand }) {
 function ResellerHealth() {
   return (
     <div className="fade-in">
+      <StcPostcodeUpload />
       <div className="kpi-row">
         <RKpi i={0} label="Uptime (90d)"      value="99.98%" icon="pulse"    trend="flat" delta="SLA 99.9%"            />
         <RKpi i={1} label="Avg. API Latency"  value="64ms"   icon="zap"      trend="flat" delta="p95 142ms"            />
@@ -20538,6 +20704,7 @@ const TITLES = {
     schedule:     ["Schedule", "Jobs, installs and appointments calendar"],
     journey:      ["Client Journey", "Each customer from enquiry to handover"],
     quotes:       ["Quotes & PV-AI", "Build quotes · design the array · send to client"],
+    stc:          ["STC Calculator", "Small-scale technology certificates for solar & batteries"],
     catalog:      ["Product Catalog", "Your priced products & services"],
     inventory:    ["Inventory", "Stock levels & over-the-counter sales"],
     cleaning:     ["Cleaning & Testing", "Maintenance schedule"],
@@ -20557,6 +20724,7 @@ const TITLES = {
     today:      ["Today", "Your daily briefing"],
     jobs:       ["My Jobs", "Geo-clock on/off"],
     pvdesign:   ["PV Designer", "Panel layout on live satellite imagery"],
+    stc:        ["STC Calculator", "Certificates for solar & batteries"],
     onsite:     ["Onsite Forms", "Checklists, readings & digital sign-off"],
     photos:     ["Site Photos", "Take & upload install photos"],
     schedule:   ["Calendar", "Your schedule"],
@@ -20630,6 +20798,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "schedule":      return <TenantCalendar key={tenant} tenantId={tenant} />;
       case "journey":       return <ClientJourney />;
       case "quotes":        return <QuoteSystem />;
+      case "stc":           return <StcCalculator />;
       case "catalog":       return <TenantCatalog />;
       case "inventory":     return <TenantInventory />;
       case "cleaning":      return <TenantCleaning />;
@@ -20661,6 +20830,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "payslips":   return <ContractorPayslips />;
       case "earnings":   return <ContractorEarnings />;
       case "cdocuments": return <ContractorDocs brand={brand} />;
+      case "stc":        return <StcCalculator />;
       case "settings":   return <Settings portal={portal} brand={brand} user={user} />;
       default:           return <Placeholder id={screen} portal={portal} />;
     }

@@ -11,6 +11,7 @@ const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
 const fieldWork = require("./field-work");
 const billing = require("./billing");
+const stc = require("./stc");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -236,6 +237,8 @@ supportAccess.register(app, { h, ok });
 fieldWork.register(app, { h, ok });
 // Tenant subscriptions: plans, extra seats, add-ons, 14-day trial (Stripe).
 billing.register(app, { h, ok });
+// STC calculator: postcode zones, tenant STC/battery rates.
+stc.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
