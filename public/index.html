@@ -35194,6 +35194,12 @@ var e,t,r="function"==typeof Symbol?Symbol:{},a=r.iterator||"@@iterator",n=r.toS
     // Transparent token refresh on 401 bad_token, then retry once.
     // Skip for the refresh endpoint itself to avoid infinite loops.
     const errCode = first.data && first.data.error;
+    // A support session that was revoked, closed or has timed out: go back to the
+    // reseller's own login instead of trying to refresh into the tenant's account.
+    if (first.status === 401 && (errCode === "support_ended" || (errCode === "bad_token" && supportSession()))) {
+      supportExit(errCode === "support_ended" ? "The tenant ended support access (or it expired)." : "Support session timed out — enter again from Support.");
+      throw Object.assign(new Error(errCode), { status: first.status, data: first.data });
+    }
     const isExpiredToken = first.status === 401 && errCode === "bad_token";
     const isRefreshCall  = path === "/auth/refresh";
     if (isExpiredToken && !isRefreshCall && getRefreshToken()) {
@@ -35214,8 +35220,34 @@ var e,t,r="function"==typeof Symbol?Symbol:{},a=r.iterator||"@@iterator",n=r.toS
     throw Object.assign(new Error(errCode || ("http_" + first.status)), { status: first.status, data: first.data });
   }
 
+  // Tenant-requested support sessions (reseller acting in a tenant's portal, with
+  // customer/staff/contractor details masked by the server). The reseller's own
+  // session is parked while it runs and restored on exit.
+  const SUPPORT_RETURN = "ss_support_return";
+  function supportSession() { const u = getUser(); return !!(u && u.support); }
+  async function supportEnter(id) {
+    const r = await call("/support-requests/" + encodeURIComponent(id) + "/enter", { method: "POST", body: {} });
+    localStorage.setItem(SUPPORT_RETURN, JSON.stringify({ a: getToken(), r: getRefreshToken(), u: localStorage.getItem(USER_KEY) }));
+    localStorage.removeItem(REFRESH_KEY);
+    setSession({ access_token: r.access_token, user: { ...r.user, tenant_name: r.tenant && r.tenant.name, session_ends_at: r.session_ends_at } });
+    location.href = "/app";
+  }
+  function supportExit(reason) {
+    const tok = getToken();
+    if (tok) fetch("/api/support-requests/exit", { method: "POST", headers: { Authorization: "Bearer " + tok } }).catch(() => {});
+    let back = null; try { back = JSON.parse(localStorage.getItem(SUPPORT_RETURN) || "null"); } catch (e) {}
+    clear(); localStorage.removeItem(SUPPORT_RETURN);
+    if (back) {
+      if (back.a) localStorage.setItem(TOKEN_KEY, back.a);
+      if (back.r) localStorage.setItem(REFRESH_KEY, back.r);
+      if (back.u) localStorage.setItem(USER_KEY, back.u);
+    }
+    if (reason) { try { sessionStorage.setItem("ss_flash", reason); } catch (e) {} }
+    location.href = "/app";
+  }
+
   window.ssApi = {
-    getToken, getUser, setSession, clear,
+    getToken, getUser, setSession, clear, supportSession, supportEnter, supportExit,
     available: async () => { try { await call("/health"); return true; } catch (e) { return false; } },
     lookup: (name) => call("/auth/lookup", { method: "POST", body: { name } }),
     pin: (user_id, pin) => call("/auth/pin", { method: "POST", body: { user_id, pin } }),
@@ -45378,6 +45410,106 @@ function ResellerHealth() {
 }
 
 /* ── ResellerSupport ────────────────────────────────────────── */
+// Tenant-requested support access. The tenant admin grants SolarSync support a
+// time-limited way into their portal; the server masks customer, staff and
+// contractor details and only allows configuration fixes during that session.
+const SR_FMT = d => d ? new Date(d).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+const SR_STATUS = r => r.active ? "Open" : r.status === "open" ? "Expired" : r.status === "revoked" ? "Revoked" : "Closed";
+function SupportAccessPanel() {
+  const [list, setList] = React.useState(null);
+  const [msg, setMsg] = React.useState("");
+  const [hours, setHours] = React.useState(24);
+  const [busy, setBusy] = React.useState(false);
+  const load = () => window.ssApi.get("/support-requests").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const submit = async () => {
+    if (!msg.trim()) return window.ssToast && window.ssToast("Describe the problem first");
+    setBusy(true);
+    try { await window.ssApi.post("/support-requests", { message: msg.trim(), hours }); setMsg(""); window.ssToast && window.ssToast("Support access granted — we'll be in touch"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't send the request"); }
+    setBusy(false);
+  };
+  const revoke = async id => {
+    try { await window.ssApi.post("/support-requests/" + id + "/revoke", {}); window.ssToast && window.ssToast("Support access removed"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't remove access"); }
+  };
+  return (
+    <div className="panel panel-pad chrome-top" data-testid="support-access-panel">
+      <div className="card-head"><div><div className="card-title">Support access</div>
+        <div className="card-sub">Let SolarSync support into your portal to fix a problem. Your customers', staff and contractors' names, contact details, addresses, notes and photos stay hidden from us, and we can only change settings like branding and products. Remove access at any time.</div></div></div>
+      <textarea className="field-input" rows={3} value={msg} onChange={e => setMsg(e.target.value)} maxLength={2000}
+        placeholder="What's going wrong? (Please don't include customer names or details)" style={{ width: "100%", padding: 10, resize: "vertical", height: "auto" }} />
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: "var(--muted)" }}>Allow access for</span>
+        <select className="field-input" value={hours} onChange={e => setHours(Number(e.target.value))} style={{ height: 34, width: 120, padding: "0 10px" }}>
+          {[2, 8, 24, 72].map(h => <option key={h} value={h}>{h < 24 ? h + " hours" : h / 24 + (h === 24 ? " day" : " days")}</option>)}
+        </select>
+        <button className="btn btn-primary" disabled={busy} onClick={submit} style={{ marginLeft: "auto" }}>{busy ? "Sending…" : "Request support"}</button>
+      </div>
+      {list && list.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          {list.slice(0, 8).map(r => (
+            <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.message}</span>
+              <span className="chip">{SR_STATUS(r)}</span>
+              <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{r.active ? "until " + SR_FMT(r.expires_at) : SR_FMT(r.created_at)}</span>
+              {r.active && <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => revoke(r.id)}>Remove access</button>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function SupportRequestsQueue() {
+  const [list, setList] = React.useState(null);
+  const load = () => window.ssApi.get("/support-requests").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const enter = async id => {
+    try { await window.ssApi.supportEnter(id); }
+    catch (e) { window.ssToast && window.ssToast(e && e.data && e.data.error === "not_active" ? "That request has ended" : "Couldn't open the tenant's portal"); load(); }
+  };
+  const close = async id => {
+    try { await window.ssApi.post("/support-requests/" + id + "/close", {}); window.ssToast && window.ssToast("Marked as fixed — access closed"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't close the request"); }
+  };
+  const open = (list || []).filter(r => r.active);
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginBottom: 16 }} data-testid="support-requests-queue">
+      <div className="card-head"><div><div className="card-title">Tenant support access requests</div>
+        <div className="card-sub">Tenants who have let you into their portal. Inside, their customers', staff and contractors' private details are hidden and only settings can be changed. Everything you do is logged.</div></div></div>
+      {list === null ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Loading…</div>
+        : !list.length ? <div style={{ fontSize: 13, color: "var(--muted)" }}>No requests yet.</div>
+        : list.slice(0, 20).map(r => (
+          <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)", fontSize: 13, opacity: r.active ? 1 : 0.6 }}>
+            <b style={{ whiteSpace: "nowrap" }}>{r.tenant_name || r.tenant_id}</b>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.message}</span>
+            <span className="chip">{SR_STATUS(r)}</span>
+            <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{r.active ? "until " + SR_FMT(r.expires_at) : SR_FMT(r.created_at)}</span>
+            {r.active && <button className="btn btn-primary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => enter(r.id)}>Enter portal</button>}
+            {r.active && <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => close(r.id)}>Close</button>}
+          </div>
+        ))}
+      {open.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>{open.length} open</div>}
+    </div>
+  );
+}
+function SupportSessionBanner({ user }) {
+  const ends = user.session_ends_at ? new Date(user.session_ends_at).getTime() : null;
+  React.useEffect(() => {
+    if (!ends) return;
+    const t = setTimeout(() => window.ssApi.supportExit("Support session timed out — enter again from Support."), Math.max(0, ends - Date.now()));
+    return () => clearTimeout(t);
+  }, [ends]);
+  return (
+    <div data-testid="support-session-banner" style={{ background: "#7A2E0E", color: "#FFF4EC", padding: "9px 18px", display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13, flexWrap: "wrap" }}>
+      <Icon d={ICONS.lock} size={16} stroke={2} />
+      <span><b>Support session · {user.tenant_name || "tenant portal"}</b> — customer, staff &amp; contractor details are hidden; only settings can be changed{ends ? " · ends " + SR_FMT(ends) : ""}</span>
+      <button onClick={() => window.ssApi.supportExit()} style={{ marginLeft: "auto", padding: "5px 12px", borderRadius: 7, border: "1px solid #FFF4EC", background: "transparent", color: "#FFF4EC", fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}>Exit support session</button>
+    </div>
+  );
+}
+
 function ResellerSupport() {
   const [tickets] = useStateR(TICKETS_INIT);
   const [openTicket, setOpenTicket] = useStateR(null);
@@ -45388,6 +45520,7 @@ function ResellerSupport() {
 
   return (
     <div className="fade-in">
+      <SupportRequestsQueue />
       <div className="kpi-row">
         <RKpi i={0} label="Open Tickets"        value={tickets.filter(t=>t.status==="Open").length}        icon="support"  trend="flat" />
         <RKpi i={1} label="In Progress"         value={tickets.filter(t=>t.status==="In Progress").length} icon="clock"    trend="flat" />
@@ -51733,6 +51866,7 @@ function Settings({ portal, brand, user }) {
     <div className="fade-in">
       <div className="dash-grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
         <div className="stack">
+          {portal === "tenant" && me.app_role === "tenant_admin" && !me.support && <SupportAccessPanel />}
           {sections.map(s => (
             <div key={s.title} className="panel panel-pad chrome-top">
               <div className="card-head"><div className="card-title">{s.title}</div><button className="btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={()=>window.ssToast&&window.ssToast("Edit mode enabled — update your details and save")}>Edit</button></div>
@@ -53253,6 +53387,7 @@ function App() {
 
   return (
     <div className="stage" style={themed}>
+      {authUser && authUser.support && <SupportSessionBanner user={authUser} />}
       {tester && (
         <div style={{ background: "#FFC93C", color: "#0F1E3A", padding: "9px 18px", display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13, borderBottom: "1px solid #E0B226" }}>
           <Icon d={ICONS.sparkle} size={16} fill={true} stroke={0} />
@@ -53319,6 +53454,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<ScreenBoundary whol
     clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
   }
   window.ssToast = toast;
+  try { const f = sessionStorage.getItem("ss_flash"); if (f) { sessionStorage.removeItem("ss_flash"); setTimeout(() => toast(f), 800); } } catch (e) {}
 
   function slug(s) { return (s || "document").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 52) || "document"; }
   function todayAU() { return new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "long", year: "numeric" }); }

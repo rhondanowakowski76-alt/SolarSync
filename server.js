@@ -8,9 +8,12 @@ const A = require("./auth");
 const QRCode = require("qrcode");
 const erp = require("./erp");
 const staffSeats = require("./staff-seats");
+const supportAccess = require("./support-access");
 
 const app = express();
 app.use(express.json({ limit: "12mb" }));
+// Tenant-requested support sessions: restrict + mask every /api call they make.
+app.use("/api", supportAccess.guard());
 
 const ok = (res, body) => res.json(body);
 // The reseller keeps its OWN ERP book under the fixed id "reseller-platform"
@@ -216,6 +219,9 @@ app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(asyn
   await audit(req.user.sub, "support_view_enter", portal, "reseller-platform", { ua: req.headers["user-agent"] || null });
   ok(res, { ok: true });
 }));
+
+// Tenant-requested support access (request → enter → masked, audited session).
+supportAccess.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
