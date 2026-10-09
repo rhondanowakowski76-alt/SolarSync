@@ -29,7 +29,7 @@ const TRIAL_DAYS = 14;
 // subscription actually starts, not when someone opens the checkout page.
 const FOUNDER_SLOTS = 15;
 const FOUNDER_PERCENT = 30;
-const FOUNDER_MONTHS = 6;
+const FOUNDER_MONTHS = 12;
 const AI_MONTHLY_CAP = 300;             // assistant replies per tenant per month
 const SEAT_ROLES = ["tenant_admin", "staff", "contractor"];
 const LIVE_STATUSES = ["trialing", "active", "past_due"];
