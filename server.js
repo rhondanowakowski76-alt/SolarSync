@@ -1189,7 +1189,9 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
   let event = null;
   const sig = req.headers["stripe-signature"];
   const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  try { event = (stripe && whSecret) ? stripe.webhooks.constructEvent(req.body, sig, whSecret) : JSON.parse(req.body); }
+  // Never trust an unsigned event: without the signing secret anyone could mark invoices paid.
+  if (!stripe || !whSecret) return res.status(503).send("stripe webhook not configured");
+  try { event = stripe.webhooks.constructEvent(req.body, sig, whSecret); }
   catch (e) { return res.status(400).send(`bad sig: ${e.message}`); }
   if (event.type === "payment_intent.succeeded" || event.type === "checkout.session.completed") {
     const obj = event.data.object;
