@@ -980,11 +980,11 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
 
 app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const plan = String((req.body || {}).plan || "");
-  if (!["Solo", "Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
-  const cur = await one("select id from tenants where id=$1", [req.params.id]);
+  const cur = await one("select * from tenants where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
-  await run("update tenants set plan=$1 where id=$2", [plan, cur.id]);
-  await audit(req.user.sub, "tenant_plan", cur.id, cur.id, { plan });
+  // Same path as the tenant's own plan change, so their Stripe subscription follows.
+  const fail = await billing.changePlan(cur, plan, req.user.sub);
+  if (fail) return res.status(fail.status).json(fail.body);
   ok(res, { id: cur.id, plan });
 }));
 

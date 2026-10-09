@@ -11879,11 +11879,18 @@ function TenantDrawer({ id, onClose }) {
     if (!b.real) { window.ssToast && window.ssToast(b.name + " is a sample tenant — plan not changed"); onClose(); return; }
     try {
       await window.ssApi.put("/tenants/" + backendId + "/plan", { plan: selPlan });
-      b.plan = selPlan; b.mrr = { Starter: 179, Growth: 499, Scale: 899 }[selPlan] || b.mrr;
+      b.plan = selPlan; b.mrr = (PLANS.find(p => p.name === selPlan) || {}).price || b.mrr;
       window.dispatchEvent(new CustomEvent("ss:tenants-changed"));
-      window.ssToast && window.ssToast(b.name + " moved to " + selPlan + " plan");
+      window.ssToast && window.ssToast(b.name + " moved to " + selPlan + " plan — their Stripe subscription was updated too (if they have one)");
       onClose();
-    } catch (e) { window.ssToast && window.ssToast("Couldn't change the plan — try again"); }
+    } catch (e) {
+      const d = (e && e.data) || {};
+      window.ssToast && window.ssToast(
+        d.error === "too_many_people" ? b.name + " has " + d.used + " people signed in but " + selPlan + " allows " + d.limit + " — they need to remove sign-ins or buy extra seats first"
+        : d.error === "payment_failed" ? "Their card was declined for the plan difference — plan not changed (" + (d.message || "declined") + ")"
+        : d.error === "stripe_not_configured" ? "Stripe isn't configured on the server — plan not changed"
+        : "Couldn't change the plan — try again", "error");
+    }
   };
   const [feats, setFeats] = useStateR(null);
   React.useEffect(() => {

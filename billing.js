@@ -150,6 +150,36 @@ async function syncSubscription(sub) {
   }
 }
 
+// Change a tenant's plan, and their Stripe subscription with it when they have one
+// (difference charged or credited pro-rata now). Used by the tenant's own
+// Subscription screen and by the reseller. Returns null on success, else
+// { status, body } describing why nothing changed.
+async function changePlan(t, plan, by) {
+  if (!PLANS[plan]) return { status: 400, body: { error: "bad_plan" } };
+  if (plan === t.plan) return null;
+  // Moving down must still fit everyone currently using a seat.
+  const u = await seatUsage(t.id);
+  if (PLANS[plan].seats != null && u.used > PLANS[plan].seats + u.extra)
+    return { status: 409, body: { error: "too_many_people", used: u.used, limit: PLANS[plan].seats + u.extra } };
+  if (t.stripe_subscription_id && LIVE_STATUSES.includes(t.billing_status)) {
+    if (!stripe()) return { status: 503, body: { error: "stripe_not_configured" } };
+    const sub = await stripe().subscriptions.retrieve(t.stripe_subscription_id, { expand: ["items.data.price"] });
+    const cur = sub.items.data.find(i => String(i.price.metadata && i.price.metadata.ss_key || "").startsWith("plan-"));
+    try {
+      await stripe().subscriptions.update(sub.id, {
+        items: [cur ? { id: cur.id, price: await planPrice(plan) } : { price: await planPrice(plan), tax_rates: [await gstRate()] }],
+        proration_behavior: "always_invoice", payment_behavior: "error_if_incomplete",
+      });
+    } catch (e) {
+      if (!String(e && e.type || "").startsWith("Stripe")) throw e;
+      return { status: 402, body: { error: "payment_failed", message: e.message || "Card declined" } };
+    }
+  }
+  await run("update tenants set plan=$1 where id=$2", [plan, t.id]);
+  await audit(by, "billing_plan", plan, t.id, { from: t.plan });
+  return null;
+}
+
 // Stripe webhook events this module cares about. Returns true when handled.
 async function handleEvent(event) {
   const o = event.data && event.data.object;
@@ -275,25 +305,9 @@ function register(app, { h, ok }) {
   app.post("/api/billing/plan", ...admin, h(async (req, res) => {
     if (!need(res)) return;
     const plan = String((req.body && req.body.plan) || "");
-    if (!PLANS[plan]) return res.status(400).json({ error: "bad_plan" });
     const t = await tenantRow(req);
-    if (plan === t.plan) return ok(res, { ok: true });
-    // Moving down must still fit everyone currently using a seat.
-    const u = await seatUsage(t.id);
-    if (PLANS[plan].seats != null && u.used > PLANS[plan].seats + u.extra)
-      return res.status(409).json({ error: "too_many_people", used: u.used, limit: PLANS[plan].seats + u.extra });
-    if (liveSub(t)) {
-      const sub = await stripe().subscriptions.retrieve(t.stripe_subscription_id, { expand: ["items.data.price"] });
-      const cur = sub.items.data.find(i => String(i.price.metadata && i.price.metadata.ss_key || "").startsWith("plan-"));
-      try {
-        await stripe().subscriptions.update(sub.id, {
-          items: [cur ? { id: cur.id, price: await planPrice(plan) } : { price: await planPrice(plan), tax_rates: [await gstRate()] }],
-          proration_behavior: "always_invoice", payment_behavior: "error_if_incomplete",
-        });
-      } catch (e) { return paymentError(res, e); }
-    }
-    await run("update tenants set plan=$1 where id=$2", [plan, t.id]);
-    await audit(req.user.sub, "billing_plan", plan, t.id, { from: t.plan });
+    const fail = await changePlan(t, plan, req.user.sub);
+    if (fail) return res.status(fail.status).json(fail.body);
     ok(res, { ok: true, seats: await seatUsage(t.id) });
   }));
 
@@ -311,4 +325,4 @@ function register(app, { h, ok }) {
   }));
 }
 
-module.exports = { register, handleEvent, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
+module.exports = { register, handleEvent, changePlan, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
