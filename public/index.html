@@ -5140,7 +5140,7 @@ function OnsiteReport({ jobId, embedded }) {
   const installItems = (STANDARDS[type === "install" ? "grid" : "grid"] || STANDARDS.grid).items;
   const items = type === "install" ? installItems : INSPECTION_ITEMS;
   const rid = type + ":" + job;
-  const rep = store[rid] || { checks: {}, notes: {}, readings: {}, installer: "Dan Webb", date: todayStr(), sig: "", completed: false, ts: "" };
+  const rep = store[rid] || { checks: {}, notes: {}, readings: {}, installer: ((window.ssApi && window.ssApi.getUser && window.ssApi.getUser()) || {}).display_name || "", date: todayStr(), sig: "", completed: false, ts: "" };
   const update = patch => setStore(s => ({ ...s, [rid]: { ...rep, ...patch } }));
   const setCheck = (i, v) => update({ checks: { ...rep.checks, [i]: v } });
   const setNote = (i, v) => update({ notes: { ...rep.notes, [i]: v } });
@@ -9556,11 +9556,52 @@ function TenantTeam() {
             onClose={() => setSlipMem(null)} />
         );
       })()}
+      <TeamComplianceDocs />
       <ClockEventsPanel />
     </div>
   );
 }
 window.TenantTeam = TenantTeam;
+
+// Compliance documents uploaded by staff and contractors themselves (licences,
+// insurance, SWMS ...), with expiry warnings. Only the tenant admin sees everyone's.
+function TeamComplianceDocs() {
+  const api = window.ssApi;
+  const me = (api && api.getUser && api.getUser()) || {};
+  const [docs, setDocs] = React.useState(null);
+  React.useEffect(() => {
+    if (!(api && api.getToken && api.getToken()) || me.app_role !== "tenant_admin") return undefined;
+    let alive = true;
+    api.get("/field-docs?scope=compliance").then(r => { if (alive) setDocs(Array.isArray(r) ? r : []); }).catch(() => { if (alive) setDocs([]); });
+    return () => { alive = false; };
+  }, []);
+  if (docs === null) return null;
+  const byPerson = {};
+  docs.forEach(d => { (byPerson[d.person || "—"] = byPerson[d.person || "—"] || []).push(d); });
+  const flagged = docs.filter(d => !window.ssExpiryNote(d.expiry).ok).length;
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginTop: "var(--gap)" }} data-testid="team-compliance-docs">
+      <div className="card-head"><div><div className="card-title">Staff &amp; Contractor Compliance Documents</div>
+        <div className="card-sub">Uploaded by each person in their own portal{flagged ? " · " + flagged + " expired or expiring within 30 days" : ""}</div></div></div>
+      {docs.length === 0 && <div className="card-sub" style={{ padding: "10px 4px" }}>No documents uploaded yet.</div>}
+      {Object.keys(byPerson).sort().map(p => (
+        <div key={p} style={{ marginTop: 10 }}>
+          <div className="comp-label" style={{ marginBottom: 4 }}>{p}</div>
+          {byPerson[p].map(d => {
+            const ex = window.ssExpiryNote(d.expiry);
+            return (
+              <div key={d.id} className="comp-row" style={{ padding: "8px 4px" }}>
+                <span className={"comp-check " + (ex.ok ? "ok" : "warn")}><Icon d={ex.ok ? ICONS.docs : ICONS.alert} size={13} stroke={2.2} /></span>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 13.5 }}>{d.name}</div><div className="card-sub">{d.category} · {ex.note}</div></div>
+                <button className="btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => window.ssOpenFieldDoc(d.id)}><Icon d={ICONS.eye} size={13} stroke={2} /></button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /* Geo-tagged clock on/off feed — what the crew recorded onsite */
 function ClockEventsPanel() {
@@ -10073,7 +10114,11 @@ const CAL_TYPES = [
   { id: "handover",        label: "Handover",      color: "#0F1E3A"   },
   { id: "service_request", label: "Svc Request",   color: "#3A7DFF"   },
   { id: "other",           label: "Other",         color: "#5A6573"   },
+  { id: "unavailable",     label: "Not available", color: "#9AA3AF"   },
+  { id: "personal",        label: "Personal",      color: "#7C5CFF"   },
 ];
+// Types that are availability entries, not bookings — never offered in the booking form.
+const CAL_NON_BOOKING = ["service_request", "unavailable", "personal"];
 const CAL_TYPE_COLOR = Object.fromEntries(CAL_TYPES.map(t => [t.id, t.color]));
 
 const CAL_INIT = [
@@ -10158,7 +10203,8 @@ function useCalData(tenantId) {
   const addEvt = async ev => {
     if (!authed) { const local = { ...ev, id: "ce" + Date.now() }; setEvts(p => [...p, local]); return local; }
     try {
-      const created = await api.post("/bookings", _bookingFromEvt(ev));
+      const created = await calSaveWithCrewCheck(b => api.post("/bookings", b), _bookingFromEvt(ev));
+      if (!created) return null;   // they chose not to book someone who is away
       const mapped = _evtFromBooking(created);
       setEvts(p => [...p, mapped]);
       return mapped;   // caller can confirm the save genuinely reached the server
@@ -10172,10 +10218,13 @@ function useCalData(tenantId) {
     }
   };
   const updateEvt = async ev => {
-    setEvts(p => p.map(e => e.id === ev.id ? ev : e));   // optimistic
-    if (!authed) return;
-    try { await api.put("/bookings/" + ev.id, _bookingFromEvt(ev)); }
-    catch (e) { window.ssToast && window.ssToast("Could not update event", "error"); }
+    if (!authed) { setEvts(p => p.map(e => e.id === ev.id ? ev : e)); return ev; }
+    try {
+      const saved = await calSaveWithCrewCheck(b => api.put("/bookings/" + ev.id, b), _bookingFromEvt(ev));
+      if (!saved) return null;
+      setEvts(p => p.map(e => e.id === ev.id ? _evtFromBooking(saved) : e));
+      return ev;
+    } catch (e) { window.ssToast && window.ssToast("Could not update event", "error"); return null; }
   };
   const deleteEvt = async id => {
     setEvts(p => p.filter(e => e.id !== id));            // optimistic
@@ -10184,6 +10233,159 @@ function useCalData(tenantId) {
     catch (e) { window.ssToast && window.ssToast("Could not delete event", "error"); }
   };
   return { evts, addEvt, updateEvt, deleteEvt };
+}
+
+/* ── Crew + availability ─────────────────────────────────────────
+   A booking's "installer" can name several people ("Dan Webb, Kira Park").
+   Staff and contractors mark days they're not available; the scheduler is
+   warned before booking someone on one of those days. */
+function calCrewOf(s) { return String(s || "").split(",").map(x => x.trim()).filter(Boolean); }
+
+async function calSaveWithCrewCheck(send, body) {
+  try { return await send(body); }
+  catch (e) {
+    if (e && e.status === 409 && e.data && e.data.error === "crew_unavailable") {
+      const who = (e.data.clashes || []).map(c => c.person + " (" + c.reason + ")").join(", ");
+      if (!window.confirm("Not available that day: " + who + ".\n\nBook them anyway?")) return null;
+      return await send({ ...body, force: true });
+    }
+    throw e;
+  }
+}
+
+function calMe() {
+  const u = window.ssApi && window.ssApi.getUser ? window.ssApi.getUser() : null;
+  return u || { display_name: "Dan Webb", app_role: "contractor" };   // design preview
+}
+
+// Team member names for crew pickers (falls back to the preview crew when signed out).
+function useTeamNames() {
+  const api = window.ssApi;
+  const authed = !!(api && api.getToken && api.getToken());
+  const [names, setNames] = useCalS(authed ? [] : CAL_CREW.filter(n => n !== "Unassigned"));
+  useCalE(() => {
+    if (!authed) return undefined;
+    let alive = true;
+    api.get("/team").then(r => { if (alive && Array.isArray(r)) setNames(r.map(m => m.name).filter(Boolean)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [authed]);
+  return names;
+}
+
+function useAvailability() {
+  const api = window.ssApi;
+  const authed = !!(api && api.getToken && api.getToken());
+  const [list, setList] = useCalS([]);
+  useCalE(() => {
+    if (!authed) return undefined;
+    let alive = true;
+    api.get("/availability").then(r => { if (alive && Array.isArray(r)) setList(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [authed]);
+  const add = async d => {
+    if (!authed) { const local = { ...d, id: "av" + Date.now(), person: d.person || calMe().display_name, kind: d.kind || "unavailable", date_to: d.date_to || d.date_from }; setList(p => [...p, local]); return local; }
+    try { const r = await api.post("/availability", d); setList(p => [...p, r]); return r; }
+    catch (e) { window.ssToast && window.ssToast("Could not save — check the dates and try again", "error"); return null; }
+  };
+  const remove = async id => {
+    if (authed) {
+      try { await api.del("/availability/" + id); }
+      catch (e) { window.ssToast && window.ssToast("Could not remove that entry", "error"); return false; }
+    }
+    setList(p => p.filter(a => a.id !== id));
+    return true;
+  };
+  return { list, add, remove };
+}
+
+// Who is away on a given date (YYYY-MM-DD)?
+function calAwayOn(list, date) {
+  return list.filter(a => a.kind === "unavailable" && a.date_from <= date && a.date_to >= date).map(a => a.person);
+}
+
+// Spread availability entries across each day they cover, as calendar chips.
+function calAvailEvents(list) {
+  const out = [];
+  list.forEach(a => {
+    const d = new Date(a.date_from + "T00:00:00"), end = new Date((a.date_to || a.date_from) + "T00:00:00");
+    for (let n = 0; d <= end && n < 92; n++, d.setDate(d.getDate() + 1)) {
+      out.push({ id: a.id + "@" + n, _av: a, type: a.kind === "unavailable" ? "unavailable" : "personal",
+        title: a.kind === "unavailable" ? a.person + " — away" : (a.title || "Personal"),
+        date: calFmt(d.getFullYear(), d.getMonth(), d.getDate()), time: a.time || "", end: a.end_time || "",
+        installer: a.person, status: "confirmed", notes: a.notes || "" });
+    }
+  });
+  return out;
+}
+
+function AvailabilityModal({ entry, people, canPickPerson, canDelete, onSave, onDelete, onClose }) {
+  const isNew = !entry.id;
+  const [f, setF] = useCalS({ kind: "unavailable", person: "", title: "", date_from: "", date_to: "", time: "", end_time: "", notes: "", ...entry });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const valid = f.date_from && (!f.date_to || f.date_to >= f.date_from) && (f.kind === "unavailable" || String(f.title).trim());
+  return (
+    <div className="drawer-scrim" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} data-testid="avail-modal"
+        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(460px,94vw)", background: "var(--glass)", border: "1px solid var(--line-strong)", borderRadius: 18, overflow: "hidden", zIndex: 300 }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: calColor(f.kind === "unavailable" ? "unavailable" : "personal"), flexShrink: 0 }} />
+          <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>
+            {isNew ? (f.kind === "unavailable" ? "Mark not available" : "Add calendar entry") : (f.kind === "unavailable" ? f.person + " — not available" : f.title)}
+          </div>
+          <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose}><Icon d="M18 6L6 18M6 6l12 12" size={13} stroke={2.2} /></button>
+        </div>
+        <div style={{ padding: "18px 20px", maxHeight: "62vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 11 }}>
+          {isNew ? (
+            <>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["unavailable", "Not available"], ["entry", "Personal entry"]].map(([k, l]) => (
+                  <button key={k} type="button" className={"btn" + (f.kind === k ? " btn-primary" : "")} style={{ flex: 1 }} onClick={() => set("kind", k)}>{l}</button>
+                ))}
+              </div>
+              {canPickPerson && (
+                <label className="field">
+                  <span className="field-label">Who</span>
+                  <select className="field-input" value={f.person} onChange={e => set("person", e.target.value)}>
+                    <option value="">Me</option>
+                    {people.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="field">
+                <span className="field-label">{f.kind === "unavailable" ? "Reason (optional — e.g. Leave, Sick, Other job)" : "Title"}</span>
+                <input className="field-input" value={f.title} onChange={e => set("title", e.target.value)} />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <label className="field"><span className="field-label">From</span>
+                  <input className="field-input" type="date" value={f.date_from} onChange={e => set("date_from", e.target.value)} /></label>
+                <label className="field"><span className="field-label">To</span>
+                  <input className="field-input" type="date" value={f.date_to} min={f.date_from} onChange={e => set("date_to", e.target.value)} /></label>
+                {f.kind === "entry" && <>
+                  <label className="field"><span className="field-label">Start time</span>
+                    <input className="field-input" type="time" value={f.time} onChange={e => set("time", e.target.value)} /></label>
+                  <label className="field"><span className="field-label">End time</span>
+                    <input className="field-input" type="time" value={f.end_time} onChange={e => set("end_time", e.target.value)} /></label>
+                </>}
+              </div>
+              <label className="field"><span className="field-label">Notes {f.kind === "unavailable" ? "(only you and your admin see these)" : ""}</span>
+                <textarea className="field-input" rows={2} value={f.notes} onChange={e => set("notes", e.target.value)} style={{ resize: "vertical" }} /></label>
+            </>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13.5 }}>
+              <div className="comp-label">{f.date_from}{f.date_to && f.date_to !== f.date_from ? " → " + f.date_to : ""}{f.time ? " · " + f.time + (f.end_time ? "–" + f.end_time : "") : ""}</div>
+              {f.kind === "unavailable" && f.title && <div className="card-sub">{f.title}</div>}
+              {f.notes && <div className="card-sub" style={{ fontStyle: "italic" }}>{f.notes}</div>}
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "12px 18px", borderTop: "1px solid var(--line)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          {!isNew && canDelete && <button className="btn" style={{ color: "var(--danger, #e5484d)", marginRight: "auto" }} onClick={() => onDelete(entry.id)}>Remove</button>}
+          <button className="btn" onClick={onClose}>{isNew ? "Cancel" : "Close"}</button>
+          {isNew && <button className="btn btn-primary" disabled={!valid} onClick={() => onSave({ ...f, date_to: f.date_to || f.date_from })}>Save</button>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function calDays(y, m)   { return new Date(y, m + 1, 0).getDate(); }
@@ -10313,10 +10515,12 @@ function CalDaySidebar({ dateStr, evts, onEvt, onAdd, onClose }) {
 
 /* ── Event modal (view / edit / approve) ────────────────────────── */
 
-function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRequest }) {
+function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRequest, avail }) {
   const isNew = !ev.id || ev.id.startsWith("new");
   const [form, setForm] = useCalS(ev);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const teamNames = useTeamNames();
+  const awayToday = calAwayOn(avail || [], form.date);
 
   return (
     <div className="drawer-scrim" onClick={onClose}>
@@ -10348,7 +10552,7 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
                 <label className="field">
                   <span className="field-label">Type</span>
                   <select className="field-input" value={form.type} onChange={e => set("type", e.target.value)}>
-                    {CAL_TYPES.filter(t => t.id !== "service_request").map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                    {CAL_TYPES.filter(t => !CAL_NON_BOOKING.includes(t.id)).map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
                   </select>
                 </label>
                 <label className="field">
@@ -10372,13 +10576,23 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
                 <span className="field-label">Suburb</span>
                 <input className="field-input" value={form.suburb} onChange={e => set("suburb", e.target.value)} />
               </label>
-              <label className="field">
-                <span className="field-label">Assigned to</span>
-                <select className="field-input" value={form.installer} onChange={e => set("installer", e.target.value)}>
-                  <option value="">Unassigned</option>
-                  {CAL_CREW.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
+              <div className="field">
+                <span className="field-label">Crew — tick everyone on this job</span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }} data-testid="crew-picker">
+                  {Array.from(new Set([...teamNames, ...calCrewOf(form.installer)])).map(n => {
+                    const on = calCrewOf(form.installer).includes(n);
+                    const away = awayToday.includes(n);
+                    return (
+                      <button key={n} type="button" className={"btn" + (on ? " btn-primary" : "")} style={{ padding: "5px 11px", fontSize: 12.5 }}
+                        title={away ? n + " has marked this day as not available" : ""}
+                        onClick={() => set("installer", (on ? calCrewOf(form.installer).filter(x => x !== n) : [...calCrewOf(form.installer), n]).join(", "))}>
+                        {on ? "✓ " : ""}{n}{away ? " · away" : ""}
+                      </button>
+                    );
+                  })}
+                  {!teamNames.length && !calCrewOf(form.installer).length && <span className="card-sub">Add people under Team &amp; Contractors first.</span>}
+                </div>
+              </div>
               <label className="field">
                 <span className="field-label">Notes</span>
                 <textarea className="field-input" rows={3} value={form.notes} onChange={e => set("notes", e.target.value)} style={{ resize: "vertical" }} />
@@ -10399,7 +10613,7 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
               {form.installer && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(255,255,255,0.025)", borderRadius: 10 }}>
                   <Icon d={ICONS.tenants} size={15} stroke={2} style={{ color: "var(--blue-light)" }} />
-                  <div><div className="comp-label">{form.installer}</div><div className="card-sub">Assigned installer</div></div>
+                  <div><div className="comp-label">{form.installer}</div><div className="card-sub">{calCrewOf(form.installer).length > 1 ? "Crew" : "Assigned installer"}</div></div>
                 </div>
               )}
               {form.notes && <div style={{ fontSize: 13, color: "var(--tx-dim)", lineHeight: 1.5, padding: "9px 13px", background: "rgba(255,255,255,0.02)", borderRadius: 9, border: "1px solid var(--line)", fontStyle: "italic" }}>{form.notes}</div>}
@@ -10446,8 +10660,14 @@ function TenantCalendar({ tenantId }) {
   const [y, setY] = useCalS(now.getFullYear());
   const [m, setM] = useCalS(now.getMonth());
   const { evts, addEvt, updateEvt, deleteEvt } = useCalData(tenantId);
+  const av = useAvailability();
+  const people = useTeamNames();
+  const me = calMe();
+  const isAdmin = me.app_role === "tenant_admin";
   const [modal, setModal] = useCalS(null);
+  const [avModal, setAvModal] = useCalS(null);
   const [selDay, setSelDay] = useCalS(null);
+  const shown = [...evts, ...calAvailEvents(av.list)];
 
   const pending = evts.filter(e => e.status === "pending" && e.src === "client");
 
@@ -10459,18 +10679,25 @@ function TenantCalendar({ tenantId }) {
     isReq: false
   });
 
-  const openEvt = (e) => setModal({ ev: e, isReq: e.src === "client" && e.status === "pending" });
+  const openEvt = (e) => e._av ? setAvModal({ entry: e._av }) : setModal({ ev: e, isReq: e.src === "client" && e.status === "pending" });
 
-  const handleSave = (ev) => {
-    if (ev.id.startsWith("new")) addEvt(ev);
-    else updateEvt(ev);
+  const handleSave = async (ev) => {
+    const isNew = ev.id.startsWith("new");
+    const saved = isNew ? await addEvt(ev) : await updateEvt(ev);
+    if (!saved) return;   // not saved (error shown, or they chose not to book someone who is away)
     setModal(null);
-    window.ssToast && window.ssToast(ev.id.startsWith("new") ? "Event added to schedule" : "Schedule updated");
+    window.ssToast && window.ssToast(isNew ? "Event added to schedule" : "Schedule updated");
   };
 
   const handleDel = (id) => { deleteEvt(id); setModal(null); window.ssToast && window.ssToast("Event removed"); };
 
-  const dayEvts = selDay ? evts.filter(e => e.date === selDay) : [];
+  const saveAvail = async d => {
+    const r = await av.add({ ...d, kind: d.kind, person: isAdmin ? d.person : undefined });
+    if (r) { setAvModal(null); window.ssToast && window.ssToast(d.kind === "unavailable" ? "Marked not available" : "Added to calendar"); }
+  };
+  const delAvail = async id => { if (await av.remove(id)) { setAvModal(null); window.ssToast && window.ssToast("Removed"); } };
+
+  const dayEvts = selDay ? shown.filter(e => e.date === selDay) : [];
 
   return (
     <div className="fade-in">
@@ -10506,13 +10733,16 @@ function TenantCalendar({ tenantId }) {
       <div style={{ display: "grid", gridTemplateColumns: selDay ? "1fr 300px" : "1fr", gap: "var(--gap)", alignItems: "start" }}>
         <div className="panel panel-pad chrome-top">
           <CalNav y={y} m={m} onPrev={prevM} onNext={nextM} subtitle="Click a day to view or add events · click an event to edit"
-            extra={
+            extra={<>
+              <button className="btn" style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => setAvModal({ entry: { date_from: selDay || "" } })}>
+                Not available / My entry
+              </button>
               <button className="btn btn-primary" style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => openNew()}>
                 <Icon d={ICONS.plus} size={14} stroke={2.4} /> New Event
               </button>
-            }
+            </>}
           />
-          <CalGrid y={y} m={m} evts={evts} onDay={ds => setSelDay(selDay === ds ? null : ds)} onEvt={openEvt} hiDay={selDay} />
+          <CalGrid y={y} m={m} evts={shown} onDay={ds => setSelDay(selDay === ds ? null : ds)} onEvt={openEvt} hiDay={selDay} />
           <CalLegend />
         </div>
         {selDay && (
@@ -10521,8 +10751,13 @@ function TenantCalendar({ tenantId }) {
       </div>
 
       {modal && (
-        <CalEventModal ev={modal.ev} canEdit={true} canDelete={true} isRequest={modal.isReq}
+        <CalEventModal ev={modal.ev} canEdit={true} canDelete={true} isRequest={modal.isReq} avail={av.list}
           onSave={handleSave} onDelete={handleDel} onClose={() => setModal(null)} />
+      )}
+      {avModal && (
+        <AvailabilityModal entry={avModal.entry} people={people} canPickPerson={isAdmin}
+          canDelete={isAdmin || avModal.entry.user_id === me.sub || !avModal.entry.user_id && !window.ssApi.getToken()}
+          onSave={saveAvail} onDelete={delAvail} onClose={() => setAvModal(null)} />
       )}
     </div>
   );
@@ -10537,17 +10772,36 @@ function ContractorCalendar({ tenantId }) {
   const now = new Date();
   const [y, setY] = useCalS(now.getFullYear());
   const [m, setM] = useCalS(now.getMonth());
-  const { evts, updateEvt } = useCalData(tenantId);
+  const { evts, addEvt, updateEvt } = useCalData(tenantId);
+  const av = useAvailability();
+  const me = calMe();
+  const myName = me.display_name;
   const [modal, setModal] = useCalS(null);
+  const [avModal, setAvModal] = useCalS(null);
   const [selDay, setSelDay] = useCalS(null);
 
-  const myName = "Dan Webb";
-  const mine = evts.filter(e => e.installer === myName);
+  // My jobs (anywhere I'm on the crew) plus my own availability entries.
+  const myAvail = av.list.filter(a => a.user_id ? a.user_id === me.sub : a.person === myName);
+  const mine = [...evts.filter(e => calCrewOf(e.installer).includes(myName)), ...calAvailEvents(myAvail)];
 
   const prevM = () => { if (m === 0) { setY(y - 1); setM(11); } else setM(m - 1); };
   const nextM = () => { if (m === 11) { setY(y + 1); setM(0); } else setM(m + 1); };
 
-  const handleSave = (ev) => { updateEvt(ev); setModal(null); window.ssToast && window.ssToast("Reschedule request saved"); };
+  const openEvt = ev => ev._av ? setAvModal({ entry: ev._av }) : setModal({ ev });
+  const newJob = ds => setModal({ ev: { id: "new" + Date.now(), title: "", type: "install", date: ds || selDay || calFmt(y, m, now.getDate()),
+    time: "08:00", end: "16:00", client: "", suburb: "", installer: myName, status: "confirmed", notes: "", jobId: "", src: "contractor" } });
+  const handleSave = async (ev) => {
+    const isNew = ev.id.startsWith("new");
+    const saved = isNew ? await addEvt(ev) : await updateEvt(ev);
+    if (!saved) return;
+    setModal(null);
+    window.ssToast && window.ssToast(isNew ? "Added to your calendar" : "Changes saved");
+  };
+  const saveAvail = async d => {
+    const r = await av.add({ ...d, person: undefined });
+    if (r) { setAvModal(null); window.ssToast && window.ssToast(d.kind === "unavailable" ? "Marked not available — the office will see this" : "Added to your calendar"); }
+  };
+  const delAvail = async id => { if (await av.remove(id)) { setAvModal(null); window.ssToast && window.ssToast("Removed"); } };
 
   const dayEvts = selDay ? mine.filter(e => e.date === selDay) : [];
 
@@ -10555,17 +10809,29 @@ function ContractorCalendar({ tenantId }) {
     <div className="fade-in">
       <div style={{ display: "grid", gridTemplateColumns: selDay ? "1fr 300px" : "1fr", gap: "var(--gap)", alignItems: "start" }}>
         <div className="panel panel-pad chrome-top">
-          <CalNav y={y} m={m} onPrev={prevM} onNext={nextM} subtitle="Your assigned jobs — click an event to view or request a reschedule" />
-          <CalGrid y={y} m={m} evts={mine} onDay={ds => setSelDay(selDay === ds ? null : ds)} onEvt={ev => setModal({ ev })} hiDay={selDay} />
+          <CalNav y={y} m={m} onPrev={prevM} onNext={nextM} subtitle="Your jobs and your own entries — mark days you're not available so the office won't book you"
+            extra={<>
+              <button className="btn" style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => setAvModal({ entry: { date_from: selDay || "" } })}>
+                Not available / My entry
+              </button>
+              <button className="btn btn-primary" style={{ padding: "7px 14px", fontSize: 13 }} onClick={() => newJob()}>
+                <Icon d={ICONS.plus} size={14} stroke={2.4} /> Add job
+              </button>
+            </>} />
+          <CalGrid y={y} m={m} evts={mine} onDay={ds => setSelDay(selDay === ds ? null : ds)} onEvt={openEvt} hiDay={selDay} />
           <CalLegend />
         </div>
         {selDay && (
-          <CalDaySidebar dateStr={selDay} evts={dayEvts} onEvt={ev => setModal({ ev })} onClose={() => setSelDay(null)} />
+          <CalDaySidebar dateStr={selDay} evts={dayEvts} onEvt={openEvt} onAdd={() => newJob(selDay)} onClose={() => setSelDay(null)} />
         )}
       </div>
       {modal && (
-        <CalEventModal ev={modal.ev} canEdit={true} canDelete={false} isRequest={false}
+        <CalEventModal ev={modal.ev} canEdit={true} canDelete={false} isRequest={false} avail={av.list}
           onSave={handleSave} onDelete={() => {}} onClose={() => setModal(null)} />
+      )}
+      {avModal && (
+        <AvailabilityModal entry={avModal.entry} people={[]} canPickPerson={false} canDelete={true}
+          onSave={saveAvail} onDelete={delAvail} onClose={() => setAvModal(null)} />
       )}
     </div>
   );
@@ -14462,41 +14728,57 @@ const CREW = [
   { name: "Joel Ruiz", role: "Cleaning Crew", lic: "Contractor", status: "Off", job: "—", hrs: 22, color: 30 },
 ];
 function ContractorCrew() {
+  const api = window.ssApi;
+  const authed = !!(api && api.getToken && api.getToken());
+  const [team, setTeam] = useCT(null);
+  const [away, setAway] = useCT([]);
+  useEffCT(() => {
+    if (!authed) return undefined;
+    let alive = true;
+    api.get("/team").then(r => { if (alive) setTeam(Array.isArray(r) ? r : []); }).catch(() => { if (alive) setTeam([]); });
+    const t = new Date(), today = t.getFullYear() + "-" + String(t.getMonth() + 1).padStart(2, "0") + "-" + String(t.getDate()).padStart(2, "0");
+    api.get("/availability").then(r => {
+      if (alive && Array.isArray(r)) setAway(r.filter(a => a.kind === "unavailable" && a.date_from <= today && a.date_to >= today).map(a => a.person));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [authed]);
+  // Signed out (design preview) shows the sample crew.
+  const list = authed ? (team || []) : CREW.map(m => ({ name: m.name, role: m.role, type: "Staff", licence: m.lic, status: m.status }));
+  const awayNow = list.filter(m => away.includes(m.name)).length;
+  const kpi = (label, value, icon, color) => (
+    <div className="panel kpi chrome-top"><div className="kpi-top"><div className="kpi-ico"><Icon d={ICONS[icon]} size={21} stroke={1.9} /></div></div>
+      <div className="kpi-label">{label}</div><div className="kpi-foot"><div className="kpi-value" style={{ fontSize: 30, color }}>{value}</div></div></div>
+  );
   return (
     <div className="fade-in">
       <div className="kpi-row">
-        <div className="panel kpi chrome-top"><div className="kpi-top"><div className="kpi-ico"><Icon d={ICONS.tenants} size={21} stroke={1.9} /></div></div>
-          <div className="kpi-label">Crew Size</div><div className="kpi-foot"><div className="kpi-value" style={{ fontSize: 30 }}>5</div></div></div>
-        <div className="panel kpi chrome-top"><div className="kpi-top"><div className="kpi-ico"><Icon d={ICONS.pin} size={21} stroke={1.9} /></div></div>
-          <div className="kpi-label">On Site Now</div><div className="kpi-foot"><div className="kpi-value" style={{ fontSize: 30, color: "var(--success)" }}>3</div></div></div>
-        <div className="panel kpi chrome-top"><div className="kpi-top"><div className="kpi-ico"><Icon d={ICONS.clock} size={21} stroke={1.9} /></div></div>
-          <div className="kpi-label">Hours This Week</div><div className="kpi-foot"><div className="kpi-value" style={{ fontSize: 30 }}>170h</div></div></div>
-        <div className="panel kpi chrome-top"><div className="kpi-top"><div className="kpi-ico"><Icon d={ICONS.compliance} size={21} stroke={1.9} /></div></div>
-          <div className="kpi-label">Licenses Current</div><div className="kpi-foot"><div className="kpi-value" style={{ fontSize: 30 }}>4 / 5</div></div></div>
+        {kpi("Team", list.length, "tenants")}
+        {kpi("Staff", list.filter(m => m.type !== "Contractor").length, "user")}
+        {kpi("Contractors", list.filter(m => m.type === "Contractor").length, "pin")}
+        {kpi("Away Today", awayNow, "cal", awayNow ? "var(--amber)" : undefined)}
       </div>
       <div className="panel panel-pad chrome-top">
-        <div className="card-head"><div><div className="card-title">Your Crew</div><div className="card-sub">People you lead this week</div></div><button className="btn" onClick={()=>window.ssToast&&window.ssToast("Only the office can add crew sign-ins — ask your company admin")}><Icon d={ICONS.plus} size={15} stroke={2} /> Invite Member</button></div>
-        <table className="tbl">
-          <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Current Job</th><th>Hours</th><th></th></tr></thead>
-          <tbody>
-            {CREW.map(m => {
-              const live = m.status !== "Off";
-              return (
-                <tr key={m.name}>
-                  <td><div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                    <span style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", color: "#fff", fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 13, background: "var(--accent)" }}>{m.name.split(" ").map(w => w[0]).join("")}</span>
-                    <div><div className="t-client">{m.name}</div><div className="card-sub">{m.lic}</div></div>
-                  </div></td>
-                  <td>{m.role}</td>
-                  <td><span style={{ color: live ? "var(--success)" : "var(--tx-faint)", fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}>{live && <span className="geo-pulse" style={{ position: "static", width: 8, height: 8 }} />}{m.status}</span></td>
-                  <td className="card-sub">{m.job}</td>
-                  <td style={{ fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-hi)" }}>{m.hrs}h</td>
-                  <td style={{ textAlign: "right", color: "var(--tx-faint)" }}><Icon d={ICONS.chevR} size={16} stroke={2.2} /></td>
+        <div className="card-head"><div><div className="card-title">Installers &amp; Staff</div>
+          <div className="card-sub">Everyone on {authed ? "your company's" : "the"} team — staff and contractors. Mark your own days off in Calendar.</div></div></div>
+        {authed && team === null && <div className="card-sub" style={{ padding: 10 }}>Loading…</div>}
+        {list.length === 0 && team !== null && <div className="card-sub" style={{ padding: 10 }}>No team members yet.</div>}
+        {list.length > 0 && (
+          <table className="tbl">
+            <thead><tr><th>Member</th><th>Role</th><th>Type</th><th>Today</th></tr></thead>
+            <tbody>
+              {list.map(m => (
+                <tr key={m.id || m.name}>
+                  <td><div className="t-client">{m.name}</div>{m.licence && <div className="card-sub">{m.licence}</div>}</td>
+                  <td>{m.role || "—"}</td>
+                  <td><span className={"plan-tag " + (m.type === "Contractor" ? "starter" : "growth")}>{m.type || "Staff"}</span></td>
+                  <td>{away.includes(m.name)
+                    ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>Not available</span>
+                    : <span style={{ color: "var(--success)", fontWeight: 600 }}>Available</span>}</td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -14788,75 +15070,168 @@ function ContractorComplianceReports({ brand }) {
   );
 }
 
+// Read a picked file as a data URL (documents and photos are stored by the app itself).
+function ssReadFile(f) {
+  return new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(f); });
+}
+async function ssOpenFieldDoc(id, download) {
+  try {
+    const f = await window.ssApi.get("/field-docs/" + encodeURIComponent(id) + "/file");
+    const blob = await (await fetch(f.data)).blob();
+    const url = URL.createObjectURL(blob);
+    if (download) { const a = document.createElement("a"); a.href = url; a.download = f.name || "document"; a.click(); }
+    else window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { window.ssToast && window.ssToast("Could not open that document", "error"); }
+}
+const SS_DOC_MAX = 8 * 1024 * 1024;
+
+// Upload a set of picked files to /field-docs. Returns the saved records.
+async function ssUploadFieldDocs(files, extra) {
+  const saved = [];
+  for (const f of files) {
+    if (f.size > SS_DOC_MAX) { window.ssToast && window.ssToast(f.name + " is over 8 MB — not uploaded", "error"); continue; }
+    try { saved.push(await window.ssApi.post("/field-docs", { ...extra, name: f.name, data: await ssReadFile(f) })); }
+    catch (e) {
+      const c = e && e.data && e.data.error;
+      window.ssToast && window.ssToast(f.name + (c === "file_type_not_allowed" ? " — only PDF, Word or photo files" : " — upload failed"), "error");
+    }
+  }
+  if (saved.length) window.ssToast && window.ssToast(saved.length === 1 ? "Document uploaded" : saved.length + " documents uploaded");
+  return saved;
+}
+
+function ssExpiryNote(expiry) {
+  if (!expiry) return { note: "No expiry", ok: true };
+  const days = Math.round((new Date(expiry + "T00:00:00") - new Date()) / 86400000);
+  const nice = new Date(expiry + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  if (days < 0) return { note: "EXPIRED " + nice, ok: false };
+  if (days <= 30) return { note: "Expires " + nice + " — renew soon", ok: false };
+  return { note: "Expires " + nice, ok: true };
+}
+
+window.ssOpenFieldDoc = ssOpenFieldDoc;
+window.ssExpiryNote = ssExpiryNote;
+
+const CDOC_GROUPS = ["Licences & Accreditation", "Insurance", "Safety & SWMS", "Contracts & Payroll"];
+
 function ContractorDocs({ brand }) {
+  const api = window.ssApi;
+  const authed = !!(api && api.getToken && api.getToken());
   const [tab, setTab] = useCT("my");
-  const [groups, setGroups] = useCT([
-    { title: "Licenses & Accreditation", items: [
-      { name: "SAA Accreditation A1234", note: "Expires 14 Mar 2027", ok: true },
-      { name: "Electrician Licence QLD 78293", note: "Expires 8 Sep 2026", ok: true },
-      { name: "White Card", note: "No expiry", ok: true },
-      { name: "Working at Heights", note: "Renew by 22 Jul 2026", ok: false },
-    ]},
-    { title: "Safety & SWMS", items: [
-      { name: "Solar Install SWMS v4.2", note: "Acknowledged 18 May 2026", ok: true },
-      { name: "Battery Install SWMS v2.1", note: "Acknowledged 18 May 2026", ok: true },
-      { name: "Working at Heights JSA", note: "Acknowledged 02 Apr 2026", ok: true },
-    ]},
-    { title: "Contracts & Payroll", items: [
-      { name: "Employment contract", note: "Signed 12 Jan 2024", ok: true },
-      { name: "Super choice form", note: "AustralianSuper · 11.5%", ok: true },
-      { name: "TFN declaration", note: "On file", ok: true },
-    ]},
-  ]);
+  const [docs, setDocs] = useCT([]);
+  const [expiry, setExpiry] = useCT({});
+  const [jobs, setJobs] = useCT([]);
+  const [job, setJob] = useCT("");
+  const [jobDocs, setJobDocs] = useCT([]);
   const uploadRef = React.useRef(null);
   const cameraRef = React.useRef(null);
-  const [uploadGroup, setUploadGroup] = useCT(0);
-  const openUpload = gi => { setUploadGroup(gi); if (uploadRef.current) uploadRef.current.click(); };
-  const openCamera = gi => { setUploadGroup(gi); if (cameraRef.current) cameraRef.current.click(); };
-  const onUpload = e => {
+  const target = React.useRef(null);   // { scope, category } for the next pick
+  const me = (api && api.getUser && api.getUser()) || {};
+
+  React.useEffect(() => {
+    if (!authed) return undefined;
+    let alive = true;
+    api.get("/field-docs?scope=compliance").then(r => { if (alive && Array.isArray(r)) setDocs(r.filter(d => d.user_id === me.sub)); }).catch(() => {});
+    api.get("/bookings").then(r => {
+      if (!alive || !Array.isArray(r)) return;
+      const mine = r.filter(b => String(b.installer || "").split(",").map(x => x.trim()).includes(me.display_name));
+      setJobs(mine.map(b => ({ id: b.job_id || b.id, label: (b.date || "") + " · " + (b.title || b.client || "Job") + (b.suburb ? " — " + b.suburb : "") })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [authed]);
+  React.useEffect(() => {
+    if (!authed || !job) { setJobDocs([]); return undefined; }
+    let alive = true;
+    api.get("/field-docs?scope=job&job_id=" + encodeURIComponent(job)).then(r => { if (alive && Array.isArray(r)) setJobDocs(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [job, authed]);
+
+  const pick = (t, camera) => { target.current = t; const el = camera ? cameraRef.current : uploadRef.current; if (el) el.click(); };
+  const onPicked = async e => {
     const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    const today = new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
-    setGroups(gs => gs.map((g, i) => i === uploadGroup
-      ? { ...g, items: [...files.map(f => ({ name: f.name, note: "Uploaded " + today, ok: true })), ...g.items] }
-      : g));
-    window.ssToast && window.ssToast(files.length === 1 ? "Document uploaded" : files.length + " documents uploaded");
     e.target.value = "";
+    if (!files.length || !target.current) return;
+    if (!authed) { window.ssToast && window.ssToast("Sign in to upload documents"); return; }
+    const t = target.current;
+    const saved = await ssUploadFieldDocs(files, t.scope === "job"
+      ? { scope: "job", job_id: t.job_id, category: "Job document" }
+      : { scope: "compliance", category: t.category, expiry: expiry[t.category] || undefined });
+    if (t.scope === "job") setJobDocs(d => [...saved, ...d]);
+    else { setDocs(d => [...saved, ...d]); setExpiry(x => ({ ...x, [t.category]: "" })); }
   };
+  const remove = async d => {
+    if (!window.confirm("Remove " + d.name + "?")) return;
+    try { await api.del("/field-docs/" + d.id); setDocs(x => x.filter(y => y.id !== d.id)); setJobDocs(x => x.filter(y => y.id !== d.id)); }
+    catch (e) { window.ssToast && window.ssToast("Could not remove it", "error"); }
+  };
+  const docRow = (d, canRemove) => {
+    const ex = ssExpiryNote(d.expiry);
+    return (
+      <div key={d.id} className="comp-row" style={{ padding: "14px 4px" }}>
+        <span className={"comp-check " + (ex.ok ? "ok" : "warn")}><Icon d={ex.ok ? ICONS.docs : ICONS.alert} size={14} stroke={2.2} /></span>
+        <div style={{ minWidth: 0 }}><div className="comp-label">{d.name}</div>
+          <div className="card-sub">{d.scope === "job" ? "By " + (d.person || "—") + " · " + new Date(d.created_at).toLocaleDateString("en-AU") : ex.note}</div></div>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+          <button className="btn" title="View" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => ssOpenFieldDoc(d.id)}><Icon d={ICONS.eye} size={13} stroke={2} /></button>
+          <button className="btn" title="Download" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => ssOpenFieldDoc(d.id, true)}><Icon d={ICONS.download} size={13} stroke={2} /></button>
+          {canRemove && <button className="btn" title="Remove" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => remove(d)}><Icon d="M18 6L6 18M6 6l12 12" size={13} stroke={2} /></button>}
+        </span>
+      </div>
+    );
+  };
+  const uploadButtons = t => (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <button className="btn" style={{ color: "var(--success)", borderColor: "rgba(58,125,255,0.35)" }} onClick={() => pick(t, true)}><Icon d={ICONS.camera || ICONS.photo} size={15} stroke={2} /> Take Photo</button>
+      <button className="btn" onClick={() => pick(t, false)}><Icon d={ICONS.plus} size={15} stroke={2} /> Upload</button>
+    </div>
+  );
+
   return (
-    <div className="fade-in">
-      <input ref={uploadRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple style={{ display: "none" }} onChange={onUpload} />
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onUpload} />
-      <div style={{ display: "flex", gap: 8, marginBottom: "var(--gap)" }}>
-        {[["my","My Documents","docs"],["reports","Compliance Reports","compliance"]].map(([id,label,icon]) => (
+    <div className="fade-in" data-testid="contractor-docs">
+      <input ref={uploadRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic" multiple style={{ display: "none" }} onChange={onPicked} />
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onPicked} />
+      <div style={{ display: "flex", gap: 8, marginBottom: "var(--gap)", flexWrap: "wrap" }}>
+        {[["my","My Compliance Documents","docs"],["job","Job Documents","pin"],["reports","Compliance Reports","compliance"]].map(([id,label,icon]) => (
           <button key={id} onClick={() => setTab(id)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 11, border: "1px solid " + (tab === id ? "rgba(58,125,255,0.4)" : "var(--line)"), background: tab === id ? "rgba(58,125,255,0.14)" : "rgba(255,255,255,0.025)", color: tab === id ? "var(--tx-hi)" : "var(--tx-dim)", fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 11, border: "1px solid " + (tab === id ? "rgba(58,125,255,0.4)" : "var(--line)"), background: tab === id ? "rgba(58,125,255,0.14)" : "rgba(255,255,255,0.03)", color: tab === id ? "var(--tx-hi)" : "var(--tx-dim)", fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>
             <Icon d={ICONS[icon]} size={15} stroke={2} /> {label}
           </button>
         ))}
       </div>
       {tab === "reports" && <ContractorComplianceReports brand={brand} />}
-      {tab === "my" && groups.map((g, gi) => (
-        <div key={g.title} className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
-          <div className="card-head"><div className="card-title">{g.title}</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" style={{ color: "var(--success)", borderColor: "rgba(58,125,255,0.35)" }} onClick={() => openCamera(gi)}><Icon d={ICONS.camera || ICONS.photo} size={15} stroke={2} /> Take Photo</button>
-              <button className="btn" onClick={() => openUpload(gi)}><Icon d={ICONS.plus} size={15} stroke={2} /> Upload</button>
+      {tab === "my" && CDOC_GROUPS.map(g => {
+        const items = docs.filter(d => (CDOC_GROUPS.includes(d.category) ? d.category : CDOC_GROUPS[0]) === g);
+        return (
+          <div key={g} className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
+            <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}><div className="card-title">{g}</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label className="card-sub" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>Expiry
+                  <input type="date" className="field-input" style={{ padding: "5px 8px", width: 150 }} value={expiry[g] || ""} onChange={e => setExpiry(x => ({ ...x, [g]: e.target.value }))} /></label>
+                {uploadButtons({ scope: "compliance", category: g })}
+              </div>
             </div>
+            {items.length === 0 && <div className="card-sub" style={{ padding: "10px 4px" }}>{authed ? "Nothing uploaded yet. Set the expiry date (if any), then upload or take a photo." : "Sign in to see your documents."}</div>}
+            {items.map(d => docRow(d, true))}
           </div>
-          {g.items.map((it, i) => (
-            <div key={i} className="comp-row" style={{ padding: "14px 4px" }}>
-              <span className={"comp-check " + (it.ok ? "ok" : "warn")}>
-                <Icon d={it.ok ? ICONS.docs : ICONS.alert} size={14} stroke={2.2} /></span>
-              <div style={{ minWidth: 0 }}><div className="comp-label">{it.name}</div><div className="card-sub">{it.note}</div></div>
-              <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-                <button className="btn" style={{ padding: "5px 10px", fontSize: 12 }}><Icon d={ICONS.eye} size={13} stroke={2} /></button>
-                <button className="btn" style={{ padding: "5px 10px", fontSize: 12 }}><Icon d={ICONS.download} size={13} stroke={2} /></button>
-              </span>
-            </div>
-          ))}
+        );
+      })}
+      {tab === "job" && (
+        <div className="panel panel-pad chrome-top">
+          <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
+            <div><div className="card-title">Job Documents</div><div className="card-sub">Paperwork for a job you're on — the office sees it straight away. Site photos go in Site Photos; signed checklists in Onsite Forms.</div></div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", margin: "10px 0" }}>
+            <select className="field-input" style={{ maxWidth: 420 }} value={job} onChange={e => setJob(e.target.value)}>
+              <option value="">{jobs.length ? "Choose a job…" : "No jobs assigned to you yet"}</option>
+              {jobs.map(j => <option key={j.id} value={j.id}>{j.label}</option>)}
+            </select>
+            {job && uploadButtons({ scope: "job", job_id: job })}
+          </div>
+          {job && jobDocs.length === 0 && <div className="card-sub" style={{ padding: "10px 4px" }}>No documents on this job yet.</div>}
+          {jobDocs.map(d => docRow(d, d.user_id === me.sub))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ const QRCode = require("qrcode");
 const erp = require("./erp");
 const staffSeats = require("./staff-seats");
 const supportAccess = require("./support-access");
+const fieldWork = require("./field-work");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -227,6 +228,8 @@ app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(asyn
 
 // Tenant-requested support access (request → enter → masked, audited session).
 supportAccess.register(app, { h, ok });
+// Staff/contractor availability, crew clash checks and field documents.
+fieldWork.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
@@ -496,6 +499,8 @@ app.post("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff",
     tenant_id = c.tenant_id; client_id = c.id; client = c.name; source = "client"; status = "pending";
   } else {
     tenant_id = tenantOf(req);
+    const clashes = d.force ? [] : await fieldWork.crewClashes(tenant_id, d.installer, d.date);
+    if (clashes.length) return res.status(409).json({ error: "crew_unavailable", clashes });
   }
   await run(`insert into bookings (id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, created_by)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
@@ -517,6 +522,12 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
     return res.status(404).json({ error: "not_found" });
   }
   const d = req.body || {};
+  if (req.user.app_role !== "client" && !d.force) {
+    const clashes = await fieldWork.crewClashes(cur.tenant_id, d.installer ?? cur.installer, d.date ?? cur.date);
+    // Only block when this edit changes who or when; never block an unrelated status update.
+    const changed = (d.installer != null && d.installer !== cur.installer) || (d.date != null && d.date !== cur.date);
+    if (clashes.length && changed) return res.status(409).json({ error: "crew_unavailable", clashes });
+  }
   await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, updated_at=now() where id=$12`,
     [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
      (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,

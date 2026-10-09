@@ -321,6 +321,17 @@ async function migrate() {
       status text not null default 'open', expires_at timestamptz not null,
       closed_at timestamptz, closed_by text, created_at timestamptz default now())`,
     `create index if not exists support_requests_idx on support_requests (tenant_id, created_at desc)`,
+    // Field work: staff/contractor availability + their own compliance and job documents.
+    `create table if not exists availability (
+      id text primary key, tenant_id text not null, user_id text, person text not null,
+      kind text not null default 'unavailable', title text, date_from text not null, date_to text not null,
+      time text, end_time text, notes text, created_at timestamptz default now())`,
+    `create index if not exists availability_idx on availability (tenant_id, date_from)`,
+    `create table if not exists field_documents (
+      id text primary key, tenant_id text not null, user_id text, person text,
+      scope text not null default 'compliance', job_id text, category text, name text not null,
+      mime text, size int, expiry text, data text not null, created_at timestamptz default now())`,
+    `create index if not exists field_documents_idx on field_documents (tenant_id, user_id)`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }
