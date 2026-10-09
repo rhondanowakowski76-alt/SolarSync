@@ -8,9 +8,15 @@ const A = require("./auth");
 const QRCode = require("qrcode");
 const erp = require("./erp");
 const staffSeats = require("./staff-seats");
+const supportAccess = require("./support-access");
 
 const app = express();
+// One proxy hop in front in production (DigitalOcean App Platform), so client IPs
+// come from X-Forwarded-For — needed for per-client rate limits.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "12mb" }));
+// Tenant-requested support sessions: restrict + mask every /api call they make.
+app.use("/api", supportAccess.limits.api, supportAccess.guard());
 
 const ok = (res, body) => res.json(body);
 // The reseller keeps its OWN ERP book under the fixed id "reseller-platform"
@@ -216,6 +222,9 @@ app.post("/api/support/enter", A.authRequired, A.requireRole("reseller"), h(asyn
   await audit(req.user.sub, "support_view_enter", portal, "reseller-platform", { ua: req.headers["user-agent"] || null });
   ok(res, { ok: true });
 }));
+
+// Tenant-requested support access (request → enter → masked, audited session).
+supportAccess.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
@@ -833,7 +842,7 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 const PLAN_PRICES = { Starter: 199, Growth: 499, Scale: 899 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
-  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants order by created_at");
+  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants where id <> 'reseller-platform' order by created_at");
   const counts = await rows("select tenant_id, count(*)::int as n from users where status='active' and tenant_id is not null group by tenant_id");
   const cmap = {}; for (const c of counts) cmap[c.tenant_id] = c.n;
   const inst = await rows("select tenant_id, count(*)::int as n from deals where stage='installed' and tenant_id is not null group by tenant_id");
@@ -938,14 +947,29 @@ app.get("/api/branding", A.authRequired, h(async (req, res) => {
   ok(res, (t && t.branding) || {});
 }));
 
-app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
-  const tid = tenantOf(req);
-  const d = req.body || {};
+// Validate + clean a branding payload. Returns { error } or { branding }.
+function cleanBranding(d) {
+  d = d || {};
+  const hex = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
+  if (Array.isArray(d.accent) && !d.accent.slice(0, 3).every(c => hex.test(String(c)))) return { status: 400, error: "bad_colour" };
+  if (d.logo_url != null && (typeof d.logo_url !== "string" || !/^(data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,|https:\/\/)/.test(d.logo_url))) return { status: 400, error: "bad_logo" };
+  if (d.logo_url && d.logo_url.length > 1500000) return { status: 413, error: "logo_too_large" };
   const branding = {
-    accent: Array.isArray(d.accent) ? d.accent.slice(0, 3) : undefined,
-    glow: d.glow, name: d.name, tagline: d.tagline, logo_url: d.logo_url,
+    accent: Array.isArray(d.accent) ? d.accent.slice(0, 3).map(String) : undefined,
+    glow: typeof d.glow === "string" && /^\d{1,3},\d{1,3},\d{1,3}$/.test(d.glow) ? d.glow : undefined,
+    name: d.name != null ? String(d.name).slice(0, 80) : undefined,
+    tagline: d.tagline != null ? String(d.tagline).slice(0, 140) : undefined,
+    logo_url: d.logo_url || undefined,
   };
   Object.keys(branding).forEach(k => branding[k] === undefined && delete branding[k]);
+  return { branding };
+}
+
+app.put("/api/branding", supportAccess.limits.strict, A.authRequired, A.requireRole("tenant_admin", "reseller"), h(async (req, res) => {
+  const tid = tenantOf(req);
+  const c = cleanBranding(req.body);
+  if (c.error) return res.status(c.status).json({ error: c.error });
+  const branding = c.branding;
   // The reseller edits its OWN platform brand under the fixed "reseller-platform" book,
   // which has no tenants row until first save, so upsert it.
   if (tid === "reseller-platform") {
@@ -955,6 +979,17 @@ app.put("/api/branding", A.authRequired, A.requireRole("tenant_admin", "reseller
   }
   await audit(req.user.sub, "update_branding", tid, tid);
   ok(res, branding);
+}));
+
+// Reseller sets up a tenant's branding on their behalf (tenant can change it later).
+app.put("/api/tenants/:id/branding", supportAccess.limits.strict, A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const t = await one("select id from tenants where id=$1 and id <> 'reseller-platform'", [req.params.id]);
+  if (!t) return res.status(404).json({ error: "not_found" });
+  const c = cleanBranding(req.body);
+  if (c.error) return res.status(c.status).json({ error: c.error });
+  await run("update tenants set branding=$1::jsonb where id=$2", [JSON.stringify(c.branding), t.id]);
+  await audit(req.user.sub, "update_tenant_branding", t.id, t.id);
+  ok(res, c.branding);
 }));
 
 // Documents an installer has sent to THIS logged-in customer (snapshot at publish time).

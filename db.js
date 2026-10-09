@@ -314,6 +314,13 @@ async function migrate() {
       pin_hash text, created_by text, created_at timestamptz default now(),
       constraint tenant_staff_email_unique unique (tenant_id, email))`,
     `create index if not exists tenant_staff_idx on tenant_staff (tenant_id, status)`,
+    // Tenant-requested support access: the tenant opens a request (with an expiry)
+    // and the reseller can enter that tenant's portal while it is open.
+    `create table if not exists support_requests (
+      id text primary key, tenant_id text not null, requested_by text, message text,
+      status text not null default 'open', expires_at timestamptz not null,
+      closed_at timestamptz, closed_by text, created_at timestamptz default now())`,
+    `create index if not exists support_requests_idx on support_requests (tenant_id, created_at desc)`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

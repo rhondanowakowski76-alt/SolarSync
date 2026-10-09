@@ -35194,6 +35194,12 @@ var e,t,r="function"==typeof Symbol?Symbol:{},a=r.iterator||"@@iterator",n=r.toS
     // Transparent token refresh on 401 bad_token, then retry once.
     // Skip for the refresh endpoint itself to avoid infinite loops.
     const errCode = first.data && first.data.error;
+    // A support session that was revoked, closed or has timed out: go back to the
+    // reseller's own login instead of trying to refresh into the tenant's account.
+    if (first.status === 401 && (errCode === "support_ended" || (errCode === "bad_token" && supportSession()))) {
+      supportExit(errCode === "support_ended" ? "The tenant ended support access (or it expired)." : "Support session timed out — enter again from Support.");
+      throw Object.assign(new Error(errCode), { status: first.status, data: first.data });
+    }
     const isExpiredToken = first.status === 401 && errCode === "bad_token";
     const isRefreshCall  = path === "/auth/refresh";
     if (isExpiredToken && !isRefreshCall && getRefreshToken()) {
@@ -35214,8 +35220,34 @@ var e,t,r="function"==typeof Symbol?Symbol:{},a=r.iterator||"@@iterator",n=r.toS
     throw Object.assign(new Error(errCode || ("http_" + first.status)), { status: first.status, data: first.data });
   }
 
+  // Tenant-requested support sessions (reseller acting in a tenant's portal, with
+  // customer/staff/contractor details masked by the server). The reseller's own
+  // session is parked while it runs and restored on exit.
+  const SUPPORT_RETURN = "ss_support_return";
+  function supportSession() { const u = getUser(); return !!(u && u.support); }
+  async function supportEnter(id) {
+    const r = await call("/support-requests/" + encodeURIComponent(id) + "/enter", { method: "POST", body: {} });
+    localStorage.setItem(SUPPORT_RETURN, JSON.stringify({ a: getToken(), r: getRefreshToken(), u: localStorage.getItem(USER_KEY) }));
+    localStorage.removeItem(REFRESH_KEY);
+    setSession({ access_token: r.access_token, user: { ...r.user, tenant_name: r.tenant && r.tenant.name, session_ends_at: r.session_ends_at } });
+    location.href = "/app";
+  }
+  function supportExit(reason) {
+    const tok = getToken();
+    if (tok) fetch("/api/support-requests/exit", { method: "POST", headers: { Authorization: "Bearer " + tok } }).catch(() => {});
+    let back = null; try { back = JSON.parse(localStorage.getItem(SUPPORT_RETURN) || "null"); } catch (e) {}
+    clear(); localStorage.removeItem(SUPPORT_RETURN);
+    if (back) {
+      if (back.a) localStorage.setItem(TOKEN_KEY, back.a);
+      if (back.r) localStorage.setItem(REFRESH_KEY, back.r);
+      if (back.u) localStorage.setItem(USER_KEY, back.u);
+    }
+    if (reason) { try { sessionStorage.setItem("ss_flash", reason); } catch (e) {} }
+    location.href = "/app";
+  }
+
   window.ssApi = {
-    getToken, getUser, setSession, clear,
+    getToken, getUser, setSession, clear, supportSession, supportEnter, supportExit,
     available: async () => { try { await call("/health"); return true; } catch (e) { return false; } },
     lookup: (name) => call("/auth/lookup", { method: "POST", body: { name } }),
     pin: (user_id, pin) => call("/auth/pin", { method: "POST", body: { user_id, pin } }),
@@ -35665,7 +35697,9 @@ const BRANDS = {
     domain: "portal.azimuth.solar", region: "NSW", users: 44, installs: 531, mrr: 899,
   },
 };
-const TENANT_IDS = ["helios", "voltaic", "azure"];
+// Demo mode (/app?demo=1, off with ?demo=0) shows all three showcase tenants for
+// sales demos; the live app keeps only Helios as the sample tenant.
+const TENANT_IDS = window.__SS_DEMO ? ["helios", "voltaic", "azure"] : ["helios"];
 
 // Brand → CSS vars.
 //   themeVars(brand)        → ONLY exposes brand-prefixed tokens (--brand-light/-mid/-deep/-glow).
@@ -36056,10 +36090,13 @@ function LoginScreen({ onLogin }) {
 
   // STEP 1 — authenticator code first. Resolve the account and hold the code; the
   // code and PIN are verified together once the PIN is entered on step 2.
+  const nameRef = useRef(null);
   const submitCode = async (val) => {
     const digits = val.replace(/\D/g, "").slice(0, 6);
     setTotp(digits);
     if (digits.length !== 6) return;
+    // Code is entered first; if no name is chosen yet, move on to the name field.
+    if (!userId && name.trim().length < 3) { setError(""); nameRef.current && nameRef.current.focus(); return; }
     setBusy(true); setError("");
     const uid = await resolveUid();
     setBusy(false);
@@ -36205,7 +36242,23 @@ function LoginScreen({ onLogin }) {
           <div className="login-title">Sign in</div>
           <div className="login-sub">{backupMode
             ? "Enter one of your recovery codes."
-            : (known.length && !typingNew ? "Pick your name, then your authenticator code." : "Type your name, then your authenticator code.")}</div>
+            : (known.length && !typingNew ? "Enter your authenticator code, then pick your name." : "Enter your authenticator code, then type your name.")}</div>
+
+          {!backupMode ? <>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>AUTHENTICATOR CODE</div>
+            <div className="totp-wrap">
+              <input ref={codeRef} className="totp-input" type="text" inputMode="numeric" maxLength={6}
+                placeholder="000000" value={totp} onChange={e => submitCode(e.target.value)} autoFocus />
+            </div>
+            <div className="login-sub" style={{ fontSize:12, marginTop:8 }}>Open your authenticator app and type the current 6-digit code — then your name and PIN.</div>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"16px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>YOUR NAME</div>
+          </> : <>
+            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>RECOVERY CODE</div>
+            <input type="text" placeholder="XXXX-XXXX" value={backupCode}
+              onChange={e => setBackupCode(e.target.value.toUpperCase())}
+              style={{ width:"100%", padding:"11px 13px", borderRadius:11, border:"1px solid var(--line-strong)", background:"rgba(255,255,255,0.05)", color:"var(--tx-hi)", fontSize:16, letterSpacing:"0.12em", textAlign:"center", fontFamily:"var(--font-head)" }} />
+            <button className="btn btn-primary" disabled={busy} style={{ width:"100%", marginTop:12, justifyContent:"center" }} onClick={submitBackup}>{busy ? "Checking…" : "Sign in with recovery code"}</button>
+          </>}
 
           {known.length > 0 && !typingNew
             ? <select value={userId}
@@ -36218,7 +36271,8 @@ function LoginScreen({ onLogin }) {
                 {known.map(a => <option key={a.id} value={a.id} style={{ background: "#0e1822", color: "#eaf4ff" }}>{a.display_name} — {ROLE_LABEL[a.app_role] || a.app_role}</option>)}
                 <option value="__new__" style={{ background: "#0e1822", color: "#eaf4ff" }}>Someone else — type my name…</option>
               </select>
-            : <input value={name} placeholder="Your full name (e.g. Sarah Chen)" autoComplete="username"
+            : <input ref={nameRef} value={name} placeholder="Your full name (e.g. Sarah Chen)" autoComplete="username"
+                onKeyDown={e => { if (e.key === "Enter" && !backupMode) submitCode(totp); }}
                 onChange={e => { setName(e.target.value); setUserId(""); setMatches([]); setError(""); }}
                 style={{ width: "100%", padding: "11px 13px", marginBottom: 14, borderRadius: 11, border: "1px solid var(--line-strong)",
                   background: "rgba(255,255,255,0.05)", color: "var(--tx-hi)", fontSize: 15, fontFamily: "var(--font-body)" }} />}
@@ -36230,21 +36284,10 @@ function LoginScreen({ onLogin }) {
             </select>
           )}
 
-          {!backupMode ? <>
-            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>AUTHENTICATOR CODE</div>
-            <div className="totp-wrap">
-              <input ref={codeRef} className="totp-input" type="text" inputMode="numeric" maxLength={6}
-                placeholder="000000" value={totp} onChange={e => submitCode(e.target.value)} autoFocus />
-            </div>
-            <div className="login-sub" style={{ fontSize:12, marginTop:8 }}>Open your authenticator app and type the current 6-digit code — you'll enter your PIN next.</div>
-          </> : <>
-            <div style={{ fontSize:12.5, color:"var(--tx-dim)", margin:"2px 0 8px", fontFamily:"var(--font-head)", fontWeight:600 }}>RECOVERY CODE</div>
-            <input type="text" placeholder="XXXX-XXXX" value={backupCode}
-              onChange={e => setBackupCode(e.target.value.toUpperCase())}
-              style={{ width:"100%", padding:"11px 13px", borderRadius:11, border:"1px solid var(--line-strong)", background:"rgba(255,255,255,0.05)", color:"var(--tx-hi)", fontSize:16, letterSpacing:"0.12em", textAlign:"center", fontFamily:"var(--font-head)" }} />
-            <button className="btn btn-primary" disabled={busy} style={{ width:"100%", marginTop:12, justifyContent:"center" }} onClick={submitBackup}>{busy ? "Checking…" : "Sign in with recovery code"}</button>
-          </>}
-
+          {!backupMode && (
+            <button className="btn btn-primary" disabled={busy || totp.length !== 6 || (!userId && name.trim().length < 3)}
+              style={{ width:"100%", justifyContent:"center", marginBottom:4 }} onClick={() => submitCode(totp)}>Continue</button>
+          )}
           {error && <div style={{ color: "var(--amber)", fontSize: 12.5, textAlign: "center", marginTop: 8, fontFamily: "var(--font-head)" }}>{error}</div>}
 
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:14 }}>
@@ -38612,12 +38655,17 @@ const SYSTEMS = [
   { id: "s20", rows: 4, cols: 5 },
 ];
 
-function PVDesigner({ embedded, onSpec, initialAddress }) {
+function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredPanelId }) {
+  // Panels come from the tenant's live catalog when the quote builder passes it in,
+  // so the design uses the products actually being quoted (seed list otherwise).
+  const PANEL_LIST = (panelOptions && panelOptions.length) ? panelOptions : PANELS;
   const [activeSys, setActiveSys] = usePV("s20");
   const [rows, setRows] = usePV(4);
   const [cols, setCols] = usePV(5);
   const [orient, setOrient] = usePV("portrait");
-  const [panelId, setPanelId] = usePV(PANELS[0].id);
+  const [panelId, setPanelId] = usePV(() => String(preferredPanelId != null ? preferredPanelId : PANEL_LIST[0].id));
+  // Follow the panel chosen on the quote's line items (Step 1).
+  useEffPV(() => { if (preferredPanelId != null) setPanelId(String(preferredPanelId)); }, [preferredPanelId]);
   const [mode, setMode] = usePV("grid");
   const [batteryKwh, setBatteryKwh] = usePV(13.5);
   const [address, setAddress] = usePV(initialAddress || "27 Edgeware Rd, Enmore NSW 2042");
@@ -38786,7 +38834,7 @@ function PVDesigner({ embedded, onSpec, initialAddress }) {
   const clearMeasures = () => { setMeasures([]); setPending(null); setHoverPt(null); };
   const applyOrientation = () => { if (!measures.length) return; const d = segDeg(measures[measures.length - 1]); setRot(Math.max(-45, Math.min(45, d))); };
 
-  const panel = PANELS.find(p => p.id === panelId);
+  const panel = PANEL_LIST.find(p => String(p.id) === String(panelId)) || PANEL_LIST[0];
   const maxPanels = rows * cols;
   const placedCount = placed.reduce((s, a) => s + a.on.length, 0);
   const count = on.size + placedCount;
@@ -39057,7 +39105,7 @@ function PVDesigner({ embedded, onSpec, initialAddress }) {
           </div>
           <label className="field" style={{ marginTop: 14 }}>
             <span className="field-label">Panel model (from your catalog)</span>
-            <select className="field-input" value={panelId} onChange={e => setPanelId(e.target.value)}>{PANELS.map(p => <option key={p.id} value={p.id}>{p.name} — {p.watts}W · ${p.price}</option>)}</select>
+            <select className="field-input" value={panelId} onChange={e => setPanelId(e.target.value)}>{PANEL_LIST.map(p => <option key={p.id} value={String(p.id)}>{p.name} — {p.watts}W · ${p.price}</option>)}</select>
           </label>
           {mode !== "grid" && <div style={{ marginTop: 14 }}><Stepper label="Battery capacity (kWh)" value={batteryKwh} set={v => setBatteryKwh(Math.round(v * 10) / 10)} min={5} max={40} suffix=" kWh" /></div>}
         </div>
@@ -39398,10 +39446,10 @@ function StepClient({ cust, setCust, lines, setLines, enq, setEnq, status, setSt
 }
 
 /* ── Step 2: PV Designer ── */
-function StepDesign({ onSpec, clientAddress }) {
+function StepDesign({ onSpec, clientAddress, panelOptions, preferredPanelId }) {
   return (
     <div style={{ padding: "var(--gap) 28px" }}>
-      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} />
+      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} panelOptions={panelOptions} preferredPanelId={preferredPanelId} />
     </div>
   );
 }
@@ -39418,8 +39466,17 @@ const QUOTE_UPGRADES = [
 ];
 
 /* ── Step 3: Proposal preview ── */
-function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets }) {
+/* Site plan markers — where the key equipment sits on the client's property. */
+const SITE_MARKERS = {
+  panels:      { label: "Solar panels", color: "#6366F2", letter: "P" },
+  inverter:    { label: "Inverter",     color: "#FA913D", letter: "I" },
+  battery:     { label: "Battery",      color: "#10B981", letter: "B" },
+  switchboard: { label: "Switchboard",  color: "#F04545", letter: "S" },
+};
+
+function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan }) {
   upgrades = upgrades || []; specSheets = specSheets || [];
+  sitePlan = sitePlan || { image: null, markers: [] };
   const brand   = window.__SS_ACTIVE_BRAND || {};
   const primary  = "#0F172A";   // Base44 navy — cover, headings
   const deepNavy = "#0A122D";   // Base44 deep navy — cover gradient
@@ -39436,7 +39493,7 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
   const initials = company.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const previewRef = useRefQS(null);
   const [busy, setBusy] = useQS(false);
-  const [sections, setSections] = useQS({ overview: true, about: true, whysolar: true, specs: true, energy: true, invest: true, finance: true, layout: true, monthly: true, simulation: true, enviro: true, tech: true, projection: true, items: true, upgrades: true, sheets: true, included: true, finoption: false, payment: false, signoff: true });
+  const [sections, setSections] = useQS({ overview: true, about: true, whysolar: true, specs: true, energy: true, invest: true, finance: true, layout: true, monthly: true, simulation: true, enviro: true, tech: true, projection: true, siteplan: true, items: true, upgrades: true, sheets: true, included: true, finoption: false, payment: false, signoff: true });
   const toggleSection = k => setSections(s => ({ ...s, [k]: !s[k] }));
 
   // Client acceptance — signature captured on-screen, stamped into the proposal,
@@ -39474,6 +39531,60 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
       } else { window.ssToast && window.ssToast("Upload spec sheets as PDF or images (JPG/PNG)"); }
     }
   };
+  // Site plan: the installer's photo of the property (falls back to the captured
+  // rooftop image) with markers showing where the equipment goes.
+  const hasBattery = spec.mode === "battery" || spec.mode === "offgrid" || lines.some(l => l.cat === "Battery");
+  const markerTypes = Object.keys(SITE_MARKERS).filter(k => k !== "battery" || hasBattery);
+  const [placing, setPlacing] = useQS(null);
+  const sitePlanRef = useRefQS(null);   // marker type armed for the next click on the plan
+  const siteImage = sitePlan.image || spec.designImage || null;
+  const uploadSitePhoto = e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f || !/^image\//.test(f.type)) { if (f) window.ssToast && window.ssToast("Upload the site photo as an image (JPG/PNG)"); return; }
+    const r = new FileReader();
+    r.onload = ev => {
+      // Downscale to keep the saved quote small.
+      const im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+        const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        setSitePlan(sp => ({ ...sp, image: c.toDataURL("image/jpeg", 0.82) }));
+      };
+      im.src = ev.target.result;
+    };
+    r.readAsDataURL(f);
+  };
+  const placeMarker = e => {
+    if (!placing) return;
+    const b = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - b.left) / b.width) * 100, y = ((e.clientY - b.top) / b.height) * 100;
+    setSitePlan(sp => ({ ...sp, markers: [...(sp.markers || []), { id: Date.now() + Math.random(), type: placing, x, y }] }));
+    setPlacing(null);
+  };
+  const sitePlanHtml = () => {
+    const el = sitePlanRef.current; if (!el) return null;
+    const clone = el.cloneNode(true); clone.style.display = "block"; clone.style.pageBreakBefore = "auto"; clone.style.breakBefore = "auto";
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Site Plan — ${cust.name||"Client"}</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Inter',sans-serif;background:#fff;color:#1f2d3d;padding:24px 32px;max-width:900px;margin:0 auto;}@media print{body{padding:0;}}</style>
+</head><body>${clone.outerHTML}</body></html>`;
+  };
+  const downloadSitePlan = () => {
+    const html = sitePlanHtml(); if (!html) return;
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: `Site-Plan-${(cust.name||"Client").replace(/\s+/g,"-")}-${new Date().toISOString().slice(0,10)}.html` });
+    a.click(); URL.revokeObjectURL(a.href);
+    window.ssToast && window.ssToast("Site plan downloaded", "success");
+  };
+  const printSitePlan = () => {
+    const html = sitePlanHtml(); if (!html) return;
+    const w = window.open("", "_blank");
+    if (!w) { window.ssToast && window.ssToast("Allow pop-ups to print the site plan on its own, or use Download"); return; }
+    w.document.write(html); w.document.close();
+    w.onload = () => { w.focus(); w.print(); };
+  };
+  const removeMarker = id => setSitePlan(sp => ({ ...sp, markers: (sp.markers || []).filter(m => m.id !== id) }));
+
   const confirmAccept = () => {
     if (!sigData || !sigName.trim()) { window.ssToast && window.ssToast("Ask the client to sign in the box and type their full name first"); return; }
     const rec = {
@@ -39584,6 +39695,7 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             ["projection", "25-year savings"],
             ["items",      "Line items & pricing"],
             ["upgrades",   "Optional upgrades"],
+            ["siteplan",   "Site plan (appendix)"],
             ["sheets",     "Product spec sheets"],
             ["included",   "What's included & warranty"],
             ["finoption",  "Finance option"],
@@ -39604,6 +39716,43 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             {busy ? <span className="pv-spin" /> : <Icon d={ICONS.docs} size={14} stroke={2} />}
             {busy ? "Preparing…" : "Print / PDF"}
           </button>
+
+          {spec.count > 0 && !spec.designImage && (
+            <div className="card-sub" style={{ fontSize:11, marginTop:10, color:"var(--warn, #FA913D)" }}>
+              No rooftop image yet — open System Design (search the client's address or upload a roof photo), then come back here to capture it.
+            </div>
+          )}
+
+          {/* Site plan — photo of the property + equipment markers */}
+          <div style={{ height:1, background:"var(--bdr)", margin:"14px 0" }} />
+          <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:10 }}>Site plan</div>
+          <label className="btn" style={{ width:"100%", justifyContent:"center", cursor:"pointer", marginBottom:8 }}>
+            <Icon d={ICONS.upload} size={13} stroke={2} /> {sitePlan.image ? "Replace site photo" : "Upload site photo"}
+            <input type="file" accept="image/*" style={{ display:"none" }} onChange={uploadSitePhoto} />
+          </label>
+          {sitePlan.image && (
+            <div className="card-sub" style={{ fontSize:11, marginBottom:8, textAlign:"center" }}>
+              <span style={{ cursor:"pointer", textDecoration:"underline" }} onClick={() => setSitePlan(sp => ({ ...sp, image: null }))}>Use the rooftop satellite image instead</span>
+            </div>
+          )}
+          {siteImage ? (
+            <>
+              <div className="card-sub" style={{ fontSize:11, marginBottom:6 }}>Pick an item, then click on the site plan to mark where it goes. Click a marker to remove it.</div>
+              {markerTypes.map(k => (
+                <button key={k} className={"btn" + (placing === k ? " btn-primary" : "")} style={{ width:"100%", justifyContent:"flex-start", marginBottom:6 }} onClick={() => setPlacing(placing === k ? null : k)}>
+                  <span style={{ width:16, height:16, borderRadius:"50%", background:SITE_MARKERS[k].color, color:"#fff", fontSize:10, fontWeight:700, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{SITE_MARKERS[k].letter}</span>
+                  {placing === k ? "Click the plan…" : SITE_MARKERS[k].label}
+                </button>
+              ))}
+              <div className="card-sub" style={{ fontSize:11, margin:"6px 0" }}>Tick "Site plan (appendix)" above to include it with the proposal, or send it on its own:</div>
+              <div style={{ display:"flex", gap:6 }}>
+                <button className="btn" style={{ flex:1, justifyContent:"center" }} onClick={downloadSitePlan}><Icon d={ICONS.download} size={13} stroke={2} /> Download</button>
+                <button className="btn" style={{ flex:1, justifyContent:"center" }} onClick={printSitePlan}><Icon d={ICONS.docs} size={13} stroke={2} /> Print</button>
+              </div>
+            </>
+          ) : (
+            <div className="card-sub" style={{ fontSize:11 }}>Upload a site photo (or capture the rooftop in System Design) to mark equipment locations.</div>
+          )}
 
           {/* Product spec sheets — tenant uploads PDF or images, embedded in the proposal */}
           <div style={{ height:1, background:"var(--bdr)", margin:"14px 0" }} />
@@ -40272,6 +40421,43 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             <div style={{ fontSize:11, color:"#c0cad4", lineHeight:1.65, marginTop:14 }}>
               All figures are estimates based on industry data and the provided site details. Actual system output, savings and payback may vary. Subject to final on-site assessment and engineering review. STCs subject to Clean Energy Regulator eligibility.
             </div>
+
+            {/* Appendix A — site plan: property photo with equipment locations marked by the
+                installer. Self-contained (own header) so it can also be downloaded or printed
+                on its own, separate from the proposal. */}
+            {siteImage && (
+              <div ref={sitePlanRef} style={{ pageBreakBefore:"always", breakBefore:"page", display: sections.siteplan ? "block" : "none" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:10, marginTop:38 }}>
+                  <div style={{ fontFamily:"'Montserrat',sans-serif", fontSize:15, fontWeight:700, color:primary }}>Appendix A — Site Plan</div>
+                  <div style={{ fontSize:11, color:"#7a8896", textAlign:"right" }}>{company} · Quote {quoteNo} · {dateStr}</div>
+                </div>
+                <div style={{ borderBottom:`2px solid ${accent}`, margin:"9px 0 12px" }} />
+                <div style={{ fontSize:12, color:"#5b6b7a", marginBottom:12 }}>
+                  Client: <b style={{ color:primary }}>{cust.name || "—"}</b> · Site: {spec.address || cust.address || "—"}
+                  {spec.count > 0 ? <> · {spec.count} × {spec.panel?.watts}W panels ({spec.sysKw?.toFixed(2)} kW)</> : null}
+                </div>
+                <div onClick={placeMarker} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid #e3e9f0", cursor: placing ? "crosshair" : "default" }}>
+                  <img src={siteImage} alt="Site plan of the client's property" style={{ width:"100%", display:"block" }} />
+                  {(sitePlan.markers || []).map(m => {
+                    const t = SITE_MARKERS[m.type]; if (!t) return null;
+                    return (
+                      <div key={m.id} title={"Remove " + t.label} onClick={ev => { ev.stopPropagation(); if (!placing) removeMarker(m.id); }}
+                        style={{ position:"absolute", left:m.x + "%", top:m.y + "%", transform:"translate(-50%,-50%)", display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+                        <span style={{ width:26, height:26, borderRadius:"50%", background:t.color, color:"#fff", border:"2px solid #fff", boxShadow:"0 1px 4px rgba(0,0,0,0.5)", fontSize:12, fontWeight:800, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{t.letter}</span>
+                        <span style={{ background:"rgba(255,255,255,0.92)", color:"#0F172A", fontSize:11, fontWeight:700, padding:"2px 7px", borderRadius:4, whiteSpace:"nowrap" }}>{t.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display:"flex", gap:18, flexWrap:"wrap", marginTop:10, fontSize:12, color:"#5b6b7a" }}>
+                  {Object.keys(SITE_MARKERS).filter(k => (sitePlan.markers || []).some(m => m.type === k)).map(k => (
+                    <span key={k} style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                      <span style={{ width:12, height:12, borderRadius:"50%", background:SITE_MARKERS[k].color }} />{SITE_MARKERS[k].label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -40298,8 +40484,38 @@ function QuoteSystem() {
     return items;
   });
   const [spec, setSpec] = useQS({});
+  // Live tenant catalog, so the designer offers the panels the tenant actually sells.
+  const { products: liveProducts } = window.useProducts ? window.useProducts() : { products: [] };
+  const catalogPanels = (liveProducts && liveProducts.length ? liveProducts : PRODUCTS).filter(p => p.cat === "Panel" && Number(p.watts) > 0);
   const [upgrades, setUpgrades] = useQS(() => QUOTE_UPGRADES.map(u => ({ ...u, accepted: false })));
+  const panelLine = lines.find(l => l.cat === "Panel");
+  const preferredPanelId = panelLine ? panelLine.id : undefined;
+  // Only accept designer output once the user has actually viewed System Design, so a
+  // reopened quote's saved design (and roof image) isn't replaced by the designer's defaults.
+  const designViewed = useRefQS(false);
+  const specRef = useRefQS(spec);
+  specRef.current = spec;
+  const onDesignSpec = s => {
+    if (!designViewed.current) return;
+    // Replacing the spec drops any captured roof image: the layout changed, so that
+    // picture is out of date. It is retaken when the user leaves System Design.
+    setSpec(s);
+    // Keep the quote's panel line item in step with the design: same product, qty = panels placed.
+    if (s.panel && s.count > 0) {
+      setLines(ls => {
+        const i = ls.findIndex(l => l.cat === "Panel");
+        if (i === -1) return [{ ...s.panel, qty: s.count }, ...ls];
+        const cur = ls[i];
+        const sameProduct = String(cur.id) === String(s.panel.id);
+        if (sameProduct && cur.qty === s.count) return ls;
+        const next = sameProduct ? { ...cur, qty: s.count } : { ...s.panel, qty: s.count };
+        const out = ls.filter((l, j) => j === i || String(l.id) !== String(next.id));
+        return out.map(l => l === cur ? next : l);
+      });
+    }
+  };
   const [specSheets, setSpecSheets] = useQS([]);
+  const [sitePlan, setSitePlan] = useQS({ image: null, markers: [] });
   const [quoteId, setQuoteId] = useQS(null);   // set when editing a saved quote
   const [saving, setSaving] = useQS(false);
   const { quotes, loaded, saveQuote, loadQuote, deleteQuote, refresh } = useQuotes();
@@ -40338,11 +40554,12 @@ function QuoteSystem() {
     return {
       id: quoteId || undefined,
       customer: cust, enq, status: statusVal || status, validity, notes,
-      lines, spec: { ...spec, upgrades, specSheets }, total: Math.round(subtotal * 1.1),
+      lines, spec: { ...specRef.current, upgrades, specSheets, sitePlan }, total: Math.round(subtotal * 1.1),
     };
   };
   const saveCurrent = async (statusVal) => {
     setSaving(true);
+    if (step === 2) await captureRoof();
     if (statusVal) setStatus(statusVal);
     const saved = await saveQuote(buildPayload(statusVal));
     setSaving(false);
@@ -40366,7 +40583,10 @@ function QuoteSystem() {
     setSpec(q.spec || {});
     setUpgrades((q.spec && Array.isArray(q.spec.upgrades) && q.spec.upgrades.length) ? q.spec.upgrades : QUOTE_UPGRADES.map(u => ({ ...u, accepted: false })));
     setSpecSheets((q.spec && Array.isArray(q.spec.specSheets)) ? q.spec.specSheets : []);
+    setSitePlan((q.spec && q.spec.sitePlan) || { image: null, markers: [] });
     designedAddr.current = (q.customer && q.customer.address) || "";
+    designViewed.current = false;
+    setDesignKey(k => k + 1);
     reached.current = { 1: true, 2: !!(q.spec && Object.keys(q.spec).length), 3: true };
     setStep(1);
     window.ssToast && window.ssToast("Opened " + (q.number || "quote"));
@@ -40379,6 +40599,7 @@ function QuoteSystem() {
   const [designKey, setDesignKey] = useQS(0);
   const reached = useRefQS({ 1: true });
   reached.current[step] = true;
+  if (step === 2) designViewed.current = true;
 
   // The PV designer is built for one site. If the tenant changes the client's
   // address, re-locate the designer to the new site (a fresh design) so the layout
@@ -40395,7 +40616,17 @@ function QuoteSystem() {
 
   const canProceed = step === 1 ? true : step === 2 ? true : true;
 
-  const go = dir => setStep(s => Math.max(1, Math.min(3, s + dir)));
+  // Every way of leaving System Design (Next, Back, the step bar, Save) retakes the
+  // rooftop image first, while the designer is still visible, so the proposal always
+  // shows the CURRENT layout on the client's roof.
+  const [capturing, setCapturing] = useQS(false);
+  const changeStep = async n => {
+    n = Math.max(1, Math.min(3, n));
+    if (capturing) return;
+    if (step === 2 && n !== 2) { setCapturing(true); await captureRoof(); setCapturing(false); }
+    setStep(n);
+  };
+  const go = dir => changeStep(step + dir);
 
   // Capture the live satellite roof + panel layout as an image for the proposal,
   // so the client sees panels on THEIR actual rooftop (not a generic schematic).
@@ -40423,9 +40654,12 @@ function QuoteSystem() {
       if (!roofImg) return;
 
       // Capture ONLY the panel overlay, transparent background (ignore tiles, photo, all chrome).
+      // The stage and aerial layers have solid dark CSS backgrounds; clear them in the
+      // clone, otherwise they paint over the real satellite photo composited below.
       const panels = await window.html2canvas(stage, {
         useCORS: true, backgroundColor: null, scale: 1.6, logging: false,
-        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-toolbar, .pv-tools, .pv-array-tag"),
+        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-toolbar, .pv-tools, .pv-array-tag, .pv-pin, .pv-pin-pulse"),
+        onclone: doc => doc.querySelectorAll(".pv-stage, .pv-aerial").forEach(el => { el.style.background = "transparent"; }),
       });
 
       // Composite: roof photo (cover-fit) first, then the panels on top.
@@ -40441,13 +40675,13 @@ function QuoteSystem() {
       ctx.drawImage(panels, 0, 0);
 
       const img = out.toDataURL("image/jpeg", 0.85);
-      if (img && img.length > 2000) setSpec(s => ({ ...s, designImage: img }));
+      if (img && img.length > 2000) { specRef.current = { ...specRef.current, designImage: img }; setSpec(s => ({ ...s, designImage: img })); }
     } catch (e) { /* capture failed — proposal falls back to the schematic layout */ }
   };
-  const generateProposal = async () => { await captureRoof(); go(1); };
+  const generateProposal = () => changeStep(3);
 
   React.useEffect(() => {
-    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designedAddr.current = ""; setDesignKey(k => k + 1); };
+    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setSitePlan({ image: null, markers: [] }); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designViewed.current = false; designedAddr.current = ""; setDesignKey(k => k + 1); };
     window.addEventListener("ss:new-quote", h);
     return () => window.removeEventListener("ss:new-quote", h);
   }, []);
@@ -40458,7 +40692,7 @@ function QuoteSystem() {
       {/* Step bar + navigation */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 28px", flexWrap:"wrap", gap:12 }}>
         <div style={{ flex:1 }}>
-          <StepBar step={step} onStep={setStep} />
+          <StepBar step={step} onStep={changeStep} />
         </div>
         <div style={{ display:"flex", gap:10, paddingTop:18 }}>
           {step > 1 && (
@@ -40467,8 +40701,8 @@ function QuoteSystem() {
             </button>
           )}
           {step < 3 && (
-            <button className="btn btn-primary" onClick={() => step === 2 ? generateProposal() : go(1)}>
-              {step === 2 ? <><Icon d={ICONS.sparkle} size={14} fill={true} stroke={0} /> Generate Proposal</> : <>Next <Icon d={ICONS.chevR} size={14} stroke={2} /></>}
+            <button className="btn btn-primary" disabled={capturing} onClick={() => step === 2 ? generateProposal() : go(1)}>
+              {capturing ? <><span className="pv-spin" /> Capturing roof…</> : step === 2 ? <><Icon d={ICONS.sparkle} size={14} fill={true} stroke={0} /> Generate Proposal</> : <>Next <Icon d={ICONS.chevR} size={14} stroke={2} /></>}
             </button>
           )}
           <button className="btn" disabled={saving} onClick={() => saveCurrent()}>
@@ -40492,13 +40726,15 @@ function QuoteSystem() {
       )}
       {reached.current[2] && (
         <div style={{ display: step === 2 ? "block" : "none" }}>
-          <StepDesign key={designKey} onSpec={setSpec} clientAddress={cust.address} />
+          <StepDesign key={designKey} onSpec={onDesignSpec} clientAddress={cust.address}
+            panelOptions={catalogPanels} preferredPanelId={preferredPanelId} />
         </div>
       )}
       {reached.current[3] && (
         <div style={{ display: step === 3 ? "block" : "none" }}>
           <StepProposal spec={spec} cust={cust} lines={lines} validity={validity} notes={notes}
-            upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets} />
+            upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets}
+            sitePlan={sitePlan} setSitePlan={setSitePlan} />
         </div>
       )}
     </div>
@@ -42517,23 +42753,46 @@ const PALETTES = [
 ];
 
 /* Branding editor — live preview, works for tenant & reseller oversight */
-function BrandingEditor({ brand }) {
+// tenantId set → the reseller is editing that tenant's brand on their behalf.
+function BrandingEditor({ brand, tenantId, onSaved }) {
   const [palette, setPalette] = useBR(brand.realLogo ? "sky" : (PALETTES.find(p => p.accent[1] === brand.accent[1])?.id || "azure"));
   const [name, setName] = useBR(brand.name);
   const [tagline, setTagline] = useBR(brand.tagline || "Premium solar solutions");
   const [showPB, setShowPB] = useBR(false);
-  const [logoUrl, setLogoUrl] = useBR(null);
+  // Start from what's already published, so re-publishing never drops the saved logo.
+  const [logoUrl, setLogoUrl] = useBR(brand.logo_url || null);
   const [customHex, setCustomHex] = useBR("");
+  // Full custom colour set: [light, main, dark]. Null = use the palette above.
+  const [custom, setCustom] = useBR(() => (brand.accent && !PALETTES.some(p => p.accent[1] === brand.accent[1]) && !brand.realLogo) ? brand.accent.slice(0, 3) : null);
   const [photoAssets, setPhotoAssets] = useBR([]);
   const fileRef = useRefBR(null);
   const photoRef = useRefBR(null);
   const photoCamRef = useRefBR(null);
 
+  // Logos: SVG kept as-is (up to 300 KB); photos/PNGs are scaled to fit 600px
+  // and kept as PNG so transparency survives. Keeps every portal load light.
   const handleLogoFile = e => {
     const file = e.target.files[0];
+    e.target.value = "";
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => setLogoUrl(ev.target.result);
+    reader.onload = ev => {
+      const src = ev.target.result;
+      if (file.type === "image/svg+xml") {
+        if (src.length > 400000) return window.ssToast && window.ssToast("That SVG is too large — keep it under 300 KB");
+        return setLogoUrl(src);
+      }
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 600 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        setLogoUrl(c.toDataURL("image/png"));
+      };
+      img.onerror = () => window.ssToast && window.ssToast("Couldn't read that image — try PNG, JPG or SVG");
+      img.src = src;
+    };
     reader.readAsDataURL(file);
   };
   const handlePhotoFile = e => {
@@ -42546,8 +42805,13 @@ function BrandingEditor({ brand }) {
   };
 
   const isValidHex = h => /^#[0-9a-f]{6}$/i.test(h);
-  const hexPal = isValidHex(customHex)
-    ? { id: "custom", name: "Custom", accent: [customHex, customHex + "bb", customHex + "66"], glow: "127,127,127" }
+  const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mix = (h, to, t) => "#" + hexRgb(h).map(v => Math.round(v + (to - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
+  // One colour → a matching light / main / dark set.
+  const shadesOf = h => [mix(h, 255, 0.45), h.toUpperCase(), mix(h, 0, 0.45)];
+  const customSet = custom || (isValidHex(customHex) ? shadesOf(customHex) : null);
+  const hexPal = customSet
+    ? { id: "custom", name: "Custom", accent: customSet, glow: hexRgb(customSet[1]).join(",") }
     : null;
 
   const pal = hexPal || PALETTES.find(p => p.id === palette) || PALETTES[0];
@@ -42557,12 +42821,21 @@ function BrandingEditor({ brand }) {
   // Persist to the backend and apply live across every portal (ss:branding-changed
   // is handled in main.jsx, which re-themes the running app immediately).
   const saveBrand = async () => {
-    const branding = { accent: pal.accent, glow: pal.glow, name, tagline };
-    if (logoUrl) branding.logo_url = logoUrl;
+    const branding = { accent: pal.accent, glow: pal.glow, name, tagline, logo_url: logoUrl || null };
     const api = window.ssApi;
     if (api && api.getToken && api.getToken()) {
-      try { await api.put("/branding", branding); }
-      catch (e) { window.ssToast && window.ssToast("Could not save branding — check your connection"); return; }
+      try { await api.put(tenantId ? "/tenants/" + encodeURIComponent(tenantId) + "/branding" : "/branding", branding); }
+      catch (e) {
+        const code = e && e.data && e.data.error;
+        window.ssToast && window.ssToast(code === "logo_too_large" ? "Logo is too large — try a smaller file" : code === "support_read_only" ? "Not allowed in this session" : "Could not save branding — check your connection");
+        return;
+      }
+    }
+    if (tenantId) {
+      window.dispatchEvent(new Event("ss:tenants-changed"));
+      window.ssToast && window.ssToast("Saved — " + name + "'s portals now use this brand");
+      onSaved && onSaved();
+      return;
     }
     window.dispatchEvent(new CustomEvent("ss:branding-changed", { detail: branding }));
     window.ssToast && window.ssToast("Brand published — all portals updated for " + name);
@@ -42610,7 +42883,7 @@ function BrandingEditor({ brand }) {
                   if (!p) return null;
                   const isOn = !hexPal && palette === p.id;
                   return (
-                    <button key={p.id} onClick={() => { setPalette(p.id); setCustomHex(""); }}
+                    <button key={p.id} onClick={() => { setPalette(p.id); setCustomHex(""); setCustom(null); }}
                       title={p.name}
                       style={{ border: isOn ? "2px solid var(--blue-light)" : "1px solid var(--line-strong)", borderRadius: 9, padding: "7px 8px", background: isOn ? "rgba(58,125,255,0.06)" : "rgba(255,255,255,0.02)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 5, alignItems: "center", minWidth: 52 }}>
                       <span style={{ display: "flex", gap: 2 }}>
@@ -42623,18 +42896,31 @@ function BrandingEditor({ brand }) {
               </div>
             </div>
           ))}
-          <label className="field" style={{ marginBottom: 18 }}>
-            <span className="field-label">Custom hex color <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— editable, overrides palette</span></span>
+          <label className="field" style={{ marginBottom: 12 }}>
+            <span className="field-label">Your brand colour <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— hex code or picker; builds light &amp; dark shades for you</span></span>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="color" aria-label="Pick brand colour" value={isValidHex(customHex) ? customHex : (customSet ? customSet[1] : pal.accent[1].slice(0, 7))}
+                onChange={e => { setCustomHex(e.target.value.toUpperCase()); setCustom(null); }}
+                style={{ width: 42, height: 38, padding: 2, border: "1px solid var(--line-strong)", borderRadius: 9, background: "transparent", cursor: "pointer", flexShrink: 0 }} />
               <input className="field-input" placeholder="#3A7DFF" value={customHex}
-                onChange={e => setCustomHex(e.target.value.startsWith("#") ? e.target.value : "#" + e.target.value)}
+                onChange={e => { const v = e.target.value.trim(); setCustomHex(!v ? "" : v.startsWith("#") ? v : "#" + v); setCustom(null); }}
                 style={{ fontFamily: "var(--font-head)", letterSpacing: "0.04em", flex: 1 }} />
-              {isValidHex(customHex) && (
-                <div style={{ width: 36, height: 36, borderRadius: 9, background: customHex, border: "2px solid rgba(255,255,255,0.18)", flexShrink: 0 }} />
-              )}
-              {customHex && <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => setCustomHex("")}>Clear</button>}
+              {(customHex || custom) && <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => { setCustomHex(""); setCustom(null); }}>Clear</button>}
             </div>
           </label>
+          <div className="field" style={{ marginBottom: 18 }}>
+            <span className="field-label">Fine-tune each shade <span style={{ color: "var(--tx-faint)", fontWeight: 400 }}>— highlights, buttons, headers &amp; dark accents</span></span>
+            <div style={{ display: "flex", gap: 10 }}>
+              {["Light", "Main", "Dark"].map((lbl, i) => (
+                <label key={lbl} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, alignItems: "center", fontSize: 11, color: "var(--tx-dim)", fontFamily: "var(--font-head)" }}>
+                  <input type="color" aria-label={lbl + " shade"} data-testid={"brand-shade-" + i} value={pal.accent[i].slice(0, 7)}
+                    onChange={e => { const next = pal.accent.map(c => c.slice(0, 7)); next[i] = e.target.value.toUpperCase(); setCustom(next); }}
+                    style={{ width: "100%", height: 34, padding: 2, border: "1px solid var(--line-strong)", borderRadius: 8, background: "transparent", cursor: "pointer" }} />
+                  {lbl} · {pal.accent[i].slice(0, 7).toUpperCase()}
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div className="field-label" style={{ marginBottom: 10 }}>Logo</div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, padding: 14, border: logoUrl ? "1px solid rgba(58,125,255,0.3)" : "1.5px dashed var(--line-strong)", borderRadius: 12, background: logoUrl ? "rgba(58,125,255,0.04)" : "transparent" }}>
@@ -42652,7 +42938,7 @@ function BrandingEditor({ brand }) {
               </button>
               {logoUrl && <button className="btn" style={{ padding: "7px 10px", fontSize: 12.5 }} onClick={() => setLogoUrl(null)}>Remove</button>}
             </div>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleLogoFile} />
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-testid="brand-logo-input" style={{ display: "none" }} onChange={handleLogoFile} />
           </div>
 
           <div className="field-label" style={{ marginBottom: 10, marginTop: 18 }}>Brand photos</div>
@@ -43835,7 +44121,7 @@ const SERVICES = [
   { name:"Database (PostgreSQL)",status:"operational", ms:12  },
 ];
 
-const TICKETS_INIT = [
+const TICKETS_INIT = [].concat([
   { id:"T-2051",tenant:"azure",  subj:"Custom domain SSL renewal",         pri:"high",status:"Open",       age:"1h",
     notes:"SSL cert expired on portal.azimuthsolar.com.au. Auto-renewal failed last week. Needs urgent action." },
   { id:"T-2049",tenant:"helios", subj:"Add 5 contractor seats to plan",    pri:"med", status:"In Progress", age:"4h",
@@ -43844,7 +44130,7 @@ const TICKETS_INIT = [
     notes:"Voltaic Energy wants Xero OAuth2 integration for monthly financial exports." },
   { id:"T-2043",tenant:"helios", subj:"Logo not showing on client emails",  pri:"med", status:"Resolved",   age:"2d",
     notes:"Logo URL was HTTP not HTTPS in email template. Fixed CDN URL. Verified on Gmail and Outlook." },
-];
+]).filter(x => (window.__SS_DEMO || !["voltaic", "azure"].includes(x.tenant)));
 
 const ADDONS = [
   { id:"compliance-suite", name:"Compliance Reports Suite", desc:"8 branded AS/NZS documents — full installation manual & handover pack plus grid-connect, battery, off-grid, site inspection, inverter commissioning, cleaning & operational testing reports. Editable, photo-enabled & Word-downloadable by tenant staff and contractors.", price:69, category:"Compliance & Reporting", badge:"Australian Standards", badgeColor:"var(--amber)" },
@@ -44790,13 +45076,13 @@ function ResellerTenants() {
 }
 
 /* ── InvoiceModal ───────────────────────────────────────────── */
-const RESELLER_INVOICES = [
+const RESELLER_INVOICES = [].concat([
   { id:"INV-3041", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3040", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3039", tenant:"voltaic", plan:"Growth", amount:499, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3022", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
   { id:"INV-3021", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
-];
+]).filter(x => (window.__SS_DEMO || !["voltaic", "azure"].includes(x.tenant)));
 
 const PLAN_ITEMS = {
   Scale:  [["SolarSync Scale Plan — monthly licence",1,699],["Unlimited contractor seats",1,150],["Dedicated CSM",1,50]],
@@ -45054,9 +45340,10 @@ function ResellerBilling() {
 }
 
 /* ── ResellerBranding ───────────────────────────────────────── */
-function ResellerBranding() {
+function ResellerBranding({ brand }) {
   const [tab, setTab] = useStateR("own");
   const [previewId, setPreviewId] = useStateR(null);
+  const [editId, setEditId] = useStateR(null);
   const realIds = useRealTenants();
   const tenantIds = [...realIds, ...SHOWCASE_IDS];
   // Arriving via the tenant drawer's "View Branding" button: land on the
@@ -45079,9 +45366,19 @@ function ResellerBranding() {
         </div>
       </div>
 
-      {tab === "own" && <BrandingEditor brand={BRANDS.solarsync} />}
+      {tab === "own" && <BrandingEditor brand={brand || BRANDS.solarsync} />}
 
-      {tab === "tenants" && (
+      {tab === "tenants" && editId && BRANDS[editId] && (
+        <>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:"var(--gap)" }}>
+            <button className="btn" onClick={()=>setEditId(null)}>← All tenants</button>
+            <span className="card-sub">Editing <b>{BRANDS[editId].name}</b>'s brand for them — they can still change it themselves.</span>
+          </div>
+          <BrandingEditor key={editId} brand={BRANDS[editId]} tenantId={editId} onSaved={()=>setEditId(null)} />
+        </>
+      )}
+
+      {tab === "tenants" && !editId && (
         <>
           {tenantIds.length===0 && <div className="panel panel-pad chrome-top" style={{ textAlign:"center",color:"var(--tx-dim)",fontSize:13,padding:"26px 0" }}>Your tenants' white-label brands appear here once they customise their portals.</div>}
           <div className="brand-grid">
@@ -45108,7 +45405,10 @@ function ResellerBranding() {
                   </div>
                   <div style={{ display:"flex",gap:8,marginTop:14 }}>
                     <span className="comp-note ok" style={{ fontSize:12 }}><Icon d={ICONS.check} size={13} stroke={2.4} style={{ verticalAlign:"-2px" }} /> Approved</span>
-                    <button className="btn" style={{ marginLeft:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setPreviewId(id)}>
+                    {b.real && <button className="btn btn-primary" style={{ marginLeft:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setEditId(id)}>
+                      <Icon d={ICONS.palette} size={14} stroke={2} /> Edit branding
+                    </button>}
+                    <button className="btn" style={{ marginLeft:b.real?0:"auto",padding:"6px 12px",fontSize:12.5 }} onClick={()=>setPreviewId(id)}>
                       <Icon d={ICONS.eye} size={14} stroke={2} /> Preview
                     </button>
                   </div>
@@ -45176,6 +45476,106 @@ function ResellerHealth() {
 }
 
 /* ── ResellerSupport ────────────────────────────────────────── */
+// Tenant-requested support access. The tenant admin grants SolarSync support a
+// time-limited way into their portal; the server masks customer, staff and
+// contractor details and only allows configuration fixes during that session.
+const SR_FMT = d => d ? new Date(d).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+const SR_STATUS = r => r.active ? "Open" : r.status === "open" ? "Expired" : r.status === "revoked" ? "Revoked" : "Closed";
+function SupportAccessPanel() {
+  const [list, setList] = React.useState(null);
+  const [msg, setMsg] = React.useState("");
+  const [hours, setHours] = React.useState(24);
+  const [busy, setBusy] = React.useState(false);
+  const load = () => window.ssApi.get("/support-requests").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const submit = async () => {
+    if (!msg.trim()) return window.ssToast && window.ssToast("Describe the problem first");
+    setBusy(true);
+    try { await window.ssApi.post("/support-requests", { message: msg.trim(), hours }); setMsg(""); window.ssToast && window.ssToast("Support access granted — we'll be in touch"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't send the request"); }
+    setBusy(false);
+  };
+  const revoke = async id => {
+    try { await window.ssApi.post("/support-requests/" + id + "/revoke", {}); window.ssToast && window.ssToast("Support access removed"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't remove access"); }
+  };
+  return (
+    <div className="panel panel-pad chrome-top" data-testid="support-access-panel">
+      <div className="card-head"><div><div className="card-title">Support access</div>
+        <div className="card-sub">Let SolarSync support into your portal to fix a problem. Your customers', staff and contractors' names, contact details, addresses, notes and photos stay hidden from us, and we can only change settings like branding and products. Remove access at any time.</div></div></div>
+      <textarea className="field-input" rows={3} value={msg} onChange={e => setMsg(e.target.value)} maxLength={2000}
+        placeholder="What's going wrong? (Please don't include customer names or details)" style={{ width: "100%", padding: 10, resize: "vertical", height: "auto" }} />
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: "var(--muted)" }}>Allow access for</span>
+        <select className="field-input" value={hours} onChange={e => setHours(Number(e.target.value))} style={{ height: 34, width: 120, padding: "0 10px" }}>
+          {[2, 8, 24, 72].map(h => <option key={h} value={h}>{h < 24 ? h + " hours" : h / 24 + (h === 24 ? " day" : " days")}</option>)}
+        </select>
+        <button className="btn btn-primary" disabled={busy} onClick={submit} style={{ marginLeft: "auto" }}>{busy ? "Sending…" : "Request support"}</button>
+      </div>
+      {list && list.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          {list.slice(0, 8).map(r => (
+            <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.message}</span>
+              <span className="chip">{SR_STATUS(r)}</span>
+              <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{r.active ? "until " + SR_FMT(r.expires_at) : SR_FMT(r.created_at)}</span>
+              {r.active && <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => revoke(r.id)}>Remove access</button>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function SupportRequestsQueue() {
+  const [list, setList] = React.useState(null);
+  const load = () => window.ssApi.get("/support-requests").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const enter = async id => {
+    try { await window.ssApi.supportEnter(id); }
+    catch (e) { window.ssToast && window.ssToast(e && e.data && e.data.error === "not_active" ? "That request has ended" : "Couldn't open the tenant's portal"); load(); }
+  };
+  const close = async id => {
+    try { await window.ssApi.post("/support-requests/" + id + "/close", {}); window.ssToast && window.ssToast("Marked as fixed — access closed"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't close the request"); }
+  };
+  const open = (list || []).filter(r => r.active);
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginBottom: 16 }} data-testid="support-requests-queue">
+      <div className="card-head"><div><div className="card-title">Tenant support access requests</div>
+        <div className="card-sub">Tenants who have let you into their portal. Inside, their customers', staff and contractors' private details are hidden and only settings can be changed. Everything you do is logged.</div></div></div>
+      {list === null ? <div style={{ fontSize: 13, color: "var(--muted)" }}>Loading…</div>
+        : !list.length ? <div style={{ fontSize: 13, color: "var(--muted)" }}>No requests yet.</div>
+        : list.slice(0, 20).map(r => (
+          <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)", fontSize: 13, opacity: r.active ? 1 : 0.6 }}>
+            <b style={{ whiteSpace: "nowrap" }}>{r.tenant_name || r.tenant_id}</b>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.message}</span>
+            <span className="chip">{SR_STATUS(r)}</span>
+            <span style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{r.active ? "until " + SR_FMT(r.expires_at) : SR_FMT(r.created_at)}</span>
+            {r.active && <button className="btn btn-primary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => enter(r.id)}>Enter portal</button>}
+            {r.active && <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => close(r.id)}>Close</button>}
+          </div>
+        ))}
+      {open.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>{open.length} open</div>}
+    </div>
+  );
+}
+function SupportSessionBanner({ user }) {
+  const ends = user.session_ends_at ? new Date(user.session_ends_at).getTime() : null;
+  React.useEffect(() => {
+    if (!ends) return;
+    const t = setTimeout(() => window.ssApi.supportExit("Support session timed out — enter again from Support."), Math.max(0, ends - Date.now()));
+    return () => clearTimeout(t);
+  }, [ends]);
+  return (
+    <div data-testid="support-session-banner" style={{ background: "#7A2E0E", color: "#FFF4EC", padding: "9px 18px", display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13, flexWrap: "wrap" }}>
+      <Icon d={ICONS.lock} size={16} stroke={2} />
+      <span><b>Support session · {user.tenant_name || "tenant portal"}</b> — customer, staff &amp; contractor details are hidden; only settings can be changed{ends ? " · ends " + SR_FMT(ends) : ""}</span>
+      <button onClick={() => window.ssApi.supportExit()} style={{ marginLeft: "auto", padding: "5px 12px", borderRadius: 7, border: "1px solid #FFF4EC", background: "transparent", color: "#FFF4EC", fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}>Exit support session</button>
+    </div>
+  );
+}
+
 function ResellerSupport() {
   const [tickets] = useStateR(TICKETS_INIT);
   const [openTicket, setOpenTicket] = useStateR(null);
@@ -45186,6 +45586,7 @@ function ResellerSupport() {
 
   return (
     <div className="fade-in">
+      <SupportRequestsQueue />
       <div className="kpi-row">
         <RKpi i={0} label="Open Tickets"        value={tickets.filter(t=>t.status==="Open").length}        icon="support"  trend="flat" />
         <RKpi i={1} label="In Progress"         value={tickets.filter(t=>t.status==="In Progress").length} icon="clock"    trend="flat" />
@@ -49180,7 +49581,7 @@ const MSG_THREADS = {
       { who: "them", t: "Custom domain SSL is up for renewal — can you handle it?", time: "Mon 2:14 PM" },
       { who: "me", t: "On it — auto-renew is now enabled, no action needed on your side.", time: "Mon 2:20 PM" },
     ] },
-  ],
+  ].filter(x => window.__SS_DEMO || !["r-voltaic", "r-azure"].includes(x.id)),
   tenant: [
     { id: "t-smith", who: "Smith Residence", role: "Client · SS-1042", online: true, msgs: [
       { who: "them", t: "Hi, just checking the install is still on for Monday?", time: "Today 8:40 AM" },
@@ -51531,6 +51932,7 @@ function Settings({ portal, brand, user }) {
     <div className="fade-in">
       <div className="dash-grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
         <div className="stack">
+          {portal === "tenant" && me.app_role === "tenant_admin" && !me.support && <SupportAccessPanel />}
           {sections.map(s => (
             <div key={s.title} className="panel panel-pad chrome-top">
               <div className="card-head"><div className="card-title">{s.title}</div><button className="btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={()=>window.ssToast&&window.ssToast("Edit mode enabled — update your details and save")}>Edit</button></div>
@@ -52587,7 +52989,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "finance":   return <TenantAccounting />;
       case "accounting": return <TenantAccounting />;
       case "timeclock": return <TimeClock heading="Reseller Time Clock" subheading="Clock on and off for your reseller staff — GPS-tagged for accurate timesheets and payroll" />;
-      case "branding":  return <ResellerBranding />;
+      case "branding":  return <ResellerBranding brand={brand} />;
       case "health":    return <ResellerHealth />;
       case "analytics": return <ResellerAnalytics />;
       case "support":   return <ResellerSupport />;
@@ -52738,6 +53140,32 @@ function AIAssist({ portal, brand }) {
   );
 }
 
+/* Catches a crash inside a screen so it shows a message instead of blanking the
+   whole app to a black screen. The menu stays usable; switching screens resets it. */
+class ScreenBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("[SolarSync] screen crashed:", error, info && info.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ padding: 32, display: "flex", justifyContent: "center", ...(this.props.whole ? { minHeight: "100vh", alignItems: "center", background: "#0a0e13" } : {}) }}>
+        <div className="panel panel-pad" style={{ maxWidth: 520, textAlign: "center", color: "#eaf4ff" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Something went wrong on this screen</div>
+          <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 16 }}>
+            {this.props.whole ? "Reload to continue." : "Your other screens still work — pick another from the menu, or try this one again."}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 16, wordBreak: "break-word" }}>{String(this.state.error && this.state.error.message || this.state.error)}</div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            {!this.props.whole && <button className="btn" onClick={() => this.setState({ error: null })}>Try again</button>}
+            <button className="btn btn-primary" onClick={() => location.reload()}>Reload</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
 function App() {
   // Tester magic-link redemption is handled by the backend:
   // ?tester=<jwt>  →  POST /api/testers/redeem  →  returns real
@@ -52862,11 +53290,12 @@ function App() {
 
   const canGoBack = navHistory.length > 0;
 
-  // Tenant's saved white-label branding (colours/name), fetched from the backend
-  // and applied live across every portal. Reseller stays on the SolarSync brand.
+  // Saved white-label branding (colours/name/logo), fetched from the backend and
+  // applied live. Tenants: across their portals. Reseller: on its own portal.
   const [brandOverride, setBrandOverride] = useM({});
+  const ownResellerBrand = portal === "reseller" && !!authUser && authUser.app_role === "reseller";
   useEffM(() => {
-    if (!authed || portal === "reseller") { setBrandOverride({}); return; }
+    if (!authed || (portal === "reseller" && !ownResellerBrand)) { setBrandOverride({}); return; }
     const api = window.ssApi;
     if (api && api.getToken && api.getToken()) {
       api.get("/branding").then(b => { if (b && typeof b === "object") setBrandOverride(b); }).catch(() => {});
@@ -52924,7 +53353,7 @@ function App() {
 
   // brand = SolarSync for reseller portal, selected tenant (+ saved branding) otherwise
   const base = portal === "reseller" ? BRANDS.solarsync : BRANDS[tenant];
-  const ov = portal === "reseller" ? null : brandOverride;
+  const ov = portal === "reseller" && !ownResellerBrand ? null : brandOverride;
   const brand = !ov ? base : {
     ...base,
     ...(ov.accent ? { accent: ov.accent } : {}),
@@ -52935,7 +53364,7 @@ function App() {
   };
   // Full token override so the tenant's brand colour re-themes the whole portal
   // (buttons, charts, accents) — not just the brand-prefixed tokens.
-  const themed = portal === "reseller" ? {} : (window.themeVarsPreview ? window.themeVarsPreview(brand) : themeVars(brand));
+  const themed = portal === "reseller" && !(ownResellerBrand && brandOverride.accent) ? {} : (window.themeVarsPreview ? window.themeVarsPreview(brand) : themeVars(brand));
 
   const titleEntry = TITLES[portal]?.[screen] || [screen, ""];
   const [title, sub] = titleEntry;
@@ -53025,6 +53454,7 @@ function App() {
 
   return (
     <div className="stage" style={themed}>
+      {authUser && authUser.support && <SupportSessionBanner user={authUser} />}
       {tester && (
         <div style={{ background: "#FFC93C", color: "#0F1E3A", padding: "9px 18px", display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--font-head)", fontWeight: 600, fontSize: 13, borderBottom: "1px solid #E0B226" }}>
           <Icon d={ICONS.sparkle} size={16} fill={true} stroke={0} />
@@ -53064,7 +53494,7 @@ function App() {
             onBack={goBack}
           />
           <div className="scroll" key={portal + ":" + screen}>
-            {renderScreen({ portal, screen, brand, user, tenant })}
+            <ScreenBoundary>{renderScreen({ portal, screen, brand, user, tenant })}</ScreenBoundary>
           </div>
         </div>
       </div>
@@ -53075,7 +53505,7 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ScreenBoundary whole><App /></ScreenBoundary>);
 
 /* ============================================================
    Global UX wiring (vanilla, event-delegated):
@@ -53091,6 +53521,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
   }
   window.ssToast = toast;
+  try { const f = sessionStorage.getItem("ss_flash"); if (f) { sessionStorage.removeItem("ss_flash"); setTimeout(() => toast(f), 800); } } catch (e) {}
 
   function slug(s) { return (s || "document").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 52) || "document"; }
   function todayAU() { return new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "long", year: "numeric" }); }
