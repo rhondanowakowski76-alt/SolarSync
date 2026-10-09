@@ -39423,8 +39423,17 @@ const QUOTE_UPGRADES = [
 ];
 
 /* ── Step 3: Proposal preview ── */
-function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets }) {
+/* Site plan markers — where the key equipment sits on the client's property. */
+const SITE_MARKERS = {
+  panels:      { label: "Solar panels", color: "#6366F2", letter: "P" },
+  inverter:    { label: "Inverter",     color: "#FA913D", letter: "I" },
+  battery:     { label: "Battery",      color: "#10B981", letter: "B" },
+  switchboard: { label: "Switchboard",  color: "#F04545", letter: "S" },
+};
+
+function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan }) {
   upgrades = upgrades || []; specSheets = specSheets || [];
+  sitePlan = sitePlan || { image: null, markers: [] };
   const brand   = window.__SS_ACTIVE_BRAND || {};
   const primary  = "#0F172A";   // Base44 navy — cover, headings
   const deepNavy = "#0A122D";   // Base44 deep navy — cover gradient
@@ -39441,7 +39450,7 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
   const initials = company.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const previewRef = useRefQS(null);
   const [busy, setBusy] = useQS(false);
-  const [sections, setSections] = useQS({ overview: true, about: true, whysolar: true, specs: true, energy: true, invest: true, finance: true, layout: true, monthly: true, simulation: true, enviro: true, tech: true, projection: true, items: true, upgrades: true, sheets: true, included: true, finoption: false, payment: false, signoff: true });
+  const [sections, setSections] = useQS({ overview: true, about: true, whysolar: true, specs: true, energy: true, invest: true, finance: true, layout: true, monthly: true, simulation: true, enviro: true, tech: true, projection: true, siteplan: true, items: true, upgrades: true, sheets: true, included: true, finoption: false, payment: false, signoff: true });
   const toggleSection = k => setSections(s => ({ ...s, [k]: !s[k] }));
 
   // Client acceptance — signature captured on-screen, stamped into the proposal,
@@ -39479,6 +39488,60 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
       } else { window.ssToast && window.ssToast("Upload spec sheets as PDF or images (JPG/PNG)"); }
     }
   };
+  // Site plan: the installer's photo of the property (falls back to the captured
+  // rooftop image) with markers showing where the equipment goes.
+  const hasBattery = spec.mode === "battery" || spec.mode === "offgrid" || lines.some(l => l.cat === "Battery");
+  const markerTypes = Object.keys(SITE_MARKERS).filter(k => k !== "battery" || hasBattery);
+  const [placing, setPlacing] = useQS(null);
+  const sitePlanRef = useRefQS(null);   // marker type armed for the next click on the plan
+  const siteImage = sitePlan.image || spec.designImage || null;
+  const uploadSitePhoto = e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f || !/^image\//.test(f.type)) { if (f) window.ssToast && window.ssToast("Upload the site photo as an image (JPG/PNG)"); return; }
+    const r = new FileReader();
+    r.onload = ev => {
+      // Downscale to keep the saved quote small.
+      const im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+        const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        setSitePlan(sp => ({ ...sp, image: c.toDataURL("image/jpeg", 0.82) }));
+      };
+      im.src = ev.target.result;
+    };
+    r.readAsDataURL(f);
+  };
+  const placeMarker = e => {
+    if (!placing) return;
+    const b = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - b.left) / b.width) * 100, y = ((e.clientY - b.top) / b.height) * 100;
+    setSitePlan(sp => ({ ...sp, markers: [...(sp.markers || []), { id: Date.now() + Math.random(), type: placing, x, y }] }));
+    setPlacing(null);
+  };
+  const sitePlanHtml = () => {
+    const el = sitePlanRef.current; if (!el) return null;
+    const clone = el.cloneNode(true); clone.style.display = "block"; clone.style.pageBreakBefore = "auto"; clone.style.breakBefore = "auto";
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Site Plan — ${cust.name||"Client"}</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Inter',sans-serif;background:#fff;color:#1f2d3d;padding:24px 32px;max-width:900px;margin:0 auto;}@media print{body{padding:0;}}</style>
+</head><body>${clone.outerHTML}</body></html>`;
+  };
+  const downloadSitePlan = () => {
+    const html = sitePlanHtml(); if (!html) return;
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: `Site-Plan-${(cust.name||"Client").replace(/\s+/g,"-")}-${new Date().toISOString().slice(0,10)}.html` });
+    a.click(); URL.revokeObjectURL(a.href);
+    window.ssToast && window.ssToast("Site plan downloaded", "success");
+  };
+  const printSitePlan = () => {
+    const html = sitePlanHtml(); if (!html) return;
+    const w = window.open("", "_blank");
+    if (!w) { window.ssToast && window.ssToast("Allow pop-ups to print the site plan on its own, or use Download"); return; }
+    w.document.write(html); w.document.close();
+    w.onload = () => { w.focus(); w.print(); };
+  };
+  const removeMarker = id => setSitePlan(sp => ({ ...sp, markers: (sp.markers || []).filter(m => m.id !== id) }));
+
   const confirmAccept = () => {
     if (!sigData || !sigName.trim()) { window.ssToast && window.ssToast("Ask the client to sign in the box and type their full name first"); return; }
     const rec = {
@@ -39589,6 +39652,7 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             ["projection", "25-year savings"],
             ["items",      "Line items & pricing"],
             ["upgrades",   "Optional upgrades"],
+            ["siteplan",   "Site plan (appendix)"],
             ["sheets",     "Product spec sheets"],
             ["included",   "What's included & warranty"],
             ["finoption",  "Finance option"],
@@ -39614,6 +39678,37 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             <div className="card-sub" style={{ fontSize:11, marginTop:10, color:"var(--warn, #FA913D)" }}>
               No rooftop image yet — open System Design (search the client's address or upload a roof photo), then come back here to capture it.
             </div>
+          )}
+
+          {/* Site plan — photo of the property + equipment markers */}
+          <div style={{ height:1, background:"var(--bdr)", margin:"14px 0" }} />
+          <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:10 }}>Site plan</div>
+          <label className="btn" style={{ width:"100%", justifyContent:"center", cursor:"pointer", marginBottom:8 }}>
+            <Icon d={ICONS.upload} size={13} stroke={2} /> {sitePlan.image ? "Replace site photo" : "Upload site photo"}
+            <input type="file" accept="image/*" style={{ display:"none" }} onChange={uploadSitePhoto} />
+          </label>
+          {sitePlan.image && (
+            <div className="card-sub" style={{ fontSize:11, marginBottom:8, textAlign:"center" }}>
+              <span style={{ cursor:"pointer", textDecoration:"underline" }} onClick={() => setSitePlan(sp => ({ ...sp, image: null }))}>Use the rooftop satellite image instead</span>
+            </div>
+          )}
+          {siteImage ? (
+            <>
+              <div className="card-sub" style={{ fontSize:11, marginBottom:6 }}>Pick an item, then click on the site plan to mark where it goes. Click a marker to remove it.</div>
+              {markerTypes.map(k => (
+                <button key={k} className={"btn" + (placing === k ? " btn-primary" : "")} style={{ width:"100%", justifyContent:"flex-start", marginBottom:6 }} onClick={() => setPlacing(placing === k ? null : k)}>
+                  <span style={{ width:16, height:16, borderRadius:"50%", background:SITE_MARKERS[k].color, color:"#fff", fontSize:10, fontWeight:700, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{SITE_MARKERS[k].letter}</span>
+                  {placing === k ? "Click the plan…" : SITE_MARKERS[k].label}
+                </button>
+              ))}
+              <div className="card-sub" style={{ fontSize:11, margin:"6px 0" }}>Tick "Site plan (appendix)" above to include it with the proposal, or send it on its own:</div>
+              <div style={{ display:"flex", gap:6 }}>
+                <button className="btn" style={{ flex:1, justifyContent:"center" }} onClick={downloadSitePlan}><Icon d={ICONS.download} size={13} stroke={2} /> Download</button>
+                <button className="btn" style={{ flex:1, justifyContent:"center" }} onClick={printSitePlan}><Icon d={ICONS.docs} size={13} stroke={2} /> Print</button>
+              </div>
+            </>
+          ) : (
+            <div className="card-sub" style={{ fontSize:11 }}>Upload a site photo (or capture the rooftop in System Design) to mark equipment locations.</div>
           )}
 
           {/* Product spec sheets — tenant uploads PDF or images, embedded in the proposal */}
@@ -40283,6 +40378,43 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             <div style={{ fontSize:11, color:"#c0cad4", lineHeight:1.65, marginTop:14 }}>
               All figures are estimates based on industry data and the provided site details. Actual system output, savings and payback may vary. Subject to final on-site assessment and engineering review. STCs subject to Clean Energy Regulator eligibility.
             </div>
+
+            {/* Appendix A — site plan: property photo with equipment locations marked by the
+                installer. Self-contained (own header) so it can also be downloaded or printed
+                on its own, separate from the proposal. */}
+            {siteImage && (
+              <div ref={sitePlanRef} style={{ pageBreakBefore:"always", breakBefore:"page", display: sections.siteplan ? "block" : "none" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:10, marginTop:38 }}>
+                  <div style={{ fontFamily:"'Montserrat',sans-serif", fontSize:15, fontWeight:700, color:primary }}>Appendix A — Site Plan</div>
+                  <div style={{ fontSize:11, color:"#7a8896", textAlign:"right" }}>{company} · Quote {quoteNo} · {dateStr}</div>
+                </div>
+                <div style={{ borderBottom:`2px solid ${accent}`, margin:"9px 0 12px" }} />
+                <div style={{ fontSize:12, color:"#5b6b7a", marginBottom:12 }}>
+                  Client: <b style={{ color:primary }}>{cust.name || "—"}</b> · Site: {spec.address || cust.address || "—"}
+                  {spec.count > 0 ? <> · {spec.count} × {spec.panel?.watts}W panels ({spec.sysKw?.toFixed(2)} kW)</> : null}
+                </div>
+                <div onClick={placeMarker} style={{ position:"relative", borderRadius:10, overflow:"hidden", border:"1px solid #e3e9f0", cursor: placing ? "crosshair" : "default" }}>
+                  <img src={siteImage} alt="Site plan of the client's property" style={{ width:"100%", display:"block" }} />
+                  {(sitePlan.markers || []).map(m => {
+                    const t = SITE_MARKERS[m.type]; if (!t) return null;
+                    return (
+                      <div key={m.id} title={"Remove " + t.label} onClick={ev => { ev.stopPropagation(); if (!placing) removeMarker(m.id); }}
+                        style={{ position:"absolute", left:m.x + "%", top:m.y + "%", transform:"translate(-50%,-50%)", display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+                        <span style={{ width:26, height:26, borderRadius:"50%", background:t.color, color:"#fff", border:"2px solid #fff", boxShadow:"0 1px 4px rgba(0,0,0,0.5)", fontSize:12, fontWeight:800, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{t.letter}</span>
+                        <span style={{ background:"rgba(255,255,255,0.92)", color:"#0F172A", fontSize:11, fontWeight:700, padding:"2px 7px", borderRadius:4, whiteSpace:"nowrap" }}>{t.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display:"flex", gap:18, flexWrap:"wrap", marginTop:10, fontSize:12, color:"#5b6b7a" }}>
+                  {Object.keys(SITE_MARKERS).filter(k => (sitePlan.markers || []).some(m => m.type === k)).map(k => (
+                    <span key={k} style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                      <span style={{ width:12, height:12, borderRadius:"50%", background:SITE_MARKERS[k].color }} />{SITE_MARKERS[k].label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -40340,6 +40472,7 @@ function QuoteSystem() {
     }
   };
   const [specSheets, setSpecSheets] = useQS([]);
+  const [sitePlan, setSitePlan] = useQS({ image: null, markers: [] });
   const [quoteId, setQuoteId] = useQS(null);   // set when editing a saved quote
   const [saving, setSaving] = useQS(false);
   const { quotes, loaded, saveQuote, loadQuote, deleteQuote, refresh } = useQuotes();
@@ -40378,7 +40511,7 @@ function QuoteSystem() {
     return {
       id: quoteId || undefined,
       customer: cust, enq, status: statusVal || status, validity, notes,
-      lines, spec: { ...specRef.current, upgrades, specSheets }, total: Math.round(subtotal * 1.1),
+      lines, spec: { ...specRef.current, upgrades, specSheets, sitePlan }, total: Math.round(subtotal * 1.1),
     };
   };
   const saveCurrent = async (statusVal) => {
@@ -40407,6 +40540,7 @@ function QuoteSystem() {
     setSpec(q.spec || {});
     setUpgrades((q.spec && Array.isArray(q.spec.upgrades) && q.spec.upgrades.length) ? q.spec.upgrades : QUOTE_UPGRADES.map(u => ({ ...u, accepted: false })));
     setSpecSheets((q.spec && Array.isArray(q.spec.specSheets)) ? q.spec.specSheets : []);
+    setSitePlan((q.spec && q.spec.sitePlan) || { image: null, markers: [] });
     designedAddr.current = (q.customer && q.customer.address) || "";
     designViewed.current = false;
     setDesignKey(k => k + 1);
@@ -40504,7 +40638,7 @@ function QuoteSystem() {
   const generateProposal = () => changeStep(3);
 
   React.useEffect(() => {
-    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designViewed.current = false; designedAddr.current = ""; setDesignKey(k => k + 1); };
+    const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setSitePlan({ image: null, markers: [] }); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designViewed.current = false; designedAddr.current = ""; setDesignKey(k => k + 1); };
     window.addEventListener("ss:new-quote", h);
     return () => window.removeEventListener("ss:new-quote", h);
   }, []);
@@ -40556,7 +40690,8 @@ function QuoteSystem() {
       {reached.current[3] && (
         <div style={{ display: step === 3 ? "block" : "none" }}>
           <StepProposal spec={spec} cust={cust} lines={lines} validity={validity} notes={notes}
-            upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets} />
+            upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets}
+            sitePlan={sitePlan} setSitePlan={setSitePlan} />
         </div>
       )}
     </div>
