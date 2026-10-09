@@ -52931,6 +52931,32 @@ function AIAssist({ portal, brand }) {
   );
 }
 
+/* Catches a crash inside a screen so it shows a message instead of blanking the
+   whole app to a black screen. The menu stays usable; switching screens resets it. */
+class ScreenBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("[SolarSync] screen crashed:", error, info && info.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ padding: 32, display: "flex", justifyContent: "center", ...(this.props.whole ? { minHeight: "100vh", alignItems: "center", background: "#0a0e13" } : {}) }}>
+        <div className="panel panel-pad" style={{ maxWidth: 520, textAlign: "center", color: "#eaf4ff" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Something went wrong on this screen</div>
+          <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 16 }}>
+            {this.props.whole ? "Reload to continue." : "Your other screens still work — pick another from the menu, or try this one again."}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 16, wordBreak: "break-word" }}>{String(this.state.error && this.state.error.message || this.state.error)}</div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            {!this.props.whole && <button className="btn" onClick={() => this.setState({ error: null })}>Try again</button>}
+            <button className="btn btn-primary" onClick={() => location.reload()}>Reload</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
 function App() {
   // Tester magic-link redemption is handled by the backend:
   // ?tester=<jwt>  →  POST /api/testers/redeem  →  returns real
@@ -53257,7 +53283,7 @@ function App() {
             onBack={goBack}
           />
           <div className="scroll" key={portal + ":" + screen}>
-            {renderScreen({ portal, screen, brand, user, tenant })}
+            <ScreenBoundary>{renderScreen({ portal, screen, brand, user, tenant })}</ScreenBoundary>
           </div>
         </div>
       </div>
@@ -53268,7 +53294,7 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ScreenBoundary whole><App /></ScreenBoundary>);
 
 /* ============================================================
    Global UX wiring (vanilla, event-delegated):
