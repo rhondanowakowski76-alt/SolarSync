@@ -281,9 +281,73 @@ function register(app, { h, ok, tenantOf: _tenantOf }) {
     ok(res, { id: jid });
   }));
 
+  // ---------------- Customers (the book's own customer list) ----------------
+  // Same records the portal uses for jobs and documents (clients table), plus what
+  // they've been invoiced and still owe.
+  const CUST_COLS = "c.id, c.name, c.email, c.phone, c.abn, c.site_address, c.notes, c.install_status, c.user_id, c.created_at";
+  const custOut = (c) => {
+    let spec = {}; try { spec = typeof c.system_spec === "string" ? JSON.parse(c.system_spec) : (c.system_spec || {}); } catch (e) {}
+    return { ...c, email: c.email || spec.email || null, phone: c.phone || spec.phone || null, system_spec: undefined };
+  };
+  const clean = (v, n) => v == null || v === "" ? null : String(v).replace(/[<>]/g, "").slice(0, n);
+
+  app.get("/api/customers", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const r = await rows(`select ${CUST_COLS}, c.system_spec,
+        coalesce((select sum(amount) from invoices i where i.client_id=c.id and i.tenant_id=c.tenant_id), 0) as invoiced,
+        coalesce((select sum(amount) from invoices i where i.client_id=c.id and i.tenant_id=c.tenant_id and i.status<>'paid'), 0) as owing,
+        (select count(*)::int from invoices i where i.client_id=c.id and i.tenant_id=c.tenant_id) as invoice_count
+      from clients c where c.tenant_id=$1 and coalesce(c.active, true) order by lower(c.name)`, [tenantOf(req)]);
+    ok(res, r.map(custOut));
+  }));
+
+  app.get("/api/customers/:id", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const c = await one(`select ${CUST_COLS}, c.system_spec, c.tenant_id from clients c where c.id=$1`, [req.params.id]);
+    if (!c || c.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+    const invoices = await rows("select id, number, amount, status, description, due, created_at, paid_at from invoices where client_id=$1 and tenant_id=$2 order by created_at desc", [c.id, c.tenant_id]);
+    ok(res, { ...custOut(c), tenant_id: undefined, invoices });
+  }));
+
+  app.post("/api/customers", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const d = req.body || {};
+    if (!d.name || !String(d.name).trim()) return res.status(400).json({ error: "name_required" });
+    const id = "c-" + rid().slice(0, 10);
+    await run(`insert into clients (id, tenant_id, name, email, phone, abn, site_address, notes)
+      values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, tenantOf(req), clean(d.name, 120), clean(d.email, 200), clean(d.phone, 40), clean(d.abn, 20), clean(d.site_address, 300), clean(d.notes, 1000)]);
+    await audit(req.user.sub, "create_customer", id, tenantOf(req));
+    ok(res, { id });
+  }));
+
+  app.put("/api/customers/:id", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const cur = await one("select * from clients where id=$1", [req.params.id]);
+    if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+    const d = req.body || {};
+    const pick = (k, n) => d[k] !== undefined ? clean(d[k], n) : cur[k];
+    const name = d.name !== undefined ? clean(d.name, 120) : cur.name;
+    if (!name) return res.status(400).json({ error: "name_required" });
+    await run(`update clients set name=$1, email=$2, phone=$3, abn=$4, site_address=$5, notes=$6, updated_at=now() where id=$7`,
+      [name, pick("email", 200), pick("phone", 40), pick("abn", 20), pick("site_address", 300), pick("notes", 1000), cur.id]);
+    await audit(req.user.sub, "update_customer", cur.id, cur.tenant_id);
+    ok(res, { ok: true });
+  }));
+
+  // Archive (hidden from lists; invoices and history are kept).
+  app.delete("/api/customers/:id", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
+    const cur = await one("select * from clients where id=$1", [req.params.id]);
+    if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+    await run("update clients set active=false, updated_at=now() where id=$1", [cur.id]);
+    await audit(req.user.sub, "archive_customer", cur.id, cur.tenant_id);
+    ok(res, { ok: true });
+  }));
+
   // ---------------- Suppliers ----------------
+  // Includes what's been billed by each supplier and what's still owed to them.
   app.get("/api/suppliers", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) =>
-    ok(res, await rows("select * from suppliers where tenant_id=$1 and active=true order by name", [tenantOf(req)]))));
+    ok(res, await rows(`select s.*,
+        coalesce((select sum(total) from bills b where b.supplier_id=s.id and b.tenant_id=s.tenant_id), 0) as billed,
+        coalesce((select sum(total) from bills b where b.supplier_id=s.id and b.tenant_id=s.tenant_id and b.status<>'paid'), 0) as owing,
+        (select count(*)::int from purchase_orders p where p.supplier_id=s.id and p.tenant_id=s.tenant_id and p.status not in ('received','cancelled')) as open_pos
+      from suppliers s where s.tenant_id=$1 and s.active=true order by lower(s.name)`, [tenantOf(req)]))));
 
   app.post("/api/suppliers", A.authRequired, A.requireRole(...TENANT_ROLES), h(async (req, res) => {
     const d = req.body || {};
