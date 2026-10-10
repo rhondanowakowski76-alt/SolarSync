@@ -390,6 +390,10 @@ async function migrate() {
       id text primary key, tenant_id text not null, job_id text not null, body text not null,
       author text, author_id text, created_at timestamptz default now())`,
     `create index if not exists job_notes_job_idx on job_notes (tenant_id, job_id, created_at)`,
+    // Office-only costing sheet per job (pipeline deal, quote, schedule job, cleaning job).
+    `create table if not exists job_costings (
+      tenant_id text not null, job_key text not null, lines jsonb, updated_by text,
+      updated_at timestamptz default now(), primary key (tenant_id, job_key))`,
     `alter table clients add column if not exists updated_at timestamptz default now()`,
     // MYOB connection (myob.js): which company file, settings, and what's been pushed.
     `alter table accounting_connections add column if not exists business_id text`,

@@ -4720,6 +4720,8 @@ function DealDrawer({ deal, onClose, onUpdate, onDelete }) {
           <button className="btn" style={{ color: "var(--blue-light)", borderColor: "rgba(58,125,255,0.35)" }} onClick={() => setReportOpen(true)}>
             <Icon d={ICONS.compliance} size={14} stroke={2} /> Onsite Report
           </button>
+          <JobCostingButton jobKey={"deal-" + deal.id} meta={{ ref: deal.id, type: deal.type, customer: deal.client, site: deal.suburb }}
+            seed={async () => deal.value ? [{ kind: "labour", d: "Job — " + (deal.type || "work"), q: 1, cost: 0, u: Number(deal.value) || 0 }] : []} />
         </div>
         <JobReportSection deal={deal} defaultOpen={reportOpen} />
 
@@ -6397,6 +6399,11 @@ function StepClient({ cust, setCust, lines, setLines, enq, setEnq, status, setSt
                     disabled={!!q.stock_allocated_at}
                     onClick={() => onAllocate && window.confirm("Allocate stock for " + (q.number || "this quote") + "?\n\nThis removes the ordered items from your inventory and posts cost of goods sold to your ledger.") && onAllocate(q.id)}>
                     {q.stock_allocated_at ? "✓ Allocated" : "Allocate stock"}</button>
+                  <JobCostingButton small jobKey={"quote-" + q.id} meta={{ ref: q.number || q.id, type: (ENQ_TYPES_QS[q.enq] || {}).label || q.enq, customer: nm, site: (q.customer && (q.customer.address || q.customer.suburb)) || "" }}
+                    seed={async () => { const r = await window.ssApi.get("/quotes/" + q.id); const ls = Array.isArray(r && r.lines) ? r.lines : [];
+                      return ls.map(l => l.d != null && l.u != null
+                        ? { kind: l.kind === "product" ? "product" : "labour", product_id: l.product_id || null, d: l.d, q: l.q, u: l.u, cost: l.cost }
+                        : { kind: "product", product_id: l.id || null, d: l.name || l.d || "Item", q: l.qty || 1, u: Math.round((Number(l.price) || 0) * 1.1 * 100) / 100, cost: l.cost }); }} />
                   <button className="btn" style={{ padding: "5px 11px", fontSize: 12 }} title="Create an invoice from this quote"
                     onClick={() => onInvoice && window.confirm("Create an invoice from " + (q.number || "this quote") + " for " + qMoney(q.total || 0) + "?") && onInvoice(q.id)}>→ Invoice</button>
                   <button className="icon-btn" style={{ width: 30, height: 30, color: "var(--tx-dim)" }} title="Delete quote"
@@ -12013,6 +12020,14 @@ function JobExtras({ ev }) {
           <button type="button" className="btn btn-primary" style={{ alignSelf: "flex-end", padding: "6px 12px", fontSize: 12.5 }} disabled={!noteText.trim()} onClick={addNote}>Add note</button>
         </div>
       </div>}
+      {canInvoice && <div style={box} data-testid="job-costing-box">
+        <span className="field-label">Costing (office only)</span>
+        <div style={{ marginTop: 6 }}><JobCostingButton small jobKey={"booking-" + ev.id} meta={{ ref: ev.jobId || ev.title || ev.id, type: label, customer: ev.client, site: ev.suburb }}
+          seed={async () => (inv && Array.isArray(inv.lines) && inv.lines.length)
+            ? inv.lines.map(l => ({ kind: l.product_id ? "product" : "labour", product_id: l.product_id || null, d: l.d, q: l.q, u: l.u }))
+            : [...(invForm ? invForm.items.map(i => ({ kind: "product", product_id: i.product_id, d: i.name, q: i.qty, u: i.price })) : []),
+               { kind: "labour", d: label, q: 1, cost: 0, u: Number(invForm ? invForm.amount : ev.value) || 0 }]} /></div>
+      </div>}
       {canInvoice && <div style={box} data-testid="job-invoice">
         <span className="field-label">Invoice</span>
         {invoiceId
@@ -12971,6 +12986,136 @@ function qqPrint(title, body) {
   w.document.close(); setTimeout(() => { w.focus(); w.print(); }, 400);
 }
 
+/* Shared printable sheets. meta = { ref, type, customer, site } */
+function qqMetaHtml(meta) {
+  return `<table class="meta"><tr><td><b>Job / quote</b></td><td>${qqEsc(meta.ref || "—")}</td><td><b>Type</b></td><td>${qqEsc(meta.type || "")}</td></tr>
+    <tr><td><b>Customer</b></td><td>${qqEsc(meta.customer || "—")}</td><td><b>Site</b></td><td>${qqEsc(meta.site || "")}</td></tr>
+    <tr><td><b>Date</b></td><td>${qqEsc(new Date().toLocaleDateString("en-AU"))}</td><td></td><td></td></tr></table>`;
+}
+function qqCostingSheet(meta, lines) {
+  const T = qqTotals(lines);
+  const rows = lines.map(l => { const q = Number(l.q) || 0, sell = q * (Number(l.u) || 0), ex = sell / 1.1, cost = q * (Number(l.cost) || 0), m = ex - cost;
+    return `<tr><td>${qqEsc(l.kind === "labour" ? "Labour — " : "")}${qqEsc(l.d)}</td><td class="n">${qqEsc(q)}</td><td class="n">${qqMoney(l.cost)}</td><td class="n">${qqMoney(cost)}</td><td class="n">${qqMoney(l.u)}</td><td class="n">${qqMoney(sell)}</td><td class="n">${qqMoney(m)}</td><td class="n">${ex > 0 ? (m / ex * 100).toFixed(1) + "%" : "—"}</td></tr>`; }).join("");
+  qqPrint("Costing sheet " + (meta.ref || ""), `<h1>Costing Sheet</h1><div class="sub">INTERNAL — office use only. Do not give to the customer or send to site.</div>${qqMetaHtml(meta)}
+    <table><tr><th>Item</th><th class="n">Qty / hrs</th><th class="n">Unit cost (ex GST)</th><th class="n">Line cost</th><th class="n">Unit sell (inc GST)</th><th class="n">Line sell</th><th class="n">Margin (ex GST)</th><th class="n">Margin %</th></tr>${rows}
+    <tr class="tot"><td>Totals</td><td></td><td></td><td class="n">${qqMoney(T.cost)}</td><td></td><td class="n">${qqMoney(T.sell)}</td><td class="n">${qqMoney(T.margin)}</td><td class="n">${T.pct.toFixed(1)}%</td></tr></table>
+    <table class="meta"><tr><td>Sell ex GST</td><td>${qqMoney(T.ex)}</td></tr><tr><td>GST</td><td>${qqMoney(T.gst)}</td></tr><tr><td>Sell inc GST</td><td>${qqMoney(T.sell)}</td></tr></table>
+    <div class="warn">Sell prices are treated as GST-inclusive and costs as GST-exclusive.</div>`);
+}
+function qqPackingSlip(meta, lines, notes) {
+  const prod = lines.filter(l => l.kind === "product"), work = lines.filter(l => l.kind !== "product");
+  qqPrint("Packing slip " + (meta.ref || ""), `<h1>Packing Slip</h1><div class="sub">For site — no prices.</div>${qqMetaHtml(meta)}
+    <h3>Items to pack</h3><table><tr><th>Packed</th><th class="n">Qty</th><th>Item</th><th>Checked on site</th></tr>
+    ${prod.length ? prod.map(l => `<tr><td><span class="box"></span></td><td class="n">${qqEsc(l.q)}</td><td>${qqEsc(l.d)}</td><td><span class="box"></span></td></tr>`).join("") : `<tr><td colspan="4">No products on this job</td></tr>`}</table>
+    ${work.length ? `<h3>Work to do</h3><table><tr><th>Done</th><th>Task</th></tr>${work.map(l => `<tr><td><span class="box"></span></td><td>${qqEsc(l.d)}</td></tr>`).join("")}</table>` : ""}
+    ${notes ? `<h3>Notes</h3><p>${qqEsc(notes)}</p>` : ""}
+    <div class="sig"><div>Packed by / date</div><div>Received on site by / date</div></div>`);
+}
+
+/* Costing sheet for any job — office only. Saved per job; seeded from the job's
+   own items the first time. jobKey e.g. "deal-SS-1041", "quote-qt-1", "booking-bk-1". */
+function JobCostingButton({ jobKey, meta, seed, small }) {
+  const me = calMe();
+  const [open, setOpen] = React.useState(false);
+  const signedIn = !!(window.ssApi && window.ssApi.getToken && window.ssApi.getToken());
+  if (!signedIn || me.support || !["tenant_admin", "staff"].includes(me.app_role)) return null;
+  return (<>
+    <button type="button" className="btn" data-testid="job-costing-btn" style={small ? { padding: "5px 10px", fontSize: 12 } : undefined}
+      onClick={e => { e.stopPropagation(); setOpen(true); }}><Icon d={ICONS.dollar} size={13} stroke={2} /> Costing sheet</button>
+    {open && <JobCostingModal jobKey={jobKey} meta={meta || {}} seed={seed} onClose={() => setOpen(false)} />}
+  </>);
+}
+function JobCostingModal({ jobKey, meta, seed, onClose }) {
+  const api = window.ssApi;
+  const [lines, setLines] = React.useState(null);
+  const [products, setProducts] = React.useState([]);
+  const [pick, setPick] = React.useState(""); const [pickQty, setPickQty] = React.useState(1);
+  const [busy, setBusy] = React.useState(false); const [savedAt, setSavedAt] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      let prods = [];
+      try { const r = await api.get("/products"); prods = (Array.isArray(r) ? r : []).filter(p => p.active !== false); } catch (e) {}
+      if (!alive) return; setProducts(prods);
+      try {
+        const r = await api.get("/job-costings/" + encodeURIComponent(jobKey));
+        if (r && Array.isArray(r.lines)) { setLines(r.lines); setSavedAt(r.updated_at); return; }
+      } catch (e) {}
+      let s = [];
+      try { s = (seed ? await seed() : []) || []; } catch (e) {}
+      // Fill in catalog cost for seeded products that don't carry one.
+      s = s.map(l => { const p = l.product_id && prods.find(x => x.id === l.product_id);
+        return { kind: l.kind || "other", product_id: l.product_id || null, d: l.d || "", q: Number(l.q) || 0, u: Number(l.u) || 0,
+          cost: l.cost != null && l.cost !== "" ? Number(l.cost) || 0 : (p ? Number(p.cost) || 0 : 0) }; });
+      if (alive) setLines(s.length ? s : [{ kind: "labour", d: "Labour", q: 1, cost: 0, u: 0 }]);
+    })();
+    return () => { alive = false; };
+  }, [jobKey]);
+  const setLine = (i, patch) => setLines(ls => ls.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const add = l => setLines(ls => [...ls, l]);
+  const addProduct = () => { const p = products.find(x => x.id === pick); if (!p) return;
+    add({ kind: "product", product_id: p.id, d: p.name, q: Math.max(1, Number(pickQty) || 1), cost: Number(p.cost) || 0, u: Number(p.price) || 0 }); setPick(""); setPickQty(1); };
+  const save = async () => {
+    setBusy(true);
+    try { const r = await api.put("/job-costings/" + encodeURIComponent(jobKey), { lines }); setLines(r.lines); setSavedAt(new Date().toISOString());
+      window.ssToast && window.ssToast("Costing sheet saved"); }
+    catch (e) { window.ssToast && window.ssToast("Could not save the costing sheet", "error"); }
+    setBusy(false);
+  };
+  const T = lines ? qqTotals(lines) : null;
+  const kinds = { product: "Product", labour: "Labour (hrs × rate)", other: "Other cost" };
+  return (
+    <div className="drawer-scrim" onClick={e => { e.stopPropagation(); onClose(); }} style={{ zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div className="panel panel-pad chrome-top" data-testid="job-costing" onClick={e => e.stopPropagation()}
+        style={{ width: "min(900px, 100%)", maxHeight: "92vh", overflowY: "auto", overflowX: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div className="card-title">Costing sheet · {meta.ref || jobKey}</div>
+            <div className="card-sub">Office only — never shown to the customer or crew.{savedAt ? " Saved " + new Date(savedAt).toLocaleString("en-AU") : " Not saved yet."}</div>
+          </div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        {!lines ? <div className="card-sub">Loading…</div> : (<>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "10px 0" }}>
+            <select className="field-input" data-testid="jc-product" style={{ flex: "1 1 200px", minWidth: 0 }} value={pick} onChange={e => setPick(e.target.value)}>
+              <option value="">Add a product from your catalog…</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name} — cost {qqMoney(p.cost)} · sell {qqMoney(p.price)}</option>)}
+            </select>
+            <input className="field-input" type="number" min="1" style={{ width: 70 }} value={pickQty} onChange={e => setPickQty(e.target.value)} />
+            <button className="btn" data-testid="jc-add-product" disabled={!pick} onClick={addProduct}>Add</button>
+            <button className="btn" data-testid="jc-add-labour" onClick={() => add({ kind: "labour", d: "Labour", q: 1, cost: 0, u: 0 })}>+ Labour</button>
+            <button className="btn" onClick={() => add({ kind: "other", d: "Other cost (travel, freight, hire…)", q: 1, cost: 0, u: 0 })}>+ Other cost</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 64px 92px 92px 28px", gap: 6, fontSize: 11, color: "var(--tx-dim)", padding: "2px 0" }}>
+            <span>Item</span><span>Qty / hrs</span><span>Cost each (ex GST)</span><span>Sell each (inc GST)</span><span></span>
+          </div>
+          {lines.map((l, i) => (
+            <div key={i} data-testid="jc-line" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 64px 92px 92px 28px", gap: 6, alignItems: "center", padding: "5px 0", borderBottom: "1px solid var(--line)" }}>
+              <input className="field-input" value={l.d} title={kinds[l.kind]} onChange={e => setLine(i, { d: e.target.value })} />
+              <input className="field-input" type="number" min="0" step="0.25" value={l.q} onChange={e => setLine(i, { q: e.target.value })} />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.cost} onChange={e => setLine(i, { cost: e.target.value })} />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.u} onChange={e => setLine(i, { u: e.target.value })} />
+              <button className="btn" style={{ padding: "4px 6px" }} aria-label="Remove" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>×</button>
+            </div>
+          ))}
+          <div data-testid="jc-totals" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 4, fontSize: 13, maxWidth: 420, marginLeft: "auto" }}>
+            <span>Total cost (ex GST)</span><b>{qqMoney(T.cost)}</b>
+            <span>Charge to customer (inc GST)</span><b>{qqMoney(T.sell)}</b>
+            <span className="card-sub">Charge ex GST</span><span>{qqMoney(T.ex)}</span>
+            <span>Margin (ex GST)</span><b style={{ color: T.margin < 0 ? "#E5484D" : "inherit" }}>{qqMoney(T.margin)} · {T.pct.toFixed(1)}%</b>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 14 }}>
+            <button className="btn" data-testid="jc-print" disabled={!lines.length} onClick={() => qqCostingSheet(meta, lines)}>Print costing sheet</button>
+            <button className="btn" data-testid="jc-packing" disabled={!lines.length} onClick={() => qqPackingSlip(meta, lines, "")}>Packing slip (no prices)</button>
+            <button className="btn btn-primary" data-testid="jc-save" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+window.JobCostingButton = JobCostingButton;
+
 function QuickQuotes() {
   const api = window.ssApi;
   const me = calMe();
@@ -13035,27 +13180,9 @@ function QuickQuotes() {
     } catch (e) { window.ssToast && window.ssToast("Could not send quote", "error"); }
   };
 
-  const head = () => `<table class="meta"><tr><td><b>Quote</b></td><td>${qqEsc(q.number || "(unsaved)")}</td><td><b>Type</b></td><td>${qqEsc(q.title)}</td></tr>
-    <tr><td><b>Customer</b></td><td>${qqEsc(client ? client.name : "—")}</td><td><b>Site</b></td><td>${qqEsc(client ? client.site_address || "" : "")}</td></tr>
-    <tr><td><b>Date</b></td><td>${qqEsc(new Date().toLocaleDateString("en-AU"))}</td><td></td><td></td></tr></table>`;
-  const printCosting = () => {
-    const rows = q.lines.map(l => { const sell = l.q * l.u, ex = sell / 1.1, cost = l.q * (l.cost || 0), m = ex - cost;
-      return `<tr><td>${qqEsc(l.d)}</td><td class="n">${qqEsc(l.q)}</td><td class="n">${qqMoney(l.cost)}</td><td class="n">${qqMoney(cost)}</td><td class="n">${qqMoney(l.u)}</td><td class="n">${qqMoney(sell)}</td><td class="n">${qqMoney(m)}</td><td class="n">${ex > 0 ? (m / ex * 100).toFixed(1) + "%" : "—"}</td></tr>`; }).join("");
-    qqPrint("Costing sheet " + (q.number || ""), `<h1>Costing Sheet</h1><div class="sub">INTERNAL — office use only. Do not give to the customer or send to site.</div>${head()}
-      <table><tr><th>Item</th><th class="n">Qty</th><th class="n">Unit cost (ex GST)</th><th class="n">Line cost</th><th class="n">Unit sell (inc GST)</th><th class="n">Line sell</th><th class="n">Margin (ex GST)</th><th class="n">Margin %</th></tr>${rows}
-      <tr class="tot"><td>Totals</td><td></td><td></td><td class="n">${qqMoney(T.cost)}</td><td></td><td class="n">${qqMoney(T.sell)}</td><td class="n">${qqMoney(T.margin)}</td><td class="n">${T.pct.toFixed(1)}%</td></tr></table>
-      <table class="meta"><tr><td>Sell ex GST</td><td>${qqMoney(T.ex)}</td></tr><tr><td>GST</td><td>${qqMoney(T.gst)}</td></tr><tr><td>Sell inc GST</td><td>${qqMoney(T.sell)}</td></tr></table>
-      <div class="warn">Sell prices are treated as GST-inclusive and costs as GST-exclusive.</div>`);
-  };
-  const printPacking = () => {
-    const prod = q.lines.filter(l => l.kind !== "service"), svc = q.lines.filter(l => l.kind === "service");
-    qqPrint("Packing slip " + (q.number || ""), `<h1>Packing Slip</h1><div class="sub">For site — no prices.</div>${head()}
-      <h3>Items to pack</h3><table><tr><th>Packed</th><th class="n">Qty</th><th>Item</th><th>Checked on site</th></tr>
-      ${prod.length ? prod.map(l => `<tr><td><span class="box"></span></td><td class="n">${qqEsc(l.q)}</td><td>${qqEsc(l.d)}</td><td><span class="box"></span></td></tr>`).join("") : `<tr><td colspan="4">No products on this job</td></tr>`}</table>
-      ${svc.length ? `<h3>Work to do</h3><table><tr><th>Done</th><th>Task</th></tr>${svc.map(l => `<tr><td><span class="box"></span></td><td>${qqEsc(l.d)}</td></tr>`).join("")}</table>` : ""}
-      ${q.notes ? `<h3>Notes</h3><p>${qqEsc(q.notes)}</p>` : ""}
-      <div class="sig"><div>Packed by / date</div><div>Received on site by / date</div></div>`);
-  };
+  const qMeta = () => ({ ref: q.number || "(unsaved)", type: q.title, customer: client ? client.name : "", site: client ? client.site_address || "" : "" });
+  const printCosting = () => qqCostingSheet(qMeta(), q.lines.map(l => ({ ...l, kind: l.kind === "product" ? "product" : "labour" })));
+  const printPacking = () => qqPackingSlip(qMeta(), q.lines, q.notes);
 
   const inp = { className: "field-input", style: { width: "100%" } };
   if (!q) return (
@@ -20403,6 +20530,8 @@ function CleanJobModal({ job, onSave, onClose }) {
         {/* Footer actions */}
         <div style={{ padding: "14px 24px", borderTop: "1px solid var(--line)", display: "flex", gap: 10, flexWrap: "wrap", flexShrink: 0 }}>
           <button className="btn btn-primary" onClick={save}><Icon d={ICONS.check} size={14} stroke={2.4} /> Save changes</button>
+          <JobCostingButton jobKey={"clean-" + form.id} meta={{ ref: form.id, type: form.type, customer: form.client, site: form.address || form.suburb }}
+            seed={async () => [{ kind: "labour", d: form.type + (form.count ? " — " + form.count : ""), q: 1, cost: 0, u: Number(form.value) || 0 }]} />
           {form.status !== "done"
             ? <button className="btn" style={{ color: "var(--success)", borderColor: "rgba(58,125,255,0.35)" }} onClick={markDone}><Icon d={ICONS.check} size={14} stroke={2.4} /> Mark complete</button>
             : <button className="btn" onClick={reopen}><Icon d={ICONS.edit || ICONS.docs} size={14} stroke={2} /> Reopen job</button>
