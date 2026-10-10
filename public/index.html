@@ -13183,6 +13183,20 @@ function QuickQuotes() {
   const qMeta = () => ({ ref: q.number || "(unsaved)", type: q.title, customer: client ? client.name : "", site: client ? client.site_address || "" : "" });
   const printCosting = () => qqCostingSheet(qMeta(), q.lines.map(l => ({ ...l, kind: l.kind === "product" ? "product" : "labour" })));
   const printPacking = () => qqPackingSlip(qMeta(), q.lines, q.notes);
+  // The customer's copy — exactly what they're offered. No costs or margins.
+  const printQuote = () => {
+    const brand = window.__SS_ACTIVE_BRAND || {};
+    const details = (window.ssBrandDetails && brand.id) ? window.ssBrandDetails(brand.id) || {} : {};
+    const company = brand.name || details.legalName || "Your solar company";
+    const rows = q.lines.map(l => `<tr><td>${qqEsc(l.d)}</td><td class="n">${qqEsc(l.q)}</td><td class="n">${qqMoney(l.u)}</td><td class="n">${qqMoney((Number(l.q) || 0) * (Number(l.u) || 0))}</td></tr>`).join("");
+    qqPrint("Quote " + (q.number || ""), `<h1>${qqEsc(company)}</h1><div class="sub">${qqEsc([details.abn ? "ABN " + details.abn : "", details.phone, details.email].filter(Boolean).join(" · "))}</div>
+      <h2 style="margin:6px 0">Quote — ${qqEsc(q.title)}</h2>${qqMetaHtml(qMeta())}
+      <table><tr><th>Description</th><th class="n">Qty</th><th class="n">Price each (inc GST)</th><th class="n">Amount</th></tr>${rows}
+      <tr class="tot"><td colspan="3">Total (inc GST)</td><td class="n">${qqMoney(T.sell)}</td></tr></table>
+      <table class="meta"><tr><td>Includes GST of</td><td>${qqMoney(T.gst)}</td></tr><tr><td>Valid for</td><td>${qqEsc(q.validity)} days</td></tr></table>
+      ${q.notes ? `<h3>Notes</h3><p>${qqEsc(q.notes)}</p>` : ""}
+      <div class="sig"><div>Accepted by (name / signature)</div><div>Date</div></div>`);
+  };
 
   const inp = { className: "field-input", style: { width: "100%" } };
   if (!q) return (
@@ -13213,6 +13227,7 @@ function QuickQuotes() {
       <div className="panel panel-pad chrome-top" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button className="btn" onClick={() => { setQ(null); load(); }}>← All quick quotes</button>
         <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>{q.number || "New quick quote"} <span className="card-sub" style={{ fontWeight: 400 }}>· {q.status}{q.spec && q.spec.shared ? " · in customer portal" : ""}</span></div>
+        <button className="btn" data-testid="qq-print" onClick={printQuote} disabled={!q.lines.length}>Print quote</button>
         <button className="btn" data-testid="qq-costing" onClick={printCosting} disabled={!q.lines.length}>Costing sheet</button>
         <button className="btn" data-testid="qq-packing" onClick={printPacking} disabled={!q.lines.length}>Packing slip</button>
         {!isSupport && <button className="btn" disabled={busy} onClick={save}>Save</button>}
@@ -13221,7 +13236,7 @@ function QuickQuotes() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 16 }}>
         <div className="panel panel-pad chrome-top" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <label className="field"><span className="field-label">Customer</span>
-            <select {...inp} data-testid="qq-client" value={q.client_id} onChange={e => setF({ client_id: e.target.value })}>
+            <select {...inp} data-testid="qq-client" value={q.client_id} disabled={isSupport} onChange={e => setF({ client_id: e.target.value })}>
               <option value="">— choose —</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select></label>
           <label className="field"><span className="field-label">Quote for</span>
