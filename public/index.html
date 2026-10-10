@@ -829,6 +829,10 @@ select.field-input option { background: #161E27; color: #e0e8f0; }
 .pv-array { position: absolute; left: 50%; top: 50%; transform-origin: center center; }
 .pv-selbox { position: relative; padding: 3px; border: 1.5px solid rgba(58,125,255,0.95); border-radius: 2px; background: rgba(150,220,70,0.05); box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.45); cursor: grab; touch-action: none; user-select: none; }
 .pv-selbox:active { cursor: grabbing; }
+.pv-sel-corner::after, .pv-sel-edge::after { content: ""; position: absolute; inset: -9px; }   /* bigger grab area for fingers */
+.pv-sel-edge { position: absolute; width: 12px; height: 12px; background: #fff; border: 1.5px solid #3A7DFF; border-radius: 50%; z-index: 4; touch-action: none; }
+.pv-sel-edge.l { left: -7px; top: 50%; margin-top: -6px; cursor: ew-resize; } .pv-sel-edge.r { right: -7px; top: 50%; margin-top: -6px; cursor: ew-resize; } .pv-sel-edge.t { top: -7px; left: 50%; margin-left: -6px; cursor: ns-resize; }
+.pv-array--bare .pv-sel-edge { display: none; }
 .pv-sel-corner { position: absolute; width: 12px; height: 12px; background: #3A7DFF; border: 1.5px solid #0F1E3A; border-radius: 2px; z-index: 4; touch-action: none; }
 .pv-sel-corner.tl { left: -6px; top: -6px; cursor: nwse-resize; } .pv-sel-corner.tr { right: -6px; top: -6px; cursor: nesw-resize; } .pv-sel-corner.bl { left: -6px; bottom: -6px; cursor: nesw-resize; } .pv-sel-corner.br { right: -6px; bottom: -6px; cursor: nwse-resize; }
 .pv-array--bare .pv-sel-corner { display: none; }
@@ -5729,6 +5733,8 @@ const MODES = [
   { id: "replacement", label: "Replacement" },
 ];
 const pvKey = (r, c) => `${r}-${c}`;
+// Largest array the designer allows (rows × columns of panels).
+const PV_MAX_ROWS = 20, PV_MAX_COLS = 30;
 const fillRect = (rows, cols) => {
   const s = new Set();
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) s.add(pvKey(r, c));
@@ -5822,7 +5828,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   const runAi = () => runScan(() => setOn(smartFill(rows, cols, slope)));
   const clearAll = () => setOn(new Set());
   const pickSystem = (sys) => { setActiveSys(sys.id); setRows(sys.rows); setCols(sys.cols); runScan(() => setOn(smartFill(sys.rows, sys.cols, slope))); };
-  const duplicate = () => { const nc = Math.min(12, cols + 1); setCols(nc); runScan(() => setOn(fillRect(rows, nc))); };
+  const duplicate = () => { const nc = Math.min(PV_MAX_COLS, cols + 1); setCols(nc); runScan(() => setOn(fillRect(rows, nc))); };
   // commit the current array onto its roof, then start a fresh array (offset) for another roof
   const addAnotherRoof = () => {
     if (on.size === 0) return;
@@ -5870,33 +5876,31 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   const onImageryFile = (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { setOverride(rd.result); runScan(); }; rd.readAsDataURL(f); };
 
   // resize / shrink the array by dragging a selection-box corner
-  const startResize = (corner) => (e) => {
+  // Stretch the array from any side or corner. dirX/dirY say which edge is pulled
+  // (-1 left/top, 1 right/bottom, 0 that axis stays). The pointer movement is read in
+  // the array's own (rotated, sloped) frame, and the opposite edge stays put, so the
+  // array grows the way it is dragged at any rotation.
+  const startResizeEdge = (dirX, dirY) => (e) => {
     e.preventDefault(); e.stopPropagation();
-    const sx = e.clientX, sy = e.clientY, r0 = rows, c0 = cols;
-    const signX = corner.indexOf("r") >= 0 ? 1 : -1;
-    const signY = corner.indexOf("b") >= 0 ? 1 : -1;
-    const step = 22;
+    const sx = e.clientX, sy = e.clientY, r0 = rows, c0 = cols, p0 = pos;
+    const th = rot * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const ky = Math.cos(slope * Math.PI / 180) || 1;
+    const stepX = cellW + 1, stepY = cellW / Number(cellAspect) + 1;   // one panel + grid gap
     const move = (ev) => {
-      const nc = Math.max(1, Math.min(12, c0 + Math.round((ev.clientX - sx) * signX / step)));
-      const nr = Math.max(1, Math.min(8, r0 + Math.round((ev.clientY - sy) * signY / step)));
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      const lx = dx * cs + dy * sn, ly = (-dx * sn + dy * cs) / ky;   // drag in the array's frame
+      const nc = dirX ? Math.max(1, Math.min(PV_MAX_COLS, c0 + Math.round(lx * dirX / stepX))) : c0;
+      const nr = dirY ? Math.max(1, Math.min(PV_MAX_ROWS, r0 + Math.round(ly * dirY / stepY))) : r0;
+      // keep the opposite edge fixed: move the centre half the growth, back in screen space
+      const ox = dirX * (nc - c0) * stepX / 2, oy = dirY * (nr - r0) * stepY / 2 * ky;
+      setPos({ x: p0.x + ox * cs - oy * sn, y: p0.y + ox * sn + oy * cs });
       setCols(nc); setRows(nr); setOn(fillRect(nr, nc));
     };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
-
-  // bottom-edge drag — extend / shrink the array downward by adding/removing rows
-  const startResizeBottom = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    const sy = e.clientY, r0 = rows, c0 = cols;
-    const step = 22;
-    const move = (ev) => {
-      const nr = Math.max(1, Math.min(8, r0 + Math.round((ev.clientY - sy) / step)));
-      setRows(nr); setOn(fillRect(nr, c0));
-    };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
-  };
+  const startResize = (corner) => startResizeEdge(corner.indexOf("r") >= 0 ? 1 : -1, corner.indexOf("b") >= 0 ? 1 : -1);
+  const startResizeBottom = startResizeEdge(0, 1);
 
   // rotate the whole array to align with the roof edges (handle above the selection box)
   const startRotate = (e) => {
@@ -5967,9 +5971,9 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   // Emit live spec to parent QuoteSystem on every relevant change
   useEffPV(() => {
     if (!onSpec) return;
-    const layout = [...placed.map(a => ({ rows: a.rows, cols: a.cols, on: a.on, orient: a.orient })), { rows, cols, on: [...on], orient }];
+    const layout = [...placed.map(a => ({ rows: a.rows, cols: a.cols, on: a.on, orient: a.orient, rot: a.rot || 0 })), { rows, cols, on: [...on], orient, rot }];
     onSpec({ count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, monthly, mode, panel, batteryKwh, address, slope, azimuth, aspectLabel: aspectLabel(azimuth), backupHrs, autonomy, avgLoadKw, layout });
-  }, [count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, mode, batteryKwh, address, slope, azimuth, panel, backupHrs, autonomy, on, placed, rows, cols, orient]);
+  }, [count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, mode, batteryKwh, address, slope, azimuth, panel, backupHrs, autonomy, on, placed, rows, cols, orient, rot]);
 
   return (
     <div className="fade-in">
@@ -6073,7 +6077,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
                 <div className="pv-selbox" onPointerDown={selected ? startDrag : undefined}>
                   <div className="pv-rotate" onPointerDown={startRotate} title="Rotate to align with roof"><span className="pv-rotate-line" /><span className="pv-rotate-knob" /></div>
                   <div className="pv-drag" onPointerDown={startResizeBottom} title="Drag down to add panel rows"><span className="pv-drag-line" /><span className="pv-drag-knob"><span /><span /><span /></span></div>
-                  <span className="pv-sel-corner tl" onPointerDown={startResize("tl")} /><span className="pv-sel-corner tr" onPointerDown={startResize("tr")} /><span className="pv-sel-corner bl" onPointerDown={startResize("bl")} /><span className="pv-sel-corner br" onPointerDown={startResize("br")} />
+                  <span className="pv-sel-corner tl" onPointerDown={startResize("tl")} /><span className="pv-sel-corner tr" onPointerDown={startResize("tr")} /><span className="pv-sel-corner bl" onPointerDown={startResize("bl")} /><span className="pv-sel-corner br" onPointerDown={startResize("br")} /><span className="pv-sel-edge l" onPointerDown={startResizeEdge(-1, 0)} title="Drag to add or remove columns" /><span className="pv-sel-edge r" onPointerDown={startResizeEdge(1, 0)} title="Drag to add or remove columns" /><span className="pv-sel-edge t" onPointerDown={startResizeEdge(0, -1)} title="Drag to add or remove rows" />
                   <div className="pv-grid" style={{ gridTemplateColumns: `repeat(${cols}, ${cellW.toFixed(1)}px)` }}>
                     {Array.from({ length: rows * cols }).map((_, idx) => {
                       const r = Math.floor(idx / cols), c = idx % cols, k = pvKey(r, c);
@@ -6191,8 +6195,8 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
             <input className="pv-range" type="range" min={0} max={45} value={slope} onChange={e => setSlope(+e.target.value)} aria-label="Slope" />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 16 }}>
-            <Stepper label="Panel rows" value={rows} set={setRows} min={1} max={8} />
-            <Stepper label="Panel columns" value={cols} set={setCols} min={1} max={12} />
+            <Stepper label="Panel rows" value={rows} set={setRows} min={1} max={PV_MAX_ROWS} />
+            <Stepper label="Panel columns" value={cols} set={setCols} min={1} max={PV_MAX_COLS} />
           </div>
           <label className="field" style={{ marginTop: 14 }}>
             <span className="field-label">Panel model (from your catalog)</span>
@@ -7237,7 +7241,7 @@ function ProposalPackPanel() {
   );
 }
 
-function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan }) {
+function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan, setDesignImage }) {
   upgrades = upgrades || []; specSheets = specSheets || [];
   sitePlan = sitePlan || { image: null, markers: [] };
   const brand   = window.__SS_ACTIVE_BRAND || {};
@@ -7580,7 +7584,30 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
 
           {spec.count > 0 && !spec.designImage && (
             <div className="card-sub" style={{ fontSize:11, marginTop:10, color:"var(--warn, #FA913D)" }}>
-              No rooftop image yet — open System Design (search the client's address or upload a roof photo), then come back here to capture it.
+              No rooftop image yet — press "Capture for quote" in System Design, or add a photo or screenshot of the design here.
+            </div>
+          )}
+          {/* Only when there is no rooftop capture yet: an added picture never replaces or
+              removes the satellite rooftop image. */}
+          {setDesignImage && !spec.designImage && (
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <label className="btn" style={{ flex:1, justifyContent:"center", cursor:"pointer" }} data-testid="pv-add-picture">
+                <Icon d={ICONS.camera || ICONS.photo} size={14} stroke={2} /> Add picture to quote
+                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e => {
+                  const f = e.target.files && e.target.files[0]; e.target.value = "";
+                  if (!f || !/^image\//.test(f.type)) return;
+                  const rd = new FileReader();
+                  rd.onload = () => { const im = new Image(); im.onload = () => {
+                    // shrink big phone photos so the quote stays light
+                    const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+                    const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+                    c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+                    setDesignImage(c.toDataURL("image/jpeg", 0.85));
+                    window.ssToast && window.ssToast("Picture added to the quote");
+                  }; im.src = rd.result; };
+                  rd.readAsDataURL(f);
+                }} />
+              </label>
             </div>
           )}
 
@@ -7929,7 +7956,7 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
                         const pw = 12;
                         const ph = Math.round(pw * (arr.orient === "landscape" ? (1.13 / 1.72) : (1.72 / 1.13)));
                         return (
-                          <div key={ai} style={{ display:"grid", gridTemplateColumns:`repeat(${arr.cols}, ${pw}px)`, gap:"2px" }}>
+                          <div key={ai} style={{ display:"grid", gridTemplateColumns:`repeat(${arr.cols}, ${pw}px)`, gap:"2px", transform:`rotate(${Number(arr.rot) || 0}deg)`, margin:Math.abs(Number(arr.rot) || 0) > 1 ? 18 : 0 }}>
                             {Array.from({ length: arr.rows * arr.cols }).map((_, idx) => {
                               const r = Math.floor(idx / arr.cols), c = idx % arr.cols, k = `${r}-${c}`;
                               const isOn = onSet.has(k);
@@ -8525,7 +8552,7 @@ function QuoteSystem() {
       // clone, otherwise they paint over the real satellite photo composited below.
       const panels = await window.html2canvas(stage, {
         useCORS: true, backgroundColor: null, scale: 1.6, logging: false,
-        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-toolbar, .pv-tools, .pv-array-tag, .pv-pin, .pv-pin-pulse"),
+        ignoreElements: el => el.matches && el.matches(".pv-tilelayer, .pv-tile, .pv-aerial-img, button, .pv-zoom, .pv-search, .pv-northrose, .pv-imagery, .pv-stage-attrib, .pv-stage-veil, .pv-rotate, .pv-drag, .pv-sel-corner, .pv-sel-edge, .pv-toolbar, .pv-tools, .pv-array-tag, .pv-pin, .pv-pin-pulse"),
         onclone: doc => doc.querySelectorAll(".pv-stage, .pv-aerial").forEach(el => { el.style.background = "transparent"; }),
       });
 
@@ -8542,10 +8569,18 @@ function QuoteSystem() {
       ctx.drawImage(panels, 0, 0);
 
       const img = out.toDataURL("image/jpeg", 0.85);
-      if (img && img.length > 2000) { specRef.current = { ...specRef.current, designImage: img }; setSpec(s => ({ ...s, designImage: img })); }
+      if (img && img.length > 2000) { setDesignImage(img); return true; }
     } catch (e) { /* capture failed — proposal falls back to the schematic layout */ }
   };
   const generateProposal = () => changeStep(3);
+  // The picture shown in the proposal's System & Panel Layout section.
+  const setDesignImage = img => { specRef.current = { ...specRef.current, designImage: img || undefined }; setSpec(s => ({ ...s, designImage: img || undefined })); };
+  // "Capture for quote": snapshot the design now and say whether it worked.
+  const captureNow = async () => {
+    if (capturing) return;
+    setCapturing(true); const ok = await captureRoof(); setCapturing(false);
+    window.ssToast && window.ssToast(ok ? "Design captured — it's in the quote's proposal" : "Couldn't capture the map view. On the Proposal step use \"Add picture to quote\" to add a photo or screenshot instead.", ok ? undefined : "error");
+  };
 
   React.useEffect(() => {
     const h = () => { setStep(1); setCust({ name:"", email:"", phone:"", address:"" }); setSpec({}); setUpgrades(QUOTE_UPGRADES.map(u => ({ ...u, accepted: false }))); setSpecSheets([]); setSitePlan({ image: null, markers: [] }); setQuoteId(null); setStatus("Draft"); setNotes(""); reached.current = { 1: true }; designViewed.current = false; designedAddr.current = ""; setDesignKey(k => k + 1); };
@@ -8593,6 +8628,12 @@ function QuoteSystem() {
       )}
       {reached.current[2] && (
         <div style={{ display: step === 2 ? "block" : "none" }}>
+          <div style={{ display:"flex", justifyContent:"flex-end", alignItems:"center", gap:10, marginBottom:10 }}>
+            {spec.designImage && <span className="card-sub" style={{ fontSize:12 }}>✓ Picture in the quote</span>}
+            <button className="btn" data-testid="pv-capture" onClick={captureNow} disabled={capturing}>
+              {capturing ? <span className="pv-spin" /> : <Icon d={ICONS.camera || ICONS.photo} size={14} stroke={2} />} Capture for quote
+            </button>
+          </div>
           <StepDesign key={designKey} onSpec={onDesignSpec} clientAddress={cust.address}
             panelOptions={catalogPanels} preferredPanelId={preferredPanelId} />
         </div>
@@ -8601,7 +8642,7 @@ function QuoteSystem() {
         <div style={{ display: step === 3 ? "block" : "none" }}>
           <StepProposal spec={spec} cust={cust} lines={lines} validity={validity} notes={notes}
             upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets}
-            sitePlan={sitePlan} setSitePlan={setSitePlan} />
+            sitePlan={sitePlan} setSitePlan={setSitePlan} setDesignImage={setDesignImage} />
         </div>
       )}
     </div>
