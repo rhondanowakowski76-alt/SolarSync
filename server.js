@@ -1013,9 +1013,12 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   // sign-in is by exact full name, so names must stay unambiguous platform-wide
   if (await one("select id from users where status='active' and lower(display_name)=lower($1)", [adminName]))
     return res.status(409).json({ error: "admin_name_taken" });
+  // Same colour/logo checks as the Branding save: hex colours only, image data or https logos only.
+  const cb = cleanBranding({ accent: Array.isArray(b.accent) && b.accent.length ? b.accent : undefined, logo_url: b.logo_url || undefined });
+  if (cb.error) return res.status(cb.status).json({ error: cb.error });
   const branding = { name };
-  if (Array.isArray(b.accent) && b.accent.length) branding.accent = b.accent.slice(0, 3).map(String);
-  if (b.logo_url) branding.logo_url = String(b.logo_url).slice(0, 400000);
+  if (cb.branding.accent) branding.accent = cb.branding.accent;
+  if (cb.branding.logo_url) branding.logo_url = cb.branding.logo_url;
   await run("insert into tenants (id, reseller_id, name, domain, plan, region, branding, status) values ($1,$2,$3,$4,$5,$6,$7::jsonb,'active')",
     [id, "reseller-solarsync", name, domain, plan, region, JSON.stringify(branding)]);
   const pin = String(require("crypto").randomInt(100000, 1000000));

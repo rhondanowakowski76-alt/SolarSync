@@ -7128,11 +7128,12 @@ function ProposalTemplateEditor({ brand }) {
         <div style={{ display: "flex", gap: 6 }}>{[["blue", "Blue"], ["dark", "Dark"], ["brand", "Brand"]].map(([k, l]) => <button key={k} disabled={!canEdit} className={"btn" + (draft.look === k ? " btn-primary" : "")} style={{ flex: 1, justifyContent: "center" }} onClick={() => set("look", k)}>{l}</button>)}</div>
         {draft.look === "brand" && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <input type="color" value={base} disabled={!canEdit} onChange={e => set("brand_color", e.target.value)} style={{ width: 40, height: 32, border: 0, background: "none" }} />
-            <span className="card-sub" style={{ fontSize: 12 }}>Brand colour</span>
+            <span style={{ width: 22, height: 22, borderRadius: 6, background: base, border: "1px solid var(--line-strong)", flexShrink: 0 }} />
+            <span className="card-sub" style={{ fontSize: 12 }}>Brand colour {String(base).toUpperCase()}</span>
             {draft.brand_color && canEdit && <span className="card-sub" style={{ fontSize: 11, cursor: "pointer", textDecoration: "underline" }} onClick={() => set("brand_color", "")}>use my branding</span>}
           </div>
         )}
+        {draft.look === "brand" && canEdit && <div style={{ marginTop: 10 }}>{window.ColourChooser && <window.ColourChooser value={base} onPick={h => set("brand_color", h.toLowerCase())} gridOpen={false} />}</div>}
         <div className="card-title" style={lbl}>Pages</div>
         {BOLD_PAGES.map(([k, l]) => (
           <label key={k} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7, cursor: "pointer" }}>
@@ -11051,6 +11052,103 @@ const COLOUR_GRID = [
   ["Blue Grey", "eceff1 cfd8dc b0bec5 90a4ae 78909c 607d8b 546e7a 455a64 37474f 263238"],
 ].map(([name, list]) => ({ name, colours: list.split(" ").map(h => "#" + h.toUpperCase()) }));
 
+/* Shared colour choosing, used everywhere a colour is picked (Branding, Provision
+   Tenant, Proposal template). "My colours" are kept on this device and shared by all. */
+const MY_COLOURS_KEY = "ss_my_colours";
+const isHex6 = h => /^#[0-9A-F]{6}$/i.test(String(h || ""));
+function readMyColours() {
+  try { const v = JSON.parse(localStorage.getItem(MY_COLOURS_KEY) || "[]"); return Array.isArray(v) ? v.filter(isHex6).map(h => h.toUpperCase()).slice(0, 24) : []; } catch (e) { return []; }
+}
+function useMyColours() {
+  const [list, setList] = React.useState(readMyColours);
+  React.useEffect(() => {
+    const sync = () => setList(readMyColours());
+    window.addEventListener("ss:my-colours", sync);
+    return () => window.removeEventListener("ss:my-colours", sync);
+  }, []);
+  const keep = next => { try { localStorage.setItem(MY_COLOURS_KEY, JSON.stringify(next)); } catch (e) {} setList(next); window.dispatchEvent(new Event("ss:my-colours")); };
+  const save = h => { h = String(h || "").toUpperCase(); if (isHex6(h) && !list.includes(h)) keep([h, ...list].slice(0, 24)); };
+  const remove = h => keep(list.filter(x => x !== h));
+  return { list, save, remove };
+}
+const groupLabel = { fontSize: 10.5, fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-faint)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 };
+function MyColoursRow({ selected, onPick, mine }) {
+  const own = useMyColours(); const m = mine || own;
+  const sel = String(selected || "").toUpperCase();
+  return (
+    <div style={{ marginBottom: 14 }} data-testid="my-colours">
+      <div style={groupLabel}>My colours</div>
+      {m.list.length === 0
+        ? <div className="card-sub" style={{ fontSize: 11.5 }}>Pick any colour, then "+ Save" to keep it here.</div>
+        : <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {m.list.map(h => (
+              <span key={h} style={{ position: "relative" }}>
+                <button type="button" onClick={() => onPick(h)} title={h}
+                  style={{ border: sel === h ? "2px solid var(--blue-light)" : "1px solid var(--line-strong)", borderRadius: 9, padding: "7px 8px", background: "rgba(255,255,255,0.02)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 5, alignItems: "center", minWidth: 52 }}>
+                  <span style={{ width: 28, height: 13, borderRadius: 3, background: h }} />
+                  <span style={{ fontFamily: "var(--font-head)", fontSize: 10, fontWeight: 600, color: "var(--tx-dim)" }}>{h}</span>
+                </button>
+                <button type="button" aria-label={"Remove " + h} onClick={() => m.remove(h)}
+                  style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--bg-1, #111)", color: "var(--tx-dim)", fontSize: 10, lineHeight: "13px", cursor: "pointer", padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>}
+    </div>
+  );
+}
+const GRID_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, "A100", "A200", "A400", "A700"];
+function ColourGrid({ selected, onPick, open = true }) {
+  const sel = String(selected || "").toUpperCase();
+  return (
+    <details open={open} style={{ marginBottom: 14 }} data-testid="colour-grid">
+      <summary style={{ ...groupLabel, cursor: "pointer" }}>Full colour range</summary>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLOUR_GRID.length}, 1fr)`, gridAutoFlow: "column", gridTemplateRows: "repeat(14, 14px)", gap: 2, marginTop: 6 }}>
+        {COLOUR_GRID.flatMap(col => GRID_SHADES.map((shade, i) => {
+          const h = col.colours[i];
+          if (!h) return <span key={col.name + i} />;
+          const label = col.name + " " + shade + " · " + h;
+          return <button type="button" key={h + i} title={label} aria-label={label} onClick={() => onPick(h)}
+            style={{ padding: 0, minWidth: 0, height: 14, borderRadius: 2, background: h, cursor: "pointer", border: "none", outline: sel === h ? "2px solid #fff" : "none", outlineOffset: 1 }} />;
+        }))}
+      </div>
+      <div className="card-sub" style={{ fontSize: 11, marginTop: 6 }}>Tap any colour to use it. Bottom four rows are the bright accent shades.</div>
+    </details>
+  );
+}
+const VIVID_IDS = ["sky","vblue","vroyal","vcyan","vturq","vgreen","vlime","vyellow","vorange","vred","vpink","vmagenta","vpurple","vviolet"];
+// One-colour chooser: picker + code + Save, My colours, Vivid, full range.
+function ColourChooser({ value, onPick, disabled, gridOpen = true }) {
+  const mine = useMyColours();
+  const v = isHex6(value) ? value.toUpperCase() : "";
+  const [text, setText] = React.useState(v);
+  React.useEffect(() => { setText(v); }, [v]);
+  const pick = h => { if (!disabled) onPick(String(h).toUpperCase()); };
+  if (disabled) return null;
+  return (
+    <div data-testid="colour-chooser">
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <input type="color" aria-label="Pick a colour" value={v || "#3A7DFF"} onChange={e => pick(e.target.value)}
+          style={{ width: 42, height: 36, padding: 2, border: "1px solid var(--line-strong)", borderRadius: 9, background: "transparent", cursor: "pointer", flexShrink: 0 }} />
+        <input className="field-input" placeholder="#3A7DFF" value={text} aria-label="Colour code"
+          onChange={e => { let t = e.target.value.trim(); if (t && !t.startsWith("#")) t = "#" + t; setText(t); if (isHex6(t)) pick(t); }}
+          style={{ fontFamily: "var(--font-head)", letterSpacing: "0.04em", flex: 1, minWidth: 0 }} />
+        <button type="button" className="btn" data-testid="my-colour-save" title="Save to My colours" style={{ padding: "6px 10px", fontSize: 12, whiteSpace: "nowrap" }} disabled={!v} onClick={() => mine.save(v)}>+ Save</button>
+      </div>
+      <MyColoursRow selected={v} onPick={pick} mine={mine} />
+      <div style={{ marginBottom: 14 }}>
+        <div style={groupLabel}>Vivid</div>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {VIVID_IDS.map(id => { const p = PALETTES.find(x => x.id === id); if (!p) return null; const h = p.accent[1].toUpperCase();
+            return <button type="button" key={id} title={p.name + " · " + h} aria-label={p.name} onClick={() => pick(h)}
+              style={{ width: 22, height: 22, borderRadius: 6, background: h, cursor: "pointer", border: v === h ? "2px solid #fff" : "1px solid var(--line-strong)", padding: 0 }} />; })}
+        </div>
+      </div>
+      <ColourGrid selected={v} onPick={pick} open={gridOpen} />
+    </div>
+  );
+}
+window.ColourChooser = ColourChooser; window.ColourGrid = ColourGrid; window.MyColoursRow = MyColoursRow; window.useMyColours = useMyColours;
+
 /* Branding editor — live preview, works for tenant & reseller oversight */
 // tenantId set → the reseller is editing that tenant's brand on their behalf.
 function BrandingEditor({ brand, tenantId, onSaved }) {
@@ -11061,11 +11159,7 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
   // Start from what's already published, so re-publishing never drops the saved logo.
   const [logoUrl, setLogoUrl] = useBR(brand.logo_url || null);
   const [customHex, setCustomHex] = useBR("");
-  // "My colours": single colours the user saved for reuse (kept on this device).
-  const [myColours, setMyColours] = useBR(() => { try { const v = JSON.parse(localStorage.getItem("ss_my_colours") || "[]"); return Array.isArray(v) ? v.filter(h => /^#[0-9A-F]{6}$/.test(h)).slice(0, 24) : []; } catch (e) { return []; } });
-  const keepMyColours = list => { setMyColours(list); try { localStorage.setItem("ss_my_colours", JSON.stringify(list)); } catch (e) {} };
-  const saveMyColour = h => { h = String(h || "").toUpperCase(); if (/^#[0-9A-F]{6}$/.test(h) && !myColours.includes(h)) keepMyColours([h, ...myColours].slice(0, 24)); };
-  const removeMyColour = h => keepMyColours(myColours.filter(x => x !== h));
+  const mine = useMyColours();
   // Full custom colour set: [light, main, dark]. Null = use the palette above.
   const [custom, setCustom] = useBR(() => (brand.accent && !PALETTES.some(p => p.accent[1] === brand.accent[1]) && !brand.realLogo) ? brand.accent.slice(0, 3) : null);
   const [photoAssets, setPhotoAssets] = useBR([]);
@@ -11175,45 +11269,12 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
               <input className="field-input" placeholder="#3A7DFF" value={customHex}
                 onChange={e => { const v = e.target.value.trim(); setCustomHex(!v ? "" : v.startsWith("#") ? v : "#" + v); setCustom(null); }}
                 style={{ fontFamily: "var(--font-head)", letterSpacing: "0.04em", flex: 1, minWidth: 0 }} />
-              <button className="btn" data-testid="my-colour-save" title="Save to My colours" style={{ padding: "6px 10px", fontSize: 12, whiteSpace: "nowrap" }} onClick={() => saveMyColour(pal.accent[1].slice(0, 7))}>+ Save</button>
+              <button className="btn" data-testid="my-colour-save" title="Save to My colours" style={{ padding: "6px 10px", fontSize: 12, whiteSpace: "nowrap" }} onClick={() => mine.save(pal.accent[1].slice(0, 7))}>+ Save</button>
               {(customHex || custom) && <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} onClick={() => { setCustomHex(""); setCustom(null); }}>Clear</button>}
             </div>
           </label>
-          <div style={{ marginBottom: 14 }} data-testid="my-colours">
-            <div style={{ fontSize: 10.5, fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-faint)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>My colours</div>
-            {myColours.length === 0
-              ? <div className="card-sub" style={{ fontSize: 11.5 }}>Pick any colour above, then "Save to My colours" to keep it here.</div>
-              : <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {myColours.map(h => {
-                    const isOn = !custom && customHex.toUpperCase() === h;
-                    return (
-                      <span key={h} style={{ position: "relative" }}>
-                        <button onClick={() => { setCustomHex(h); setCustom(null); }} title={h}
-                          style={{ border: isOn ? "2px solid var(--blue-light)" : "1px solid var(--line-strong)", borderRadius: 9, padding: "7px 8px", background: "rgba(255,255,255,0.02)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 5, alignItems: "center", minWidth: 52 }}>
-                          <span style={{ width: 28, height: 13, borderRadius: 3, background: h }} />
-                          <span style={{ fontFamily: "var(--font-head)", fontSize: 10, fontWeight: 600, color: "var(--tx-dim)" }}>{h}</span>
-                        </button>
-                        <button aria-label={"Remove " + h} onClick={() => removeMyColour(h)}
-                          style={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: 8, border: "1px solid var(--line-strong)", background: "var(--bg-1, #111)", color: "var(--tx-dim)", fontSize: 10, lineHeight: "13px", cursor: "pointer", padding: 0 }}>×</button>
-                      </span>
-                    );
-                  })}
-                </div>}
-          </div>
-          <details open style={{ marginBottom: 14 }} data-testid="colour-grid">
-            <summary style={{ fontSize: 10.5, fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-faint)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, cursor: "pointer" }}>Full colour range</summary>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLOUR_GRID.length}, 1fr)`, gridAutoFlow: "column", gridTemplateRows: "repeat(14, 14px)", gap: 2, marginTop: 6 }}>
-              {COLOUR_GRID.flatMap(col => Array.from({ length: 14 }, (_, i) => {
-                const h = col.colours[i];
-                if (!h) return <span key={col.name + i} />;
-                const isOn = !custom && customHex.toUpperCase() === h;
-                const label = col.name + " " + (i < 10 ? [50,100,200,300,400,500,600,700,800,900][i] : ["A100","A200","A400","A700"][i - 10]) + " · " + h;
-                return <button key={h + i} title={label} aria-label={label} onClick={() => { setCustomHex(h); setCustom(null); }}
-                  style={{ padding: 0, minWidth: 0, height: 14, borderRadius: 2, background: h, cursor: "pointer", border: "none", outline: isOn ? "2px solid #fff" : "none", outlineOffset: 1 }} />;
-              }))}
-            </div>
-            <div className="card-sub" style={{ fontSize: 11, marginTop: 6 }}>Tap any colour to use it. Bottom four rows are the bright accent shades.</div>
-          </details>
+          <MyColoursRow mine={mine} selected={custom ? "" : customHex} onPick={h => { setCustomHex(h); setCustom(null); }} />
+          <ColourGrid selected={custom ? "" : customHex} onPick={h => { setCustomHex(h); setCustom(null); }} />
           {[
             { label: "Vivid", ids: ["sky","vblue","vroyal","vcyan","vturq","vgreen","vlime","vyellow","vorange","vred","vpink","vmagenta","vpurple","vviolet"] },
             { label: "Base44 Collection", ids: ["b44navy","b44indigo","b44emerald","b44amber","b44red","b44slate"] },
@@ -13247,6 +13308,12 @@ const PROV_PALETTES = [
   { id:"b44amber",  name:"Base44 Amber",   accent:["#FCD9A8","#FA913D","#C2570A"] },
 ];
 
+// One colour → light / main / dark, matching the Branding editor.
+function provShades(h) {
+  const rgb = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mix = (to, t) => "#" + rgb.map(v => Math.round(v + (to - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
+  return [mix(255, 0.45), h.toUpperCase(), mix(0, 0.45)];
+}
 function ProvisionModal({ onClose }) {
   const [step, setStep] = useStateR(1);
   const [fields, setFields] = useStateR({ name:"",domain:"",email:"",region:"",admin:"" });
@@ -13261,7 +13328,7 @@ function ProvisionModal({ onClose }) {
 
   const isValidHex = h => /^#[0-9a-f]{6}$/i.test(h);
   const activePal = isValidHex(customHex)
-    ? { accent:[customHex,customHex+"bb",customHex+"66"] }
+    ? { accent:provShades(customHex) }
     : (PROV_PALETTES.find(p=>p.id===brandPal)||PROV_PALETTES[0]);
 
   const handleLogoFile = e => {
@@ -13359,28 +13426,8 @@ function ProvisionModal({ onClose }) {
               <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleLogoFile} />
             </div>
 
-            <div className="field-label" style={{ marginBottom:10 }}>Brand color</div>
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:14 }}>
-              {PROV_PALETTES.map(p=>{
-                const isOn = !isValidHex(customHex) && brandPal===p.id;
-                return (
-                  <button key={p.id} onClick={()=>{ setBrandPal(p.id); setCustomHex(""); }}
-                    style={{ border:isOn?"2px solid var(--blue-light)":"1px solid var(--line-strong)",borderRadius:10,padding:"8px 6px",background:"rgba(255,255,255,0.03)",cursor:"pointer",display:"flex",flexDirection:"column",gap:6,alignItems:"center" }}>
-                    <span style={{ display:"flex",gap:2 }}>{p.accent.map((c,i)=><span key={i} style={{ width:14,height:14,borderRadius:3,background:c }} />)}</span>
-                    <span style={{ fontFamily:"var(--font-head)",fontSize:10,fontWeight:600,color:isOn?"var(--tx-hi)":"var(--tx-dim)" }}>{p.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <label className="field">
-              <span className="field-label">Custom hex <span style={{ color:"var(--tx-faint)",fontWeight:400 }}>— overrides above</span></span>
-              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                <input className="field-input" placeholder="#3A7DFF" value={customHex}
-                  onChange={e=>setCustomHex(e.target.value.startsWith("#")?e.target.value:"#"+e.target.value)}
-                  style={{ fontFamily:"var(--font-head)",letterSpacing:"0.04em" }} />
-                {isValidHex(customHex)&&<div style={{ width:36,height:36,borderRadius:9,background:customHex,border:"2px solid rgba(255,255,255,0.18)",flexShrink:0 }} />}
-              </div>
-            </label>
+            <div className="field-label" style={{ marginBottom:10 }}>Brand colour</div>
+            <ColourChooser value={isValidHex(customHex) ? customHex : activePal.accent[1].slice(0,7)} onPick={h=>setCustomHex(h)} />
             <div style={{ marginTop:14,padding:"12px 14px",borderRadius:10,background:"rgba(255,255,255,0.03)",border:"1px solid var(--line)",display:"flex",alignItems:"center",gap:12 }}>
               <div style={{ width:36,height:36,borderRadius:9,background:activePal.accent[0],flexShrink:0 }} />
               <div>
