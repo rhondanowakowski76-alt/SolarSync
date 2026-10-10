@@ -11452,6 +11452,7 @@ const CAL_TYPES = [
   { id: "test",            label: "Testing",       color: "#FFC93C"   },
   { id: "handover",        label: "Handover",      color: "#0F1E3A"   },
   { id: "service_request", label: "Svc Request",   color: "#3A7DFF"   },
+  { id: "misc",            label: "Miscellaneous", color: "#2E9E8F"   },
   { id: "other",           label: "Other",         color: "#5A6573"   },
   { id: "unavailable",     label: "Not available", color: "#9AA3AF"   },
   { id: "personal",        label: "Personal",      color: "#7C5CFF"   },
@@ -11876,6 +11877,9 @@ function JobExtras({ ev }) {
   const [inv, setInv] = useCalS(null);          // linked invoice
   const [invForm, setInvForm] = useCalS(null);  // { amount, description, client_id }
   const [clients, setClients] = useCalS([]);
+  const [products, setProducts] = useCalS([]);
+  const [notes, setNotes] = useCalS(null);
+  const [noteText, setNoteText] = useCalS("");
   const [invoiceId, setInvoiceId] = useCalS(ev.invoiceId || "");
   const fileRef = React.useRef(null);
   const label = (CAL_TYPES.find(t => t.id === ev.type) || {}).label || "Service";
@@ -11883,6 +11887,10 @@ function JobExtras({ ev }) {
   React.useEffect(() => {
     if (!signedIn || !ev.id) return;
     api.get("/job-photos?job_id=" + encodeURIComponent(ev.id)).then(r => setPhotos(Array.isArray(r) ? r : [])).catch(() => setPhotos([]));
+  }, [ev.id]);
+  React.useEffect(() => {
+    if (!signedIn || !ev.id || me.app_role === "client" || me.support) return;
+    api.get("/job-notes?job_id=" + encodeURIComponent(ev.id)).then(r => setNotes(Array.isArray(r) ? r : [])).catch(() => setNotes([]));
   }, [ev.id]);
   React.useEffect(() => {
     if (!signedIn || !canInvoice || !invoiceId) { setInv(null); return; }
@@ -11917,24 +11925,39 @@ function JobExtras({ ev }) {
     let list = clients;
     if (!list.length) { try { list = await api.get("/clients"); setClients(Array.isArray(list) ? list : []); } catch (e) { list = []; } }
     const match = ev.clientId || ((Array.isArray(list) ? list : []).find(c => (c.name || "").toLowerCase() === (ev.client || "").toLowerCase()) || {}).id || "";
-    setInvForm({ amount: ev.value ? String(ev.value) : "", description: label + (ev.date ? " — " + ev.date : "") + (ev.suburb ? ", " + ev.suburb : ""), client_id: match });
+    if (!products.length) { try { const pr = await api.get("/products"); setProducts((Array.isArray(pr) ? pr : []).filter(x => x.active !== false)); } catch (e) {} }
+    setInvForm({ amount: ev.value ? String(ev.value) : "", description: label + (ev.date ? " — " + ev.date : "") + (ev.suburb ? ", " + ev.suburb : ""), client_id: match, items: [], pick: "", qty: "1" });
   };
+  const addItem = () => {
+    const pr = products.find(x => x.id === invForm.pick); const qty = Math.floor(Number(invForm.qty));
+    if (!pr || !(qty > 0)) { window.ssToast && window.ssToast("Pick a product and a quantity", "error"); return; }
+    if (pr.stock != null && qty > pr.stock) { window.ssToast && window.ssToast("Only " + pr.stock + " of " + pr.name + " in stock", "error"); return; }
+    setInvForm({ ...invForm, items: [...invForm.items, { product_id: pr.id, name: pr.name, qty, price: Number(pr.price) || 0 }], pick: "", qty: "1" });
+  };
+  const invTotal = invForm ? (Number(invForm.amount) || 0) + invForm.items.reduce((t, i) => t + i.qty * i.price, 0) : 0;
   const saveInvoice = async () => {
-    const amount = Number(invForm.amount);
-    if (!(amount > 0)) { window.ssToast && window.ssToast("Enter the invoice amount", "error"); return; }
+    if (!(invTotal > 0)) { window.ssToast && window.ssToast("Add a service amount or at least one product", "error"); return; }
     setBusy(true);
     try {
-      const c = clients.find(x => x.id === invForm.client_id);
-      const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-      const created = await api.post("/invoices", { amount, description: invForm.description, client_id: invForm.client_id || undefined,
-        client_name: c ? c.name : (ev.client || undefined), due, lines: [{ d: invForm.description, q: 1, u: amount, amt: amount }] });
-      await api.put("/bookings/" + ev.id, { invoice_id: created.id });
+      const created = await api.post("/bookings/" + ev.id + "/invoice", { service_amount: Number(invForm.amount) || 0, description: invForm.description,
+        client_id: invForm.client_id || undefined, items: invForm.items.map(i => ({ product_id: i.product_id, qty: i.qty })) });
       setInvoiceId(created.id); setInv(created); setInvForm(null);
       window.ssToast && window.ssToast("Invoice " + created.number + " created" + (invForm.client_id ? " — the customer can see it in their portal" : ""));
     } catch (e) {
-      window.ssToast && window.ssToast("Could not create the invoice — check the amount and try again", "error");
+      const c = String(e && e.message);
+      window.ssToast && window.ssToast(c === "not_enough_stock" ? "Not enough stock of " + ((e.data && e.data.product) || "a product") + " (" + ((e.data && e.data.in_stock) ?? 0) + " left)"
+        : c === "already_invoiced" ? "This job already has an invoice" : "Could not create the invoice — check the amounts and try again", "error");
     }
     setBusy(false);
+  };
+  const addNote = async () => {
+    const body = noteText.trim(); if (!body) return;
+    try { const n = await api.post("/job-notes", { job_id: ev.id, body }); setNotes(p => [...(p || []), n]); setNoteText(""); }
+    catch (e) { window.ssToast && window.ssToast("Could not save the note", "error"); }
+  };
+  const delNote = async id => {
+    try { await api.del("/job-notes/" + id); setNotes(p => p.filter(n => n.id !== id)); }
+    catch (e) { window.ssToast && window.ssToast("Only the writer or an admin can remove a note", "error"); }
   };
 
   const box = { padding: "12px 18px", borderTop: "1px solid var(--line)" };
@@ -11965,16 +11988,51 @@ function JobExtras({ ev }) {
           </div>
         </div>}
       </div>
+      {notes !== null && <div style={box} data-testid="job-notes">
+        <span className="field-label">Job notes</span>
+        {notes.length === 0 && <div className="card-sub" style={{ fontSize: 12, marginTop: 4 }}>No notes yet.</div>}
+        {notes.map(n => (
+          <div key={n.id} style={{ marginTop: 6, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" }}>
+            <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--tx)" }}>{n.body}</div>
+            <div className="card-sub" style={{ fontSize: 11, marginTop: 3, display: "flex", gap: 8 }}>
+              <span style={{ flex: 1 }}>{[n.author, n.created_at && new Date(n.created_at).toLocaleString()].filter(Boolean).join(" · ")}</span>
+              {(n.author_id === me.sub || me.app_role === "tenant_admin") && <a style={{ cursor: "pointer" }} onClick={() => delNote(n.id)}>Remove</a>}
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <textarea className="field-input" rows={2} placeholder="Add a note for this job…" value={noteText} onChange={e => setNoteText(e.target.value)} style={{ flex: 1, resize: "vertical" }} />
+          <button type="button" className="btn btn-primary" style={{ alignSelf: "flex-end", padding: "6px 12px", fontSize: 12.5 }} disabled={!noteText.trim()} onClick={addNote}>Add note</button>
+        </div>
+      </div>}
       {canInvoice && <div style={box} data-testid="job-invoice">
         <span className="field-label">Invoice</span>
         {invoiceId
           ? <div className="card-sub" style={{ marginTop: 6 }}>{inv ? <><b>{inv.number}</b> · ${Number(inv.amount).toFixed(2)} · {inv.status}</> : "Invoice linked"}</div>
           : invForm
             ? <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-                <label className="field"><span className="field-label">Amount (inc GST)</span>
+                <label className="field"><span className="field-label">Service / labour amount (inc GST)</span>
                   <input className="field-input" type="number" min="0" step="0.01" value={invForm.amount} onChange={e => setInvForm({ ...invForm, amount: e.target.value })} /></label>
                 <label className="field"><span className="field-label">Description</span>
                   <input className="field-input" value={invForm.description} onChange={e => setInvForm({ ...invForm, description: e.target.value })} /></label>
+                <div className="field"><span className="field-label">Products sold on this job</span>
+                  {invForm.items.map((it, k) => (
+                    <div key={k} className="card-sub" style={{ display: "flex", gap: 8, fontSize: 12.5, marginTop: 3 }}>
+                      <span style={{ flex: 1 }}>{it.qty} × {it.name}</span><span>${(it.qty * it.price).toFixed(2)}</span>
+                      <a style={{ cursor: "pointer" }} onClick={() => setInvForm({ ...invForm, items: invForm.items.filter((_, x) => x !== k) })}>×</a>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+                    <select className="field-input" value={invForm.pick} onChange={e => setInvForm({ ...invForm, pick: e.target.value })} style={{ flex: 1, minWidth: 0 }} data-testid="job-product-pick">
+                      <option value="">{products.length ? "Choose a product…" : "No products in your catalog yet"}</option>
+                      {products.map(pr => <option key={pr.id} value={pr.id} disabled={pr.stock != null && pr.stock <= 0}>
+                        {pr.name} — ${Number(pr.price || 0).toFixed(2)}{pr.stock != null ? " (" + pr.stock + " in stock)" : ""}</option>)}
+                    </select>
+                    <input className="field-input" type="number" min="1" value={invForm.qty} onChange={e => setInvForm({ ...invForm, qty: e.target.value })} style={{ width: 64 }} aria-label="Quantity" />
+                    <button type="button" className="btn" style={{ padding: "5px 10px", fontSize: 12.5 }} onClick={addItem}>Add</button>
+                  </div>
+                </div>
+                <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>Total ${invTotal.toFixed(2)} inc GST</div>
                 <label className="field"><span className="field-label">Customer</span>
                   <select className="field-input" value={invForm.client_id} onChange={e => setInvForm({ ...invForm, client_id: e.target.value })}>
                     <option value="">Not linked{ev.client ? " — " + ev.client : ""}</option>
@@ -12690,6 +12748,7 @@ const CLIENT_SVC = [
   { id: "clean",      label: "Panel Clean",       desc: "Remove dust, grime and bird waste" },
   { id: "inspection", label: "System Inspection",  desc: "Full electrical and mounting check" },
   { id: "test",       label: "Performance Test",   desc: "Inverter output and monitoring check" },
+  { id: "misc",       label: "Miscellaneous",      desc: "Any other job — tell us what you need" },
   { id: "other",      label: "Other / General",    desc: "Any other service or enquiry" },
 ];
 
@@ -12722,7 +12781,7 @@ function ClientCalendar({ tenantId, clientName }) {
     // so a silent failure (e.g. account not linked) can never look like success.
     const created = await addEvt({
       title: myClient + " — " + (isQuote ? "Quote: " : "") + svcLabel,
-      type: !isQuote && ["clean", "inspection", "test"].includes(svcType) ? svcType : "service_request",
+      type: !isQuote && ["clean", "inspection", "test", "misc"].includes(svcType) ? svcType : "service_request",
       date: isQuote ? "" : reqDate, time: isQuote ? "" : reqTime,
       end: isQuote ? "" : reqTime, client: myClient, suburb: "", installer: "",
       status: "pending", notes: (isQuote ? "Quote request. " : "") + (reqNotes || ""), jobId: "", src: "client",

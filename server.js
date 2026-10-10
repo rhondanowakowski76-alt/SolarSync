@@ -614,6 +614,107 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [cur.id]));
 }));
 
+// Invoice a service job: optional service/labour amount plus retail products from the
+// company's catalog. Built on the server so prices come from the catalog, stock is
+// checked and taken off once, the cost of goods is booked once (the sale itself is
+// booked by the invoice), and a job can only be invoiced once.
+app.post("/api/bookings/:id/invoice", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const tid = tenantOf(req);
+  const bk = await one("select * from bookings where id=$1 and tenant_id=$2", [req.params.id, tid]);
+  if (!bk) return res.status(404).json({ error: "not_found" });
+  if (bk.invoice_id) return res.status(409).json({ error: "already_invoiced", invoice_id: bk.invoice_id });
+  const d = req.body || {};
+  const service = Math.round((Number(d.service_amount) || 0) * 100) / 100;
+  if (service < 0) return res.status(400).json({ error: "bad_amount" });
+  const want = new Map();
+  for (const it of (Array.isArray(d.items) ? d.items : []).slice(0, 50)) {
+    const qty = Math.floor(Number(it && it.qty));
+    if (!it || !it.product_id || !(qty > 0) || qty > 10000) return res.status(400).json({ error: "bad_item" });
+    want.set(String(it.product_id), (want.get(String(it.product_id)) || 0) + qty);
+  }
+  const prods = [];
+  for (const [pid, qty] of want) {
+    const pr = await one("select * from products where id=$1 and tenant_id=$2 and active", [pid, tid]);
+    if (!pr) return res.status(404).json({ error: "product_not_found", product_id: pid });
+    if (pr.stock != null && pr.stock < qty) return res.status(409).json({ error: "not_enough_stock", product: pr.name, in_stock: pr.stock });
+    prods.push({ pr, qty });
+  }
+  if (!(service > 0) && !prods.length) return res.status(400).json({ error: "nothing_to_invoice" });
+  if (d.client_id && !(await one("select 1 from clients where id=$1 and tenant_id=$2", [d.client_id, tid])))
+    return res.status(404).json({ error: "client_not_found" });
+  const label = cleanText(d.description, 200) || bk.title || "Service";
+  const lines = [];
+  if (service > 0) lines.push({ d: label, q: 1, u: service, amt: service });
+  for (const { pr, qty } of prods) {
+    const u = Number(pr.price) || 0;
+    lines.push({ d: pr.name + (pr.spec ? " — " + pr.spec : ""), q: qty, u, amt: Math.round(u * qty * 100) / 100, product_id: pr.id });
+  }
+  const amount = Math.round(lines.reduce((s, l) => s + l.amt, 0) * 100) / 100;
+  if (!(amount > 0)) return res.status(400).json({ error: "nothing_to_invoice" });
+  // Claim the job first so two clicks can't invoice it (or take the stock) twice.
+  const id = "inv-" + rid().slice(0, 8);
+  const claim = await rows("update bookings set invoice_id=$1, updated_at=now() where id=$2 and invoice_id is null returning id", [id, bk.id]);
+  if (!claim.length) return res.status(409).json({ error: "already_invoiced" });
+  try {
+  const client_id = d.client_id || bk.client_id || null;
+  const client = client_id ? await one("select name from clients where id=$1", [client_id]) : null;
+  const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [tid]);
+  const number = "INV-" + (2100 + ((cnt && cnt.c) || 0));
+  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id, lines)
+    values ($1,$2,$3,$4,$5,$6,'due',$7,$8,null,$9)`,
+    [id, tid, client_id, client ? client.name : (bk.client || null), number, amount, label, due, JSON.stringify(lines)]);
+  let cost = 0;
+  for (const { pr, qty } of prods) {
+    if (pr.stock != null) await run("update products set stock=greatest(0, stock-$1), updated_at=now() where id=$2", [qty, pr.id]);
+    await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, job_id, unit_cost, created_by)
+      values ($1,$2,$3,$4,'job',$5,$6,$7,$8,$9)`,
+      ["mov-" + rid().slice(0, 8), tid, pr.id, -qty, client ? client.name : (bk.client || null),
+       Math.round((Number(pr.price) || 0) * qty * 100) / 100, bk.id, pr.cost != null ? Number(pr.cost) : null, req.user.sub]);
+    cost += qty * (Number(pr.cost) || 0);
+  }
+  await audit(req.user.sub, "invoice_job", id, tid, { booking: bk.id, products: prods.length });
+  const inv = await one("select * from invoices where id=$1", [id]);
+  try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (job invoice) failed:", e.message); }
+  if (cost > 0) { try { await erp.postStockAllocation(tid, { source_id: id, posted_by: req.user.sub, cost, memo: `Products used — ${number}` }); } catch (e) { console.error("ledger post (job stock) failed:", e.message); } }
+  myob.onInvoiceCreated(inv);
+  ok(res, inv);
+  } catch (e) {
+    // Release the claim so the job can be invoiced again (nothing was half-saved on purpose).
+    await run("update bookings set invoice_id=null where id=$1 and invoice_id=$2", [bk.id, id]).catch(() => {});
+    throw e;
+  }
+}));
+
+// Job notes — a running log on a job, visible to the office and crew.
+const NOTE_ROLES = ["tenant_admin", "staff", "contractor"];
+async function noteJob(req) {
+  const id = String(req.query.job_id || (req.body && req.body.job_id) || "");
+  return id ? await one("select id, tenant_id from bookings where id=$1 and tenant_id=$2", [id, tenantOf(req)]) : null;
+}
+app.get("/api/job-notes", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const job = await noteJob(req); if (!job) return res.status(404).json({ error: "not_found" });
+  ok(res, await rows("select id, body, author, author_id, created_at from job_notes where tenant_id=$1 and job_id=$2 order by created_at", [job.tenant_id, job.id]));
+}));
+app.post("/api/job-notes", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const job = await noteJob(req); if (!job) return res.status(404).json({ error: "not_found" });
+  const body = cleanText(req.body && req.body.body, 2000);
+  if (!body || !body.trim()) return res.status(400).json({ error: "note_required" });
+  const id = "jn-" + rid().slice(0, 10);
+  await run("insert into job_notes (id, tenant_id, job_id, body, author, author_id) values ($1,$2,$3,$4,$5,$6)",
+    [id, job.tenant_id, job.id, body.trim(), req.user.display_name || null, req.user.sub]);
+  await audit(req.user.sub, "job_note", job.id, job.tenant_id);
+  ok(res, await one("select id, body, author, author_id, created_at from job_notes where id=$1", [id]));
+}));
+app.delete("/api/job-notes/:id", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const n = await one("select * from job_notes where id=$1 and tenant_id=$2", [req.params.id, tenantOf(req)]);
+  if (!n) return res.status(404).json({ error: "not_found" });
+  // Writers remove their own notes; the company admin can remove any.
+  if (n.author_id !== req.user.sub && req.user.app_role !== "tenant_admin") return res.status(403).json({ error: "forbidden" });
+  await run("delete from job_notes where id=$1", [n.id]);
+  ok(res, { ok: true });
+}));
+
 app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
   const cur = await one("select * from bookings where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
