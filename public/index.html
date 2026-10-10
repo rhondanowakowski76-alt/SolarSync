@@ -11122,6 +11122,20 @@ function ColourGrid({ selected, onPick, open = true }) {
     </details>
   );
 }
+// "Your Blues": the vivid blue palettes the owner chose (one swatch per colour).
+const YOUR_BLUES = ["#050198", "#070069", "#002FEC", "#006AE4", "#0097CD", "#0569C9", "#148BF9", "#1D90FA", "#389CFC", "#50A9FB", "#0011FF", "#2E3CFF", "#4D58FF", "#6570FE", "#7F88FF", "#1D65C7", "#2270DD", "#4D8BE0", "#639BE8", "#79A9EB", "#004BCB", "#0055E6", "#005EFE", "#196EFF", "#337EFE", "#003CCB", "#0046E6", "#004DFF", "#1A5EFF", "#3370FF", "#175BFE", "#4C82FE", "#6896FC", "#81A6FF", "#1323D1", "#1627E9", "#2D3DEB", "#4453EE", "#5C68F0", "#255DFC", "#3369FF", "#4D7CFE", "#6690FF", "#7FA2FE", "#014AB1", "#0055CC", "#0061E6", "#006AFE", "#1B79FF", "#0169FB", "#3388FF", "#4D96FC", "#66A6FE", "#367EE0", "#4E8CE1", "#0031B4", "#0F42CF", "#003DE6", "#0044FF", "#1C57F9"];
+function SwatchRow({ title, colours, selected, onPick, testid }) {
+  const sel = String(selected || "").toUpperCase();
+  return (
+    <div style={{ marginBottom: 14 }} data-testid={testid}>
+      <div style={groupLabel}>{title}</div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {colours.map(h => <button type="button" key={h} title={h} aria-label={title + " " + h} onClick={() => onPick(h)}
+          style={{ width: 24, height: 24, borderRadius: 6, background: h, cursor: "pointer", border: sel === h ? "2px solid #fff" : "1px solid var(--line-strong)", padding: 0 }} />)}
+      </div>
+    </div>
+  );
+}
 const VIVID_IDS = ["sky","vblue","vroyal","vcyan","vturq","vgreen","vlime","vyellow","vorange","vred","vpink","vmagenta","vpurple","vviolet"];
 // One-colour chooser: picker + code + Save, My colours, Vivid, full range.
 function ColourChooser({ value, onPick, disabled, gridOpen = true }) {
@@ -11142,6 +11156,7 @@ function ColourChooser({ value, onPick, disabled, gridOpen = true }) {
         <button type="button" className="btn" data-testid="my-colour-save" title="Save to My colours" style={{ padding: "6px 10px", fontSize: 12, whiteSpace: "nowrap" }} disabled={!v} onClick={() => mine.save(v)}>+ Save</button>
       </div>
       <MyColoursRow selected={v} onPick={pick} mine={mine} />
+      <SwatchRow title="Your Blues" testid="your-blues" colours={YOUR_BLUES} selected={v} onPick={pick} />
       <div style={{ marginBottom: 14 }}>
         <div style={groupLabel}>Vivid</div>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -11283,6 +11298,7 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
             </div>
           </label>
           <MyColoursRow mine={mine} selected={custom ? "" : customHex} onPick={h => { setCustomHex(h); setCustom(null); }} />
+          <SwatchRow title="Your Blues" testid="your-blues" colours={YOUR_BLUES} selected={custom ? "" : customHex} onPick={h => { setCustomHex(h); setCustom(null); }} />
           <ColourGrid selected={custom ? "" : customHex} onPick={h => { setCustomHex(h); setCustom(null); }} />
           {[
             { label: "Vivid", ids: ["sky","vblue","vroyal","vcyan","vturq","vgreen","vlime","vyellow","vorange","vred","vpink","vmagenta","vpurple","vviolet"] },
