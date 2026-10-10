@@ -383,6 +383,8 @@ async function migrate() {
     `alter table clients add column if not exists abn text`,
     `alter table clients add column if not exists notes text`,
     `alter table clients add column if not exists active boolean default true`,
+    // A service job can have an invoice raised from it.
+    `alter table bookings add column if not exists invoice_id text`,
     `alter table clients add column if not exists updated_at timestamptz default now()`,
     // MYOB connection (myob.js): which company file, settings, and what's been pushed.
     `alter table accounting_connections add column if not exists business_id text`,

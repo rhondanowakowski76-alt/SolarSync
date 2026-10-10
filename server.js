@@ -523,7 +523,7 @@ app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "s
 //   - clients create "requested" bookings from their portal
 //   - tenants/contractors see them on the calendar and confirm/schedule
 // ============================================================
-const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, updated_at, created_at";
+const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, invoice_id, updated_at, created_at";
 
 // Resolve the clients row for a logged-in client user (used to attribute + scope bookings).
 async function clientRowOf(req) {
@@ -599,10 +599,17 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   }
   // The customer name is free text for staff; a customer's own name stays as it is.
   const client = req.user.app_role === "client" ? cur.client : (d.client ?? cur.client);
-  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, client=$12, updated_at=now() where id=$13`,
+  // Staff can link the invoice raised for this job — it must be this company's invoice.
+  let invoice_id = cur.invoice_id;
+  if (req.user.app_role !== "client" && d.invoice_id !== undefined) {
+    if (d.invoice_id && !(await one("select 1 from invoices where id=$1 and tenant_id=$2", [d.invoice_id, cur.tenant_id])))
+      return res.status(404).json({ error: "invoice_not_found" });
+    invoice_id = d.invoice_id || null;
+  }
+  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, client=$12, invoice_id=$13, updated_at=now() where id=$14`,
     [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
      (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,
-     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, client, cur.id]);
+     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, client, invoice_id, cur.id]);
   await audit(req.user.sub, "update_booking", cur.id, cur.tenant_id, { status: d.status });
   ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [cur.id]));
 }));
