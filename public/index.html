@@ -2816,6 +2816,16 @@ function BrandEmblem({ brand, size = 38 }) {
   );
 }
 
+// A typed company name replaces the whole wordmark, including any built-in suffix
+// (e.g. "CRM"), so it isn't shown twice. The unchanged built-in name keeps its styling.
+function brandNameParts(base, name) {
+  name = String(name || "").trim();
+  if (!name || name === base.name) return { name: base.name, word: base.word, suffix: base.suffix };
+  const words = name.split(/\s+/);
+  return { name, word: words.length > 1 ? [words[0], words.slice(1).join(" ")] : [name, ""], suffix: "" };
+}
+window.brandNameParts = brandNameParts;
+
 function BrandWordmark({ brand, size = 20 }) {
   // Inline the brand tint so the wordmark stays branded even though global
   // colour tokens (--blue-*, --accent) are no longer overridden by themeVars.
@@ -11066,7 +11076,7 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
     : null;
 
   const pal = hexPal || PALETTES.find(p => p.id === palette) || PALETTES[0];
-  const liveBrand = { ...brand, name, word: name.split(" ").length > 1 ? [name.split(" ")[0], name.split(" ").slice(1).join(" ")] : [name, ""], accent: pal.accent, glow: pal.glow, realLogo: logoUrl ? false : brand.realLogo, logo_url: logoUrl || brand.logo_url };
+  const liveBrand = { ...brand, ...brandNameParts(brand, name), accent: pal.accent, glow: pal.glow, realLogo: logoUrl ? false : brand.realLogo, logo_url: logoUrl || brand.logo_url };
   const vars = themeVarsPreview(liveBrand);
 
   // Persist to the backend and apply live across every portal (ss:branding-changed
@@ -22249,7 +22259,7 @@ function App() {
     ...(ov.glow ? { glow: ov.glow } : {}),
     ...(ov.tagline ? { tagline: ov.tagline } : {}),
     ...(ov.logo_url ? { logo_url: ov.logo_url } : {}),
-    ...(ov.name ? { name: ov.name, word: ov.name.split(" ").length > 1 ? [ov.name.split(" ")[0], ov.name.split(" ").slice(1).join(" ")] : [ov.name, ""] } : {}),
+    ...(ov.name ? brandNameParts(base, ov.name) : {}),
   };
   // Full token override so the tenant's brand colour re-themes the whole portal
   // (buttons, charts, accents) — not just the brand-prefixed tokens.
