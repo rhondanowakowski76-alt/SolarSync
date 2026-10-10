@@ -2297,6 +2297,8 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     totp: (user_id, code, ticket) => call("/auth/totp", { method: "POST", body: { user_id, code, ticket } }),
     backup: (user_id, code) => call("/auth/backup", { method: "POST", body: { user_id, code } }),
     regenBackup: () => call("/auth/backup/regenerate", { method: "POST" }),
+    passkeyOptions: () => call("/auth/passkey/options", { method: "POST", body: {} }),
+    passkeyVerify: (state, response) => call("/auth/passkey/verify", { method: "POST", body: { state, response } }),
     get: (p) => call(p),
     post: (p, body) => call(p, { method: "POST", body }),
     put: (p, body) => call(p, { method: "PUT", body }),
@@ -3182,6 +3184,25 @@ function LoginScreen({ onLogin }) {
     if (next.length === 6) setTimeout(() => submitPin(next), 180);
   };
 
+  // Sign in with a passkey — no name, PIN or code: the device proves who it is.
+  const submitPasskey = async () => {
+    setBusy(true); setError("");
+    try {
+      const { options, state } = await window.ssApi.passkeyOptions();
+      const response = await window.ssPasskey.get(options);
+      const r = await window.ssApi.passkeyVerify(state, response);
+      window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
+      setTimeout(() => onLogin(r.user), 350);
+    } catch (e) {
+      const err = e && e.data && e.data.error;
+      setError(e && e.name === "NotAllowedError" ? "Passkey sign-in was cancelled."
+        : err === "unknown_passkey" ? "That passkey isn't set up for SolarSync — sign in with your code and PIN, then add it in Settings."
+        : err === "locked" ? "Too many attempts. Locked for a few minutes."
+        : err === "disabled" || err === "suspended" ? "This account can't sign in — contact your administrator."
+        : "Passkey sign-in didn't work — try again or use your code and PIN.");
+    } finally { setBusy(false); }
+  };
+
   // Sign in with a single-use recovery code when the authenticator app isn't available.
   const submitBackup = async () => {
     setBusy(true); setError("");
@@ -3337,6 +3358,9 @@ function LoginScreen({ onLogin }) {
           {error && <div style={{ color: "var(--amber)", fontSize: 12.5, textAlign: "center", marginTop: 8, fontFamily: "var(--font-head)" }}>{error}</div>}
 
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:14 }}>
+            {window.ssPasskey && window.ssPasskey.supported() && !backupMode && (
+              <button className="btn" disabled={busy} onClick={submitPasskey} data-testid="passkey-login"
+                style={{ width:"100%", justifyContent:"center" }}>Sign in with a passkey (Face ID / fingerprint)</button>)}
             <button className="login-demo-hint" onClick={() => { setBackupMode(m => !m); setError(""); setBackupCode(""); setTotp(""); }}
               style={{ width:"100%", cursor:"pointer", textAlign:"center", background:"rgba(58,125,255,0.06)", border:"1px solid rgba(58,125,255,0.16)", color:"var(--tx-dim)" }}>
               {backupMode ? <>← Use my <strong style={{ color:"var(--blue-light)" }}>authenticator app</strong> instead</> : <>No authenticator? <strong style={{ color:"var(--blue-light)" }}>Use a recovery code →</strong></>}
@@ -20628,6 +20652,7 @@ function Settings({ portal, brand, user }) {
   const canManage = (isReseller && me.app_role === "reseller") || (portal === "tenant" && me.app_role === "tenant_admin");
   const [pinOpen, setPinOpen] = useEX(false);
   const [recovOpen, setRecovOpen] = useEX(false);
+  const [pkOpen, setPkOpen] = useEX(false);
   const [invOpen, setInvOpen] = useEX(false);
   const [members, setMembers] = useEX(null);
   const ROLE_LABEL = { reseller: "Platform", tenant_admin: "Admin", staff: "Staff", contractor: "Contractor", client: "Customer" };
@@ -20731,6 +20756,8 @@ function Settings({ portal, brand, user }) {
             </div>
             <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={()=>setPinOpen(true)}><Icon d={ICONS.settings} size={15} stroke={2} /> Change PIN</button>
             <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={()=>setRecovOpen(true)}><Icon d={ICONS.compliance} size={15} stroke={2} /> Recovery codes</button>
+            {window.ssPasskey && window.ssPasskey.supported() && !(me && me.support) &&
+              <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={()=>setPkOpen(true)} data-testid="passkeys-open"><Icon d={ICONS.lock || ICONS.compliance} size={15} stroke={2} /> Passkeys (Face ID / fingerprint)</button>}
           </div>
 
           {(isReseller || portal === "tenant") && (
@@ -20758,6 +20785,7 @@ function Settings({ portal, brand, user }) {
       </div>
       {pinOpen && <ChangePinModal onClose={()=>setPinOpen(false)} />}
       {recovOpen && <RecoveryCodesModal onClose={()=>setRecovOpen(false)} />}
+      {pkOpen && <PasskeysModal onClose={()=>setPkOpen(false)} />}
       {invOpen && <InviteMemberModal portal={portal} brand={brand} onClose={()=>setInvOpen(false)} />}
     </div>
   );
@@ -20820,6 +20848,83 @@ function ChangePinModal({ onClose }) {
           <button className="btn btn-primary" disabled={busy} onClick={save}><Icon d={ICONS.check} size={15} stroke={2.4} /> {busy ? "Saving…" : "Change PIN"}</button>
         </div>
         </>}
+      </div>
+    </div>
+  );
+}
+
+/* Passkeys: sign in with Face ID, fingerprint, the device PIN or a security key. */
+window.ssPasskey = (function () {
+  const toBuf = (s) => { s = String(s).replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; const b = atob(s); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+  const toB64u = (buf) => { const u = new Uint8Array(buf); let b = ""; for (let i = 0; i < u.length; i++) b += String.fromCharCode(u[i]); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+  const supported = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+  async function create(opts) {
+    const pk = { ...opts, challenge: toBuf(opts.challenge), user: { ...opts.user, id: toBuf(opts.user.id) },
+      excludeCredentials: (opts.excludeCredentials || []).map(c => ({ ...c, id: toBuf(c.id) })) };
+    const c = await navigator.credentials.create({ publicKey: pk });
+    const r = c.response;
+    return { id: c.id, rawId: toB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {},
+      authenticatorAttachment: c.authenticatorAttachment || undefined,
+      response: { clientDataJSON: toB64u(r.clientDataJSON), attestationObject: toB64u(r.attestationObject),
+        transports: r.getTransports ? r.getTransports() : [] } };
+  }
+  async function get(opts) {
+    const pk = { ...opts, challenge: toBuf(opts.challenge), allowCredentials: (opts.allowCredentials || []).map(c => ({ ...c, id: toBuf(c.id) })) };
+    const c = await navigator.credentials.get({ publicKey: pk });
+    const r = c.response;
+    return { id: c.id, rawId: toB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {},
+      authenticatorAttachment: c.authenticatorAttachment || undefined,
+      response: { clientDataJSON: toB64u(r.clientDataJSON), authenticatorData: toB64u(r.authenticatorData),
+        signature: toB64u(r.signature), userHandle: r.userHandle ? toB64u(r.userHandle) : undefined } };
+  }
+  return { supported, create, get };
+})();
+
+function PasskeysModal({ onClose }) {
+  const api = window.ssApi;
+  const [list, setList] = useEX(null);
+  const [busy, setBusy] = useEX(false);
+  const toast = (m, k) => window.ssToast && window.ssToast(m, k);
+  const load = () => api.get("/auth/passkeys").then(setList).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const add = async () => {
+    setBusy(true);
+    try {
+      const { options, state } = await api.post("/auth/passkeys/options", {});
+      const response = await window.ssPasskey.create(options);
+      const ua = navigator.userAgent;
+      const name = /iPhone|iPad/.test(ua) ? "iPhone / iPad" : /Android/.test(ua) ? "Android phone" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows PC" : "This device";
+      await api.post("/auth/passkeys", { state, response, name });
+      toast("Passkey added — next time, tap “Sign in with a passkey”");
+      load();
+    } catch (e) {
+      const err = e && e.data && e.data.error;
+      toast(e && e.name === "NotAllowedError" ? "Passkey setup was cancelled" : err === "already_registered" ? "This device already has a passkey" : "Couldn't add the passkey — try again", "error");
+    } finally { setBusy(false); }
+  };
+  const remove = async (p) => {
+    if (!window.confirm("Remove the passkey “" + p.name + "”? You can still sign in with your PIN and authenticator code.")) return;
+    try { await api.del("/auth/passkeys/" + p.id); toast("Passkey removed"); load(); } catch (e) { toast("Couldn't remove it — try again", "error"); }
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={e=>e.stopPropagation()} data-testid="passkeys-modal">
+        <div className="card-head">
+          <div><div className="card-title">Passkeys</div><div className="card-sub">Sign in with Face ID, your fingerprint or a security key — nothing to type, and it can't be phished</div></div>
+          <button className="icon-btn" onClick={onClose} style={{ width:32,height:32 }}><Icon d="M18 6L6 18M6 6l12 12" size={16} stroke={2.2} /></button>
+        </div>
+        {!list ? <div className="card-sub">Loading…</div> : list.length === 0
+          ? <div className="card-sub" style={{ marginBottom: 12 }}>No passkeys yet. Add one on each phone or computer you use.</div>
+          : <div style={{ marginBottom: 12 }}>{list.map(p => (
+              <div key={p.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid var(--line)" }}>
+                <div><div style={{ fontWeight: 600, color: "var(--tx-hi)" }}>{p.name}</div>
+                  <div className="card-sub">Added {new Date(p.created_at).toLocaleDateString("en-AU")}{p.last_used_at ? " · last used " + new Date(p.last_used_at).toLocaleDateString("en-AU") : ""}</div></div>
+                <button className="btn" style={{ padding:"4px 10px", fontSize:12, color:"var(--amber)" }} onClick={() => remove(p)}>Remove</button>
+              </div>))}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" disabled={busy} onClick={add} data-testid="passkey-add">{busy ? "Waiting for your device…" : "Add a passkey on this device"}</button>
+        </div>
       </div>
     </div>
   );

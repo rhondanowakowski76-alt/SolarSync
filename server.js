@@ -23,6 +23,9 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
+// Browser security headers (CSP, no framing, HSTS on live…) — see security-headers.js.
+app.use(require("./security-headers").securityHeaders({ devCompile: !fs.existsSync(path.join(__dirname, "dist", "index.html")) }));
 // Measure /api traffic, response times and errors for the reseller's Platform Health screen.
 app.use(platformHealth.track);
 // The Stripe webhook needs the raw body to verify its signature, so it's skipped
@@ -216,6 +219,7 @@ app.post("/api/admin/reset-user", A.authRequired, A.requireRole("reseller", "ten
   if (!target) return res.status(404).json({ error: "not_found" });
   if (!isReseller(req) && target.tenant_id !== tenantOf(req)) return res.status(403).json({ error: "forbidden" });
   await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id]);
+  await run("delete from passkeys where user_id=$1", [user_id]);   // a reset removes every sign-in method
   await audit(req.user.sub, "admin_reset", user_id, target.tenant_id);
   ok(res, { ok: true });
 }));
@@ -1687,6 +1691,7 @@ app.get("/api/roof-image", (req, res) => {
 // ============================================================
 erp.register(app, { h, ok, tenantOf });
 myob.register(app, { h, ok, erp });
+require("./passkeys").register(app, { h, ok, loginBlocked });
 
 // ============================================================
 // Staff & contractor seat management (staff-seats.js)
