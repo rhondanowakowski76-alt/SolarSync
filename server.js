@@ -686,6 +686,30 @@ app.post("/api/bookings/:id/invoice", A.authRequired, A.requireRole("tenant_admi
   }
 }));
 
+// Job costing sheets — office only (tenant admin and staff). Keyed per tenant, so a
+// key can never reach another company's data. Costs are never sent to crew or customers.
+const COSTING_ROLES = ["tenant_admin", "staff"];
+const costKey = k => /^[\w-]{1,80}$/.test(String(k || "")) ? String(k) : null;
+app.get("/api/job-costings/:key", A.authRequired, A.requireRole(...COSTING_ROLES), h(async (req, res) => {
+  const key = costKey(req.params.key); if (!key) return res.status(400).json({ error: "bad_key" });
+  const r = await one("select job_key, lines, updated_by, updated_at from job_costings where tenant_id=$1 and job_key=$2", [tenantOf(req), key]);
+  ok(res, r || { job_key: key, lines: null });
+}));
+app.put("/api/job-costings/:key", A.authRequired, A.requireRole(...COSTING_ROLES), h(async (req, res) => {
+  const key = costKey(req.params.key); if (!key) return res.status(400).json({ error: "bad_key" });
+  const raw = (req.body && req.body.lines) || [];
+  if (!Array.isArray(raw) || raw.length > 200) return res.status(400).json({ error: "bad_lines" });
+  const num = v => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n < 1e7 ? Math.round(n * 100) / 100 : 0; };
+  const lines = raw.map(l => ({ kind: ["product", "labour", "other"].includes(l && l.kind) ? l.kind : "other",
+    product_id: l && typeof l.product_id === "string" ? l.product_id.slice(0, 80) : null,
+    d: cleanText(String((l && l.d) || ""), 300), q: num(l && l.q), cost: num(l && l.cost), u: num(l && l.u) }));
+  await run(`insert into job_costings (tenant_id, job_key, lines, updated_by, updated_at) values ($1,$2,$3,$4,now())
+    on conflict (tenant_id, job_key) do update set lines=excluded.lines, updated_by=excluded.updated_by, updated_at=now()`,
+    [tenantOf(req), key, JSON.stringify(lines), req.user.display_name || req.user.sub]);
+  await audit(req.user.sub, "save_costing", key, tenantOf(req));
+  ok(res, { job_key: key, lines });
+}));
+
 // Job notes — a running log on a job, visible to the office and crew.
 const NOTE_ROLES = ["tenant_admin", "staff", "contractor"];
 async function noteJob(req) {
