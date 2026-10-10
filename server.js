@@ -523,7 +523,7 @@ app.get("/api/stock-movements", A.authRequired, A.requireRole("tenant_admin", "s
 //   - clients create "requested" bookings from their portal
 //   - tenants/contractors see them on the calendar and confirm/schedule
 // ============================================================
-const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, updated_at, created_at";
+const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, end_time, suburb, job_id, status, notes, value, installer, source, invoice_id, updated_at, created_at";
 
 // Resolve the clients row for a logged-in client user (used to attribute + scope bookings).
 async function clientRowOf(req) {
@@ -583,19 +583,136 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
     return res.status(404).json({ error: "not_found" });
   }
-  const d = req.body || {};
+  let d = req.body || {};
+  if (req.user.app_role === "client") {
+    // A customer can move or cancel their own request, never confirm it themselves
+    // or change the job details; a moved request goes back to the business to approve.
+    const moved = (d.date != null && d.date !== cur.date) || (d.time != null && d.time !== cur.time);
+    d = { date: d.date, time: d.time, end_time: d.end_time ?? d.end, notes: d.notes,
+      status: d.status === "cancelled" ? "cancelled" : (moved ? "pending" : cur.status) };
+  }
   if (req.user.app_role !== "client" && !d.force) {
     const clashes = await fieldWork.crewClashes(cur.tenant_id, d.installer ?? cur.installer, d.date ?? cur.date);
     // Only block when this edit changes who or when; never block an unrelated status update.
     const changed = (d.installer != null && d.installer !== cur.installer) || (d.date != null && d.date !== cur.date);
     if (clashes.length && changed) return res.status(409).json({ error: "crew_unavailable", clashes });
   }
-  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, updated_at=now() where id=$12`,
+  // The customer name is free text for staff; a customer's own name stays as it is.
+  const client = req.user.app_role === "client" ? cur.client : (d.client ?? cur.client);
+  // Staff can link the invoice raised for this job — it must be this company's invoice.
+  let invoice_id = cur.invoice_id;
+  if (req.user.app_role !== "client" && d.invoice_id !== undefined) {
+    if (d.invoice_id && !(await one("select 1 from invoices where id=$1 and tenant_id=$2", [d.invoice_id, cur.tenant_id])))
+      return res.status(404).json({ error: "invoice_not_found" });
+    invoice_id = d.invoice_id || null;
+  }
+  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, client=$12, invoice_id=$13, updated_at=now() where id=$14`,
     [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
      (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,
-     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, cur.id]);
+     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, client, invoice_id, cur.id]);
   await audit(req.user.sub, "update_booking", cur.id, cur.tenant_id, { status: d.status });
   ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [cur.id]));
+}));
+
+// Invoice a service job: optional service/labour amount plus retail products from the
+// company's catalog. Built on the server so prices come from the catalog, stock is
+// checked and taken off once, the cost of goods is booked once (the sale itself is
+// booked by the invoice), and a job can only be invoiced once.
+app.post("/api/bookings/:id/invoice", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const tid = tenantOf(req);
+  const bk = await one("select * from bookings where id=$1 and tenant_id=$2", [req.params.id, tid]);
+  if (!bk) return res.status(404).json({ error: "not_found" });
+  if (bk.invoice_id) return res.status(409).json({ error: "already_invoiced", invoice_id: bk.invoice_id });
+  const d = req.body || {};
+  const service = Math.round((Number(d.service_amount) || 0) * 100) / 100;
+  if (service < 0) return res.status(400).json({ error: "bad_amount" });
+  const want = new Map();
+  for (const it of (Array.isArray(d.items) ? d.items : []).slice(0, 50)) {
+    const qty = Math.floor(Number(it && it.qty));
+    if (!it || !it.product_id || !(qty > 0) || qty > 10000) return res.status(400).json({ error: "bad_item" });
+    want.set(String(it.product_id), (want.get(String(it.product_id)) || 0) + qty);
+  }
+  const prods = [];
+  for (const [pid, qty] of want) {
+    const pr = await one("select * from products where id=$1 and tenant_id=$2 and active", [pid, tid]);
+    if (!pr) return res.status(404).json({ error: "product_not_found", product_id: pid });
+    if (pr.stock != null && pr.stock < qty) return res.status(409).json({ error: "not_enough_stock", product: pr.name, in_stock: pr.stock });
+    prods.push({ pr, qty });
+  }
+  if (!(service > 0) && !prods.length) return res.status(400).json({ error: "nothing_to_invoice" });
+  if (d.client_id && !(await one("select 1 from clients where id=$1 and tenant_id=$2", [d.client_id, tid])))
+    return res.status(404).json({ error: "client_not_found" });
+  const label = cleanText(d.description, 200) || bk.title || "Service";
+  const lines = [];
+  if (service > 0) lines.push({ d: label, q: 1, u: service, amt: service });
+  for (const { pr, qty } of prods) {
+    const u = Number(pr.price) || 0;
+    lines.push({ d: pr.name + (pr.spec ? " — " + pr.spec : ""), q: qty, u, amt: Math.round(u * qty * 100) / 100, product_id: pr.id });
+  }
+  const amount = Math.round(lines.reduce((s, l) => s + l.amt, 0) * 100) / 100;
+  if (!(amount > 0)) return res.status(400).json({ error: "nothing_to_invoice" });
+  // Claim the job first so two clicks can't invoice it (or take the stock) twice.
+  const id = "inv-" + rid().slice(0, 8);
+  const claim = await rows("update bookings set invoice_id=$1, updated_at=now() where id=$2 and invoice_id is null returning id", [id, bk.id]);
+  if (!claim.length) return res.status(409).json({ error: "already_invoiced" });
+  try {
+  const client_id = d.client_id || bk.client_id || null;
+  const client = client_id ? await one("select name from clients where id=$1", [client_id]) : null;
+  const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [tid]);
+  const number = "INV-" + (2100 + ((cnt && cnt.c) || 0));
+  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  await run(`insert into invoices (id, tenant_id, client_id, client_name, number, amount, status, description, due, quote_id, lines)
+    values ($1,$2,$3,$4,$5,$6,'due',$7,$8,null,$9)`,
+    [id, tid, client_id, client ? client.name : (bk.client || null), number, amount, label, due, JSON.stringify(lines)]);
+  let cost = 0;
+  for (const { pr, qty } of prods) {
+    if (pr.stock != null) await run("update products set stock=greatest(0, stock-$1), updated_at=now() where id=$2", [qty, pr.id]);
+    await run(`insert into stock_movements (id, tenant_id, product_id, delta, reason, buyer, total, job_id, unit_cost, created_by)
+      values ($1,$2,$3,$4,'job',$5,$6,$7,$8,$9)`,
+      ["mov-" + rid().slice(0, 8), tid, pr.id, -qty, client ? client.name : (bk.client || null),
+       Math.round((Number(pr.price) || 0) * qty * 100) / 100, bk.id, pr.cost != null ? Number(pr.cost) : null, req.user.sub]);
+    cost += qty * (Number(pr.cost) || 0);
+  }
+  await audit(req.user.sub, "invoice_job", id, tid, { booking: bk.id, products: prods.length });
+  const inv = await one("select * from invoices where id=$1", [id]);
+  try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (job invoice) failed:", e.message); }
+  if (cost > 0) { try { await erp.postStockAllocation(tid, { source_id: id, posted_by: req.user.sub, cost, memo: `Products used — ${number}` }); } catch (e) { console.error("ledger post (job stock) failed:", e.message); } }
+  myob.onInvoiceCreated(inv);
+  ok(res, inv);
+  } catch (e) {
+    // Release the claim so the job can be invoiced again (nothing was half-saved on purpose).
+    await run("update bookings set invoice_id=null where id=$1 and invoice_id=$2", [bk.id, id]).catch(() => {});
+    throw e;
+  }
+}));
+
+// Job notes — a running log on a job, visible to the office and crew.
+const NOTE_ROLES = ["tenant_admin", "staff", "contractor"];
+async function noteJob(req) {
+  const id = String(req.query.job_id || (req.body && req.body.job_id) || "");
+  return id ? await one("select id, tenant_id from bookings where id=$1 and tenant_id=$2", [id, tenantOf(req)]) : null;
+}
+app.get("/api/job-notes", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const job = await noteJob(req); if (!job) return res.status(404).json({ error: "not_found" });
+  ok(res, await rows("select id, body, author, author_id, created_at from job_notes where tenant_id=$1 and job_id=$2 order by created_at", [job.tenant_id, job.id]));
+}));
+app.post("/api/job-notes", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const job = await noteJob(req); if (!job) return res.status(404).json({ error: "not_found" });
+  const body = cleanText(req.body && req.body.body, 2000);
+  if (!body || !body.trim()) return res.status(400).json({ error: "note_required" });
+  const id = "jn-" + rid().slice(0, 10);
+  await run("insert into job_notes (id, tenant_id, job_id, body, author, author_id) values ($1,$2,$3,$4,$5,$6)",
+    [id, job.tenant_id, job.id, body.trim(), req.user.display_name || null, req.user.sub]);
+  await audit(req.user.sub, "job_note", job.id, job.tenant_id);
+  ok(res, await one("select id, body, author, author_id, created_at from job_notes where id=$1", [id]));
+}));
+app.delete("/api/job-notes/:id", A.authRequired, A.requireRole(...NOTE_ROLES), h(async (req, res) => {
+  const n = await one("select * from job_notes where id=$1 and tenant_id=$2", [req.params.id, tenantOf(req)]);
+  if (!n) return res.status(404).json({ error: "not_found" });
+  // Writers remove their own notes; the company admin can remove any.
+  if (n.author_id !== req.user.sub && req.user.app_role !== "tenant_admin") return res.status(403).json({ error: "forbidden" });
+  await run("delete from job_notes where id=$1", [n.id]);
+  ok(res, { ok: true });
 }));
 
 app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
@@ -626,6 +743,8 @@ app.get("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "c
 app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const q = await one(`select ${QUOTE_COLS} from quotes where id=$1`, [req.params.id]);
   if (!q || q.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  // Costs and margins are for the office only — crew get the quote without them.
+  if (req.user.app_role === "contractor" && Array.isArray(q.lines)) q.lines = q.lines.map(({ cost, ...l }) => l);
   ok(res, q);
 }));
 
@@ -666,6 +785,49 @@ app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "sta
   await run("delete from quotes where id=$1", [cur.id]);
   await audit(req.user.sub, "delete_quote", cur.id, cur.tenant_id);
   ok(res, { ok: true });
+}));
+
+// Quick quotes: send a quote to the customer's portal. Only the customer-safe view
+// (description, qty, price, total) ever reaches the customer — never cost or margin.
+app.post("/api/quotes/:id/send", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  if (!cur.client_id) return res.status(400).json({ error: "no_customer" });
+  if (await foreignClient(req, cur.client_id)) return res.status(404).json({ error: "client_not_found" });
+  const spec = Object.assign({}, cur.spec || {}, { shared: true, shared_at: new Date().toISOString() });
+  await run("update quotes set spec=$1, status=(CASE WHEN status='Draft' THEN 'Sent' ELSE status END), updated_at=now() where id=$2",
+    [JSON.stringify(spec), cur.id]);
+  await audit(req.user.sub, "send_quote", cur.id, cur.tenant_id);
+  ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [cur.id]));
+}));
+
+function customerQuoteView(q) {
+  const lines = (Array.isArray(q.lines) ? q.lines : []).map(l => ({
+    d: String(l.d || l.name || "").slice(0, 300), q: Number(l.q) || 0, u: Number(l.u) || 0,
+    amt: Math.round((Number(l.q) || 0) * (Number(l.u) || 0) * 100) / 100,
+  }));
+  const spec = q.spec || {};
+  return { id: q.id, number: q.number, enq: q.enq, title: String(spec.title || "").slice(0, 200), status: q.status,
+    validity: q.validity, notes: q.notes, lines, total: Number(q.total) || 0,
+    sent_at: spec.shared_at || null, created_at: q.created_at };
+}
+
+app.get("/api/client/quotes", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const c = await clientRowOf(req);
+  if (!c) return ok(res, []);
+  const r = await rows("select * from quotes where tenant_id=$1 and client_id=$2 and (spec->>'shared')='true' order by updated_at desc", [c.tenant_id, c.id]);
+  ok(res, r.map(customerQuoteView));
+}));
+
+app.post("/api/client/quotes/:id/accept", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const c = await clientRowOf(req);
+  const q = c && await one("select * from quotes where id=$1", [req.params.id]);
+  if (!q || q.tenant_id !== c.tenant_id || q.client_id !== c.id || !(q.spec && q.spec.shared)) return res.status(404).json({ error: "not_found" });
+  if (q.status !== "Sent") return res.status(409).json({ error: "not_open" });
+  const spec = Object.assign({}, q.spec, { accepted_at: new Date().toISOString(), accepted_by: c.name });
+  await run("update quotes set status='Accepted', spec=$1, updated_at=now() where id=$2", [JSON.stringify(spec), q.id]);
+  await audit(req.user.sub, "client_accept_quote", q.id, q.tenant_id);
+  ok(res, customerQuoteView(await one("select * from quotes where id=$1", [q.id])));
 }));
 
 // Allocate a quote's stock against the customer order (ERP draw-down, MYOB/Xero style).

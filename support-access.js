@@ -12,8 +12,9 @@
 //     contact details, addresses, notes, signatures and rooftop images are replaced
 //     before the response leaves the server. Messages, documents, photos, payroll,
 //     accounting and the like are not reachable at all.
-//   - Writes are limited to configuration (branding, letterhead, products/stock),
-//     so masked placeholder values can never be saved back over real records.
+//   - Writes are limited to configuration (branding, letterhead, products/stock)
+//     and adding new schedule events, so masked placeholder values can never be
+//     saved back over real records.
 //   - Requesting, entering, every change, exiting, revoking and closing are audited.
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
@@ -38,6 +39,9 @@ const WRITE_OK = [
   ["POST", /^\/api\/products$/], ["PUT", /^\/api\/products\/[\w-]+$/],
   ["DELETE", /^\/api\/products\/[\w-]+$/], ["POST", /^\/api\/products\/[\w-]+\/stock$/],
   ["POST", /^\/api\/support-requests\/exit$/],
+  // New schedule events only: they hold just what support types in. Existing events
+  // are read masked, so editing or deleting them stays blocked.
+  ["POST", /^\/api\/bookings$/],
 ];
 // Responses that are the tenant's own business setup — shown as-is.
 const NO_MASK = ["/api/branding", "/api/letterhead", "/api/products", "/api/my-features", "/api/entitlements/", "/api/report-templates", "/api/health", "/api/support-requests/current"];

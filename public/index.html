@@ -3769,6 +3769,7 @@ const PORTAL_NAV = {
     { id: "schedule", label: "Schedule", icon: "cal" },
     { id: "journey", label: "Client Journey", icon: "route" },
     { id: "quotes", label: "Quotes & PV-AI", icon: "sparkle" },
+    { id: "quickquotes", label: "Quick Quotes", icon: "dollar" },
     { id: "stc", label: "STC Calculator", icon: "sun" },
     { id: "catalog", label: "Product Catalog", icon: "panel" },
     { id: "inventory", label: "Inventory", icon: "battery" },
@@ -3807,6 +3808,7 @@ const PORTAL_NAV = {
     { id: "documents", label: "Documents", icon: "docs" },
     { id: "messages", label: "Messages", icon: "mail", badge: "1" },
     { id: "billing", label: "Billing", icon: "dollar" },
+    { id: "cquotes", label: "Quotes", icon: "docs" },
     { id: "book", label: "Book a Service", icon: "clean" },
   ],
 };
@@ -6248,6 +6250,7 @@ const ENQ_TYPES_QS = {
   replacement: { label: "Panel Replacement",   icon: "panel" },
   commercial:  { label: "Commercial",          icon: "building" },
   monitoring:  { label: "Monitoring & Maint.", icon: "pulse" },
+  quick:       { label: "Quick Quote",         icon: "docs" },
 };
 
 /* ── Quotes persistence ───────────────────────────────────────────
@@ -11448,10 +11451,16 @@ const { useState: useCalS, useEffect: useCalE } = React;
 const CAL_TYPES = [
   { id: "install",         label: "Installation",  color: "#0F1E3A"   },
   { id: "clean",           label: "Panel Clean",   color: "#3A7DFF"   },
-  { id: "inspection",      label: "Inspection",    color: "#1E5BD6"   },
-  { id: "test",            label: "Testing",       color: "#FFC93C"   },
+  { id: "inspection",      label: "Site Inspection", color: "#1E5BD6" },
+  { id: "test",            label: "Operational Testing", color: "#FFC93C" },
+  { id: "fault_finding",   label: "Fault Finding", color: "#E5484D"   },
+  { id: "inverter_check",  label: "Inverter Check", color: "#F08C2E"  },
+  { id: "warranty_claim",  label: "Inverter Warranty Claim", color: "#B8558C" },
+  { id: "callout",         label: "Site Call-out", color: "#6B4FD8"   },
+  { id: "pigeon_proofing", label: "Pigeon Proofing", color: "#3F8F4F" },
   { id: "handover",        label: "Handover",      color: "#0F1E3A"   },
   { id: "service_request", label: "Svc Request",   color: "#3A7DFF"   },
+  { id: "misc",            label: "Miscellaneous", color: "#2E9E8F"   },
   { id: "other",           label: "Other",         color: "#5A6573"   },
   { id: "unavailable",     label: "Not available", color: "#9AA3AF"   },
   { id: "personal",        label: "Personal",      color: "#7C5CFF"   },
@@ -11507,11 +11516,20 @@ function _evtFromBooking(b) {
   return { id: b.id, title: b.title || b.client || calLabel(b.type), type: b.type || "other",
     date: b.date, time: b.time || "", end: b.end_time || "", client: b.client || "",
     suburb: b.suburb || "", installer: b.installer || "", status: b.status || "confirmed",
-    notes: b.notes || "", jobId: b.job_id || "", value: b.value || 0, src: b.source || "tenant" };
+    notes: b.notes || "", jobId: b.job_id || "", value: b.value || 0, src: b.source || "tenant",
+    clientId: b.client_id || "", invoiceId: b.invoice_id || "" };
+}
+// In a support session existing events are shown with details hidden, so only new
+// events can be added; say so plainly instead of blaming the connection.
+function calSupportMsg(e) {
+  const code = String((e && (e.message || (e.data && e.data.error))) || e || "");
+  return /support_read_only|support_restricted/.test(code)
+    ? "Support session: you can add new events, but existing ones can't be changed here — their details are hidden for privacy"
+    : "";
 }
 function _bookingFromEvt(e) {
   return { type: e.type, title: e.title, date: e.date, time: e.time, end_time: e.end,
-    suburb: e.suburb, job_id: e.jobId, status: e.status, notes: e.notes,
+    client: e.client, suburb: e.suburb, job_id: e.jobId, status: e.status, notes: e.notes,
     value: e.value || 0, installer: e.installer, source: e.src || "tenant" };
 }
 
@@ -11552,7 +11570,7 @@ function useCalData(tenantId) {
       window.ssToast && window.ssToast(
         code.includes("no_client_record")
           ? "Your login isn't linked to a customer profile yet — ask your provider to finish setting up your portal"
-          : "Could not save — check your connection and try again", "error");
+          : calSupportMsg(code) || "Could not save — check your connection and try again", "error");
       return null;   // signal failure so the caller does NOT show a false success
     }
   };
@@ -11563,13 +11581,13 @@ function useCalData(tenantId) {
       if (!saved) return null;
       setEvts(p => p.map(e => e.id === ev.id ? _evtFromBooking(saved) : e));
       return ev;
-    } catch (e) { window.ssToast && window.ssToast("Could not update event", "error"); return null; }
+    } catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) || "Could not update event", "error"); return null; }
   };
   const deleteEvt = async id => {
     setEvts(p => p.filter(e => e.id !== id));            // optimistic
     if (!authed) return;
     try { await api.del("/bookings/" + id); }
-    catch (e) { window.ssToast && window.ssToast("Could not delete event", "error"); }
+    catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) || "Could not delete event", "error"); }
   };
   return { evts, addEvt, updateEvt, deleteEvt };
 }
@@ -11624,7 +11642,7 @@ function useAvailability() {
   const add = async d => {
     if (!authed) { const local = { ...d, id: "av" + Date.now(), person: d.person || calMe().display_name, kind: d.kind || "unavailable", date_to: d.date_to || d.date_from }; setList(p => [...p, local]); return local; }
     try { const r = await api.post("/availability", d); setList(p => [...p, r]); return r; }
-    catch (e) { window.ssToast && window.ssToast("Could not save — check the dates and try again", "error"); return null; }
+    catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) ? "Support session: staff availability is private and can't be changed here" : "Could not save — check the dates and try again", "error"); return null; }
   };
   const remove = async id => {
     if (authed) {
@@ -11854,6 +11872,192 @@ function CalDaySidebar({ dateStr, evts, onEvt, onAdd, onClose }) {
 
 /* ── Event modal (view / edit / approve) ────────────────────────── */
 
+// Service-job extras on a saved booking: site photos (camera or upload) and an
+// invoice raised from the job. Photos: office + contractors. Invoices: office only.
+function JobExtras({ ev }) {
+  const api = window.ssApi;
+  const me = calMe();
+  const signedIn = !!(api && api.getToken && api.getToken());
+  const canInvoice = ["tenant_admin", "staff"].includes(me.app_role) && !me.support;
+  const [photos, setPhotos] = useCalS(null);
+  const [busy, setBusy] = useCalS(false);
+  const [big, setBig] = useCalS(null);
+  const [inv, setInv] = useCalS(null);          // linked invoice
+  const [invForm, setInvForm] = useCalS(null);  // { amount, description, client_id }
+  const [clients, setClients] = useCalS([]);
+  const [products, setProducts] = useCalS([]);
+  const [notes, setNotes] = useCalS(null);
+  const [noteText, setNoteText] = useCalS("");
+  const [invoiceId, setInvoiceId] = useCalS(ev.invoiceId || "");
+  const fileRef = React.useRef(null);
+  const label = (CAL_TYPES.find(t => t.id === ev.type) || {}).label || "Service";
+
+  React.useEffect(() => {
+    if (!signedIn || !ev.id) return;
+    api.get("/job-photos?job_id=" + encodeURIComponent(ev.id)).then(r => setPhotos(Array.isArray(r) ? r : [])).catch(() => setPhotos([]));
+  }, [ev.id]);
+  React.useEffect(() => {
+    if (!signedIn || !ev.id || me.app_role === "client" || me.support) return;
+    api.get("/job-notes?job_id=" + encodeURIComponent(ev.id)).then(r => setNotes(Array.isArray(r) ? r : [])).catch(() => setNotes([]));
+  }, [ev.id]);
+  React.useEffect(() => {
+    if (!signedIn || !canInvoice || !invoiceId) { setInv(null); return; }
+    api.get("/invoices").then(r => setInv((Array.isArray(r) ? r : []).find(x => x.id === invoiceId) || null)).catch(() => {});
+  }, [invoiceId]);
+  if (!signedIn || me.app_role === "client") return null;
+
+  const addPhotos = async files => {
+    setBusy(true);
+    let n = 0;
+    for (const f of Array.from(files || [])) {
+      try {
+        const data = await boldResize(f, 1600);
+        const key = ev.id + "-" + Date.now() + "-" + n;
+        await api.post("/job-photos", { photo_key: key, job_id: ev.id, kind: label + " photo", data });
+        setPhotos(p => [...(p || []), { photo_key: key, data, kind: label + " photo", uploaded_by: me.display_name, created_at: new Date().toISOString() }]);
+        n++;
+      } catch (e) {
+        window.ssToast && window.ssToast(String(e && e.message).includes("support") ? "Photos can't be added in a support session" : "Could not add that photo — use a JPG or PNG under 6 MB", "error");
+      }
+    }
+    setBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
+    if (n) window.ssToast && window.ssToast(n === 1 ? "Photo added to this job" : n + " photos added to this job");
+  };
+  const delPhoto = async key => {
+    try { await api.del("/job-photos/" + encodeURIComponent(key)); setPhotos(p => p.filter(x => x.photo_key !== key)); setBig(null); }
+    catch (e) { window.ssToast && window.ssToast("Could not remove the photo", "error"); }
+  };
+
+  const openInvoice = async () => {
+    let list = clients;
+    if (!list.length) { try { list = await api.get("/clients"); setClients(Array.isArray(list) ? list : []); } catch (e) { list = []; } }
+    const match = ev.clientId || ((Array.isArray(list) ? list : []).find(c => (c.name || "").toLowerCase() === (ev.client || "").toLowerCase()) || {}).id || "";
+    if (!products.length) { try { const pr = await api.get("/products"); setProducts((Array.isArray(pr) ? pr : []).filter(x => x.active !== false)); } catch (e) {} }
+    setInvForm({ amount: ev.value ? String(ev.value) : "", description: label + (ev.date ? " — " + ev.date : "") + (ev.suburb ? ", " + ev.suburb : ""), client_id: match, items: [], pick: "", qty: "1" });
+  };
+  const addItem = () => {
+    const pr = products.find(x => x.id === invForm.pick); const qty = Math.floor(Number(invForm.qty));
+    if (!pr || !(qty > 0)) { window.ssToast && window.ssToast("Pick a product and a quantity", "error"); return; }
+    if (pr.stock != null && qty > pr.stock) { window.ssToast && window.ssToast("Only " + pr.stock + " of " + pr.name + " in stock", "error"); return; }
+    setInvForm({ ...invForm, items: [...invForm.items, { product_id: pr.id, name: pr.name, qty, price: Number(pr.price) || 0 }], pick: "", qty: "1" });
+  };
+  const invTotal = invForm ? (Number(invForm.amount) || 0) + invForm.items.reduce((t, i) => t + i.qty * i.price, 0) : 0;
+  const saveInvoice = async () => {
+    if (!(invTotal > 0)) { window.ssToast && window.ssToast("Add a service amount or at least one product", "error"); return; }
+    setBusy(true);
+    try {
+      const created = await api.post("/bookings/" + ev.id + "/invoice", { service_amount: Number(invForm.amount) || 0, description: invForm.description,
+        client_id: invForm.client_id || undefined, items: invForm.items.map(i => ({ product_id: i.product_id, qty: i.qty })) });
+      setInvoiceId(created.id); setInv(created); setInvForm(null);
+      window.ssToast && window.ssToast("Invoice " + created.number + " created" + (invForm.client_id ? " — the customer can see it in their portal" : ""));
+    } catch (e) {
+      const c = String(e && e.message);
+      window.ssToast && window.ssToast(c === "not_enough_stock" ? "Not enough stock of " + ((e.data && e.data.product) || "a product") + " (" + ((e.data && e.data.in_stock) ?? 0) + " left)"
+        : c === "already_invoiced" ? "This job already has an invoice" : "Could not create the invoice — check the amounts and try again", "error");
+    }
+    setBusy(false);
+  };
+  const addNote = async () => {
+    const body = noteText.trim(); if (!body) return;
+    try { const n = await api.post("/job-notes", { job_id: ev.id, body }); setNotes(p => [...(p || []), n]); setNoteText(""); }
+    catch (e) { window.ssToast && window.ssToast("Could not save the note", "error"); }
+  };
+  const delNote = async id => {
+    try { await api.del("/job-notes/" + id); setNotes(p => p.filter(n => n.id !== id)); }
+    catch (e) { window.ssToast && window.ssToast("Only the writer or an admin can remove a note", "error"); }
+  };
+
+  const box = { padding: "12px 18px", borderTop: "1px solid var(--line)" };
+  return (
+    <>
+      <div style={box} data-testid="job-photos">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span className="field-label" style={{ flex: 1 }}>Job photos {photos && photos.length ? "(" + photos.length + ")" : ""}</span>
+          <button type="button" className="btn" style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={busy} onClick={() => fileRef.current && fileRef.current.click()}>
+            <Icon d={ICONS.upload} size={13} stroke={2} /> {busy ? "Adding…" : "Add photos"}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} data-testid="job-photo-input" onChange={e => addPhotos(e.target.files)} />
+        </div>
+        {photos === null ? <div className="card-sub">Loading…</div>
+          : photos.length === 0 ? <div className="card-sub" style={{ fontSize: 12 }}>No photos yet — take them on site or upload from the office.</div>
+          : <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+              {photos.map(ph => <img key={ph.photo_key} src={ph.data} alt={ph.kind || "Job photo"} onClick={() => setBig(ph)}
+                style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, cursor: "pointer", border: "1px solid var(--line)" }} />)}
+            </div>}
+        {big && <div className="drawer-scrim" style={{ zIndex: 400 }} onClick={() => setBig(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ position: "fixed", inset: "5vh 5vw", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, zIndex: 401 }}>
+            <img src={big.data} alt={big.kind || "Job photo"} style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 10 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <span className="card-sub" style={{ color: "#fff" }}>{[big.uploaded_by, big.created_at && new Date(big.created_at).toLocaleString()].filter(Boolean).join(" · ")}</span>
+              {me.app_role !== "client" && <button className="btn" onClick={() => delPhoto(big.photo_key)}>Remove</button>}
+              <button className="btn btn-primary" onClick={() => setBig(null)}>Close</button>
+            </div>
+          </div>
+        </div>}
+      </div>
+      {notes !== null && <div style={box} data-testid="job-notes">
+        <span className="field-label">Job notes</span>
+        {notes.length === 0 && <div className="card-sub" style={{ fontSize: 12, marginTop: 4 }}>No notes yet.</div>}
+        {notes.map(n => (
+          <div key={n.id} style={{ marginTop: 6, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.03)", border: "1px solid var(--line)" }}>
+            <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--tx)" }}>{n.body}</div>
+            <div className="card-sub" style={{ fontSize: 11, marginTop: 3, display: "flex", gap: 8 }}>
+              <span style={{ flex: 1 }}>{[n.author, n.created_at && new Date(n.created_at).toLocaleString()].filter(Boolean).join(" · ")}</span>
+              {(n.author_id === me.sub || me.app_role === "tenant_admin") && <a style={{ cursor: "pointer" }} onClick={() => delNote(n.id)}>Remove</a>}
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <textarea className="field-input" rows={2} placeholder="Add a note for this job…" value={noteText} onChange={e => setNoteText(e.target.value)} style={{ flex: 1, resize: "vertical" }} />
+          <button type="button" className="btn btn-primary" style={{ alignSelf: "flex-end", padding: "6px 12px", fontSize: 12.5 }} disabled={!noteText.trim()} onClick={addNote}>Add note</button>
+        </div>
+      </div>}
+      {canInvoice && <div style={box} data-testid="job-invoice">
+        <span className="field-label">Invoice</span>
+        {invoiceId
+          ? <div className="card-sub" style={{ marginTop: 6 }}>{inv ? <><b>{inv.number}</b> · ${Number(inv.amount).toFixed(2)} · {inv.status}</> : "Invoice linked"}</div>
+          : invForm
+            ? <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8, marginTop: 6 }}>
+                <label className="field"><span className="field-label">Service / labour amount (inc GST)</span>
+                  <input className="field-input" type="number" min="0" step="0.01" value={invForm.amount} onChange={e => setInvForm({ ...invForm, amount: e.target.value })} /></label>
+                <label className="field"><span className="field-label">Description</span>
+                  <input className="field-input" value={invForm.description} onChange={e => setInvForm({ ...invForm, description: e.target.value })} /></label>
+                <div className="field"><span className="field-label">Products sold on this job</span>
+                  {invForm.items.map((it, k) => (
+                    <div key={k} className="card-sub" style={{ display: "flex", gap: 8, fontSize: 12.5, marginTop: 3 }}>
+                      <span style={{ flex: 1 }}>{it.qty} × {it.name}</span><span>${(it.qty * it.price).toFixed(2)}</span>
+                      <a style={{ cursor: "pointer" }} onClick={() => setInvForm({ ...invForm, items: invForm.items.filter((_, x) => x !== k) })}>×</a>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+                    <select className="field-input" value={invForm.pick} onChange={e => setInvForm({ ...invForm, pick: e.target.value })} style={{ flex: 1, minWidth: 0 }} data-testid="job-product-pick">
+                      <option value="">{products.length ? "Choose a product…" : "No products in your catalog yet"}</option>
+                      {products.map(pr => <option key={pr.id} value={pr.id} disabled={pr.stock != null && pr.stock <= 0}>
+                        {pr.name} — ${Number(pr.price || 0).toFixed(2)}{pr.stock != null ? " (" + pr.stock + " in stock)" : ""}</option>)}
+                    </select>
+                    <input className="field-input" type="number" min="1" value={invForm.qty} onChange={e => setInvForm({ ...invForm, qty: e.target.value })} style={{ width: 64 }} aria-label="Quantity" />
+                    <button type="button" className="btn" style={{ padding: "5px 10px", fontSize: 12.5 }} onClick={addItem}>Add</button>
+                  </div>
+                </div>
+                <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>Total ${invTotal.toFixed(2)} inc GST</div>
+                <label className="field"><span className="field-label">Customer</span>
+                  <select className="field-input" style={{ width: "100%", minWidth: 0 }} value={invForm.client_id} onChange={e => setInvForm({ ...invForm, client_id: e.target.value })}>
+                    <option value="">Not linked{ev.client ? " — " + ev.client : ""}</option>
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select></label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="btn btn-primary" disabled={busy} onClick={saveInvoice}>{busy ? "Creating…" : "Create invoice"}</button>
+                  <button type="button" className="btn" onClick={() => setInvForm(null)}>Cancel</button>
+                </div>
+              </div>
+            : <div style={{ marginTop: 6 }}><button type="button" className="btn" style={{ padding: "5px 11px", fontSize: 12.5 }} onClick={openInvoice}>
+                <Icon d={ICONS.plus} size={13} stroke={2.2} /> Create invoice for this job</button></div>}
+      </div>}
+    </>
+  );
+}
+
 function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRequest, avail }) {
   const isNew = !ev.id || ev.id.startsWith("new");
   const [form, setForm] = useCalS(ev);
@@ -11864,7 +12068,7 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
   return (
     <div className="drawer-scrim" onClick={onClose}>
       <div onClick={e => e.stopPropagation()}
-        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(500px,94vw)", background: "var(--glass)", border: "1px solid var(--line-strong)", borderRadius: 18, overflow: "hidden", zIndex: 300 }}>
+        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(500px,94vw)", background: "var(--glass)", border: "1px solid var(--line-strong)", borderRadius: 18, maxHeight: "92vh", overflowY: "auto", overflowX: "hidden", zIndex: 300 }}>
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", gap: 10, alignItems: "center" }}>
           <span style={{ width: 10, height: 10, borderRadius: 3, background: calColor(form.type), flexShrink: 0 }} />
           <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>
@@ -11963,6 +12167,8 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
           )}
         </div>
 
+        {!isNew && !isRequest && <JobExtras ev={form} />}
+
         <div style={{ padding: "11px 18px", borderTop: "1px solid var(--line)", display: "flex", gap: 8, flexWrap: "wrap" }}>
           {canEdit && !isRequest && (
             <>
@@ -11977,7 +12183,7 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
           {isRequest && (
             <>
               <button className="btn btn-primary" style={{ background: "var(--success)", borderColor: "var(--success)" }}
-                onClick={() => onSave({ ...form, status: "confirmed", type: form.type === "service_request" ? "clean" : form.type })}>
+                onClick={() => onSave({ ...form, status: "confirmed", type: form.type === "service_request" ? "other" : form.type })}>
                 <Icon d={ICONS.check} size={14} stroke={2.4} /> Approve
               </button>
               <button className="btn" style={{ color: "var(--amber)", borderColor: "rgba(58,125,255,0.3)" }} onClick={() => onDelete(form.id)}>Decline</button>
@@ -12548,8 +12754,14 @@ window.ResellerCalendar = ResellerCalendar;
 
 const CLIENT_SVC = [
   { id: "clean",      label: "Panel Clean",       desc: "Remove dust, grime and bird waste" },
-  { id: "inspection", label: "System Inspection",  desc: "Full electrical and mounting check" },
-  { id: "test",       label: "Performance Test",   desc: "Inverter output and monitoring check" },
+  { id: "inspection", label: "Site Inspection",    desc: "Full electrical and mounting check" },
+  { id: "test",       label: "Operational Testing", desc: "System output and monitoring check" },
+  { id: "fault_finding",   label: "Fault Finding",   desc: "Track down why the system isn't working" },
+  { id: "inverter_check",  label: "Inverter Check",  desc: "Error codes, output and connections checked" },
+  { id: "warranty_claim",  label: "Inverter Warranty Claim", desc: "We test the inverter and lodge the claim" },
+  { id: "callout",         label: "Site Call-out",   desc: "A technician visits your site (call-out fee applies)" },
+  { id: "pigeon_proofing", label: "Pigeon Proofing", desc: "Mesh to keep birds out from under the panels" },
+  { id: "misc",       label: "Miscellaneous",      desc: "Any other job — tell us what you need" },
   { id: "other",      label: "Other / General",    desc: "Any other service or enquiry" },
 ];
 
@@ -12566,7 +12778,9 @@ function ClientCalendar({ tenantId, clientName }) {
   const [busy, setBusy] = useCalS(false);
 
   const myClient = clientName || "Adam Smith";
-  const myEvts = evts.filter(e => e.client === myClient);
+  // Signed in, the server already returns only this customer's bookings.
+  const signedIn = !!(window.ssApi && window.ssApi.getToken && window.ssApi.getToken());
+  const myEvts = signedIn ? evts : evts.filter(e => e.client === myClient);
 
   const prevM = () => { if (m === 0) { setY(y - 1); setM(11); } else setM(m - 1); };
   const nextM = () => { if (m === 11) { setY(y + 1); setM(0); } else setM(m + 1); };
@@ -12580,7 +12794,8 @@ function ClientCalendar({ tenantId, clientName }) {
     // so a silent failure (e.g. account not linked) can never look like success.
     const created = await addEvt({
       title: myClient + " — " + (isQuote ? "Quote: " : "") + svcLabel,
-      type: "service_request", date: isQuote ? "" : reqDate, time: isQuote ? "" : reqTime,
+      type: !isQuote && ["clean", "inspection", "test", "fault_finding", "inverter_check", "warranty_claim", "callout", "pigeon_proofing", "misc"].includes(svcType) ? svcType : "service_request",
+      date: isQuote ? "" : reqDate, time: isQuote ? "" : reqTime,
       end: isQuote ? "" : reqTime, client: myClient, suburb: "", installer: "",
       status: "pending", notes: (isQuote ? "Quote request. " : "") + (reqNotes || ""), jobId: "", src: "client",
     });
@@ -12726,6 +12941,240 @@ function ClientCalendar({ tenantId, clientName }) {
   );
 }
 window.ClientCalendar = ClientCalendar;
+
+/* ══════════════════════════════════════════════════════════════════
+   Quick Quotes — single-item / service quotes for a customer
+   (inverter replacement, pigeon proofing, battery, retail products…).
+   Office-only costing sheet and a no-price packing slip for site.
+   ══════════════════════════════════════════════════════════════════ */
+const QQ_TYPES = ["Inverter Replacement", "Pigeon Proofing", "Panel Cleaning", "Battery", "Retail Products",
+  "Fault Finding", "Inverter Check", "Inverter Warranty Claim", "Site Call-out", "Site Inspection",
+  "Operational Testing", "Miscellaneous"];
+const qqMoney = n => "$" + (Number(n) || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const qqEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function qqTotals(lines) {
+  const sell = lines.reduce((a, l) => a + (Number(l.q) || 0) * (Number(l.u) || 0), 0);
+  const cost = lines.reduce((a, l) => a + (Number(l.q) || 0) * (Number(l.cost) || 0), 0);
+  const ex = sell / 1.1, margin = ex - cost;
+  return { sell, ex, gst: sell - ex, cost, margin, pct: ex > 0 ? (margin / ex) * 100 : 0 };
+}
+function qqPrint(title, body) {
+  const w = window.open("", "_blank");
+  if (!w) { window.ssToast && window.ssToast("Allow pop-ups to print", "error"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${qqEsc(title)}</title><style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:32px;font-size:13px}
+    h1{font-size:22px;margin:0 0 4px} .sub{color:#555;margin-bottom:18px}
+    table{width:100%;border-collapse:collapse;margin:12px 0} th,td{border:1px solid #bbb;padding:7px 8px;text-align:left;vertical-align:top}
+    th{background:#f1f3f6} td.n,th.n{text-align:right} .tot td{font-weight:bold} .box{width:16px;height:16px;border:1.5px solid #333;display:inline-block}
+    .meta td{border:none;padding:3px 8px 3px 0} .sig{margin-top:28px;display:flex;gap:40px} .sig div{flex:1;border-top:1px solid #333;padding-top:4px}
+    .warn{font-size:11px;color:#a00;margin-top:6px}</style></head><body>${body}</body></html>`);
+  w.document.close(); setTimeout(() => { w.focus(); w.print(); }, 400);
+}
+
+function QuickQuotes() {
+  const api = window.ssApi;
+  const me = calMe();
+  const isSupport = !!me.support || !['tenant_admin', 'staff'].includes(me.app_role);
+  const [list, setList] = React.useState([]);
+  const [clients, setClients] = React.useState([]);
+  const [products, setProducts] = React.useState([]);
+  const [q, setQ] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [pick, setPick] = React.useState("");
+  const [pickQty, setPickQty] = React.useState(1);
+
+  const load = async () => {
+    try { const r = await api.get("/quotes"); setList((Array.isArray(r) ? r : []).filter(x => x.enq === "quick")); } catch (e) {}
+  };
+  React.useEffect(() => {
+    load();
+    api.get("/clients").then(r => setClients(Array.isArray(r) ? r : [])).catch(() => {});
+    api.get("/products").then(r => setProducts((Array.isArray(r) ? r : []).filter(p => p.active !== false))).catch(() => {});
+  }, []);
+
+  const blank = () => setQ({ id: null, client_id: "", title: QQ_TYPES[0], notes: "", validity: "30", status: "Draft", lines: [], spec: {} });
+  const open = async (id) => {
+    try {
+      const r = await api.get("/quotes/" + id);
+      setQ({ id: r.id, number: r.number, client_id: r.client_id || "", title: (r.spec && r.spec.title) || "", notes: r.notes || "",
+        validity: r.validity || "30", status: r.status, lines: Array.isArray(r.lines) ? r.lines : [], spec: r.spec || {} });
+    } catch (e) { window.ssToast && window.ssToast("Could not open quote", "error"); }
+  };
+  const setF = patch => setQ(x => ({ ...x, ...patch }));
+  const setLine = (i, patch) => setQ(x => ({ ...x, lines: x.lines.map((l, j) => j === i ? { ...l, ...patch } : l) }));
+  const delLine = i => setQ(x => ({ ...x, lines: x.lines.filter((_, j) => j !== i) }));
+  const addProduct = () => {
+    const p = products.find(p => p.id === pick); if (!p) return;
+    setQ(x => ({ ...x, lines: [...x.lines, { kind: "product", product_id: p.id, d: p.name + (p.spec ? " — " + p.spec : ""), q: Math.max(1, Number(pickQty) || 1), u: Number(p.price) || 0, cost: Number(p.cost) || 0 }] }));
+    setPick(""); setPickQty(1);
+  };
+  const addService = () => setQ(x => ({ ...x, lines: [...x.lines, { kind: "service", d: x.title || "Service", q: 1, u: 0, cost: 0 }] }));
+
+  const client = q && clients.find(c => c.id === q.client_id);
+  const T = q ? qqTotals(q.lines) : null;
+
+  const save = async () => {
+    if (!q.lines.length) { window.ssToast && window.ssToast("Add at least one item"); return null; }
+    setBusy(true);
+    const payload = { client_id: q.client_id || null, enq: "quick", status: q.status || "Draft", validity: q.validity, notes: q.notes,
+      customer: client ? { name: client.name, address: client.site_address || "" } : {},
+      lines: q.lines.map(l => ({ kind: l.kind, product_id: l.product_id || null, d: String(l.d || "").slice(0, 300), q: Number(l.q) || 0, u: Number(l.u) || 0, cost: Number(l.cost) || 0 })),
+      spec: { ...(q.spec || {}), quick: true, title: q.title }, total: Math.round(T.sell * 100) / 100 };
+    try {
+      const r = q.id ? await api.put("/quotes/" + q.id, payload) : await api.post("/quotes", payload);
+      setQ(x => ({ ...x, id: r.id, number: r.number, status: r.status, spec: r.spec || x.spec }));
+      window.ssToast && window.ssToast("Quote " + r.number + " saved"); load(); return r;
+    } catch (e) { window.ssToast && window.ssToast("Could not save quote", "error"); return null; }
+    finally { setBusy(false); }
+  };
+  const send = async () => {
+    if (!q.client_id) { window.ssToast && window.ssToast("Choose the customer first"); return; }
+    const r = await save(); if (!r) return;
+    try { const s = await api.post("/quotes/" + r.id + "/send", {}); setQ(x => ({ ...x, status: s.status, spec: s.spec }));
+      window.ssToast && window.ssToast("Sent to " + (client ? client.name : "customer") + "'s portal"); load();
+    } catch (e) { window.ssToast && window.ssToast("Could not send quote", "error"); }
+  };
+
+  const head = () => `<table class="meta"><tr><td><b>Quote</b></td><td>${qqEsc(q.number || "(unsaved)")}</td><td><b>Type</b></td><td>${qqEsc(q.title)}</td></tr>
+    <tr><td><b>Customer</b></td><td>${qqEsc(client ? client.name : "—")}</td><td><b>Site</b></td><td>${qqEsc(client ? client.site_address || "" : "")}</td></tr>
+    <tr><td><b>Date</b></td><td>${qqEsc(new Date().toLocaleDateString("en-AU"))}</td><td></td><td></td></tr></table>`;
+  const printCosting = () => {
+    const rows = q.lines.map(l => { const sell = l.q * l.u, ex = sell / 1.1, cost = l.q * (l.cost || 0), m = ex - cost;
+      return `<tr><td>${qqEsc(l.d)}</td><td class="n">${qqEsc(l.q)}</td><td class="n">${qqMoney(l.cost)}</td><td class="n">${qqMoney(cost)}</td><td class="n">${qqMoney(l.u)}</td><td class="n">${qqMoney(sell)}</td><td class="n">${qqMoney(m)}</td><td class="n">${ex > 0 ? (m / ex * 100).toFixed(1) + "%" : "—"}</td></tr>`; }).join("");
+    qqPrint("Costing sheet " + (q.number || ""), `<h1>Costing Sheet</h1><div class="sub">INTERNAL — office use only. Do not give to the customer or send to site.</div>${head()}
+      <table><tr><th>Item</th><th class="n">Qty</th><th class="n">Unit cost (ex GST)</th><th class="n">Line cost</th><th class="n">Unit sell (inc GST)</th><th class="n">Line sell</th><th class="n">Margin (ex GST)</th><th class="n">Margin %</th></tr>${rows}
+      <tr class="tot"><td>Totals</td><td></td><td></td><td class="n">${qqMoney(T.cost)}</td><td></td><td class="n">${qqMoney(T.sell)}</td><td class="n">${qqMoney(T.margin)}</td><td class="n">${T.pct.toFixed(1)}%</td></tr></table>
+      <table class="meta"><tr><td>Sell ex GST</td><td>${qqMoney(T.ex)}</td></tr><tr><td>GST</td><td>${qqMoney(T.gst)}</td></tr><tr><td>Sell inc GST</td><td>${qqMoney(T.sell)}</td></tr></table>
+      <div class="warn">Sell prices are treated as GST-inclusive and costs as GST-exclusive.</div>`);
+  };
+  const printPacking = () => {
+    const prod = q.lines.filter(l => l.kind !== "service"), svc = q.lines.filter(l => l.kind === "service");
+    qqPrint("Packing slip " + (q.number || ""), `<h1>Packing Slip</h1><div class="sub">For site — no prices.</div>${head()}
+      <h3>Items to pack</h3><table><tr><th>Packed</th><th class="n">Qty</th><th>Item</th><th>Checked on site</th></tr>
+      ${prod.length ? prod.map(l => `<tr><td><span class="box"></span></td><td class="n">${qqEsc(l.q)}</td><td>${qqEsc(l.d)}</td><td><span class="box"></span></td></tr>`).join("") : `<tr><td colspan="4">No products on this job</td></tr>`}</table>
+      ${svc.length ? `<h3>Work to do</h3><table><tr><th>Done</th><th>Task</th></tr>${svc.map(l => `<tr><td><span class="box"></span></td><td>${qqEsc(l.d)}</td></tr>`).join("")}</table>` : ""}
+      ${q.notes ? `<h3>Notes</h3><p>${qqEsc(q.notes)}</p>` : ""}
+      <div class="sig"><div>Packed by / date</div><div>Received on site by / date</div></div>`);
+  };
+
+  const inp = { className: "field-input", style: { width: "100%" } };
+  if (!q) return (
+    <div className="fade-in">
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div className="card-title">Quick Quotes</div>
+          <div className="card-sub">Single jobs or items — inverter replacement, pigeon proofing, panel cleaning, retail products or a battery. Separate to proposals.</div>
+        </div>
+        {!isSupport && <button className="btn btn-primary" data-testid="qq-new" onClick={blank}><Icon d={ICONS.plus} size={14} stroke={2.2} /> New quick quote</button>}
+      </div>
+      <div className="panel panel-pad chrome-top" data-testid="qq-list">
+        {list.length === 0 ? <div className="card-sub">No quick quotes yet.</div> : list.map(x => (
+          <button key={x.id} onClick={() => open(x.id)} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: "10px 4px", background: "none", border: "none", borderBottom: "1px solid var(--line)", cursor: "pointer", textAlign: "left", color: "inherit" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-hi)" }}>{x.number} · {(x.customer && x.customer.name) || "No customer"}</div>
+              <div className="card-sub">{x.status}</div>
+            </div>
+            <div style={{ fontFamily: "var(--font-head)", fontWeight: 700 }}>{qqMoney(x.total)}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fade-in" data-testid="qq-editor">
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn" onClick={() => { setQ(null); load(); }}>← All quick quotes</button>
+        <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>{q.number || "New quick quote"} <span className="card-sub" style={{ fontWeight: 400 }}>· {q.status}{q.spec && q.spec.shared ? " · in customer portal" : ""}</span></div>
+        <button className="btn" data-testid="qq-costing" onClick={printCosting} disabled={!q.lines.length}>Costing sheet</button>
+        <button className="btn" data-testid="qq-packing" onClick={printPacking} disabled={!q.lines.length}>Packing slip</button>
+        {!isSupport && <button className="btn" disabled={busy} onClick={save}>Save</button>}
+        {!isSupport && <button className="btn btn-primary" data-testid="qq-send" disabled={busy} onClick={send}>Send to customer</button>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 16 }}>
+        <div className="panel panel-pad chrome-top" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <label className="field"><span className="field-label">Customer</span>
+            <select {...inp} data-testid="qq-client" value={q.client_id} onChange={e => setF({ client_id: e.target.value })}>
+              <option value="">— choose —</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></label>
+          <label className="field"><span className="field-label">Quote for</span>
+            <select {...inp} data-testid="qq-type" value={q.title} onChange={e => setF({ title: e.target.value })}>
+              {QQ_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select></label>
+          <label className="field"><span className="field-label">Valid for (days)</span>
+            <input {...inp} type="number" min="1" value={q.validity} onChange={e => setF({ validity: e.target.value })} /></label>
+          <label className="field"><span className="field-label">Notes for the customer</span>
+            <textarea {...inp} rows={3} value={q.notes} onChange={e => setF({ notes: e.target.value })} /></label>
+        </div>
+        <div className="panel panel-pad chrome-top" style={{ minWidth: 0 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Items</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            <select className="field-input" data-testid="qq-product" style={{ flex: "1 1 180px", minWidth: 0 }} value={pick} onChange={e => setPick(e.target.value)}>
+              <option value="">Add a product from your catalog…</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name} — {qqMoney(p.price)}{p.stock != null ? " · " + p.stock + " in stock" : ""}</option>)}
+            </select>
+            <input className="field-input" type="number" min="1" style={{ width: 70 }} value={pickQty} onChange={e => setPickQty(e.target.value)} />
+            <button className="btn" data-testid="qq-add-product" onClick={addProduct} disabled={!pick}>Add</button>
+            <button className="btn" data-testid="qq-add-service" onClick={addService}>+ Service / labour line</button>
+          </div>
+          {q.lines.map((l, i) => (
+            <div key={i} data-testid="qq-line" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 60px 90px 90px 28px", gap: 6, alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+              <input className="field-input" value={l.d} onChange={e => setLine(i, { d: e.target.value })} title={l.kind === "service" ? "Service / labour" : "Product"} />
+              <input className="field-input" type="number" min="0" value={l.q} onChange={e => setLine(i, { q: e.target.value })} title="Qty" />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.u} onChange={e => setLine(i, { u: e.target.value })} title="Sell price each (inc GST)" />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.cost} onChange={e => setLine(i, { cost: e.target.value })} title="Your cost each (ex GST) — never shown to the customer" />
+              <button className="btn" style={{ padding: "4px 6px" }} onClick={() => delLine(i)} aria-label="Remove">×</button>
+            </div>
+          ))}
+          {q.lines.length > 0 && <div className="card-sub" style={{ fontSize: 11, marginTop: 4 }}>Columns: description · qty · sell each (inc GST) · your cost each (ex GST, office only)</div>}
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 4, fontSize: 13 }} data-testid="qq-totals">
+            <span>Customer total (inc GST)</span><b>{qqMoney(T.sell)}</b>
+            <span className="card-sub">Your cost (ex GST)</span><span>{qqMoney(T.cost)}</span>
+            <span className="card-sub">Margin (ex GST)</span><span style={{ color: T.margin < 0 ? "var(--danger, #E5484D)" : "inherit" }}>{qqMoney(T.margin)} · {T.pct.toFixed(1)}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+window.QuickQuotes = QuickQuotes;
+
+/* Customer portal — quotes the provider has sent. No costs ever reach here. */
+function ClientQuotes() {
+  const api = window.ssApi;
+  const [list, setList] = React.useState(null);
+  const load = () => api.get("/client/quotes").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const accept = async (id) => {
+    try { await api.post("/client/quotes/" + id + "/accept", {}); window.ssToast && window.ssToast("Quote accepted — your provider will be in touch to book it in"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Could not accept this quote", "error"); }
+  };
+  if (!list) return <div className="card-sub">Loading…</div>;
+  return (
+    <div className="fade-in" data-testid="client-quotes">
+      {list.length === 0 && <div className="panel panel-pad chrome-top"><div className="card-title">Quotes</div><div className="card-sub">No quotes yet. Use Book a Service → Request a Quote to ask for one.</div></div>}
+      {list.map(q => (
+        <div key={q.id} className="panel panel-pad chrome-top" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className="card-title">{q.title || "Quote"} · {q.number}</div>
+              <div className="card-sub">{q.status === "Accepted" ? "Accepted — thank you" : "Valid for " + q.validity + " days"}</div>
+            </div>
+            {q.status === "Sent" && <button className="btn btn-primary" onClick={() => accept(q.id)}>Accept quote</button>}
+          </div>
+          {q.lines.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{l.d}</span><span>{l.q} × {qqMoney(l.u)}</span><b style={{ minWidth: 90, textAlign: "right" }}>{qqMoney(l.amt)}</b>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 10, fontFamily: "var(--font-head)", fontWeight: 700 }}>Total (inc GST) <span>{qqMoney(q.total)}</span></div>
+          {q.notes && <div className="card-sub" style={{ marginTop: 8 }}>{q.notes}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+window.ClientQuotes = ClientQuotes;
 
 </script>
 
@@ -15859,7 +16308,7 @@ const $ = n => "$" + Math.round(n).toLocaleString();
 const TODAY_JOBS = [
   { id: "SS-1042", client: "Smith Residence", suburb: "Toowoomba QLD", time: "8:30 AM", type: "Solar Install", system: "6.6 kW · 16 panels", status: "In progress", eta: "Finishing today" },
   { id: "SS-1044", client: "Nguyen Residence", suburb: "Logan QLD", time: "1:00 PM", type: "Panel Cleaning", system: "22 panels", status: "Scheduled", eta: "2h site time" },
-  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", time: "3:30 PM", type: "Operational Test", system: "24 kW system", status: "Scheduled", eta: "1h on-site" },
+  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", time: "3:30 PM", type: "Operational Testing", system: "24 kW system", status: "Scheduled", eta: "1h on-site" },
 ];
 
 function ContractorToday({ user }) {
@@ -17961,8 +18410,13 @@ function ClientBook() {
   const [quoteInverter, setQuoteInverter] = useCL(CLIENT.inverter);
   const TYPES = [
     { id: "clean",      label: "Panel Cleaning",     price: "$220",     desc: "Soft-wash clean of all 16 panels · ~2 hrs on-site",      icon: "clean" },
-    { id: "test",       label: "Performance Test",   price: "$180",     desc: "Full string test, inverter check, output report",         icon: "pulse" },
-    { id: "inspection", label: "Health Inspection",  price: "Included", desc: "Annual visual & electrical safety inspection",            icon: "eye" },
+    { id: "test",       label: "Operational Testing", price: "$180",    desc: "Full string test, inverter check, output report",         icon: "pulse" },
+    { id: "inspection", label: "Site Inspection",    price: "Included", desc: "Annual visual & electrical safety inspection",            icon: "eye" },
+    { id: "fault_finding",   label: "Fault Finding",   price: "Quote", desc: "Track down why the system isn't working",                icon: "alert" },
+    { id: "inverter_check",  label: "Inverter Check",  price: "Quote", desc: "Error codes, output and connections checked",            icon: "bolt" },
+    { id: "warranty_claim",  label: "Inverter Warranty Claim", price: "Quote", desc: "We test the inverter and lodge the claim",       icon: "compliance" },
+    { id: "callout",         label: "Site Call-out",   price: "Call-out fee", desc: "A technician visits your site",                    icon: "pin" },
+    { id: "pigeon_proofing", label: "Pigeon Proofing", price: "Quote", desc: "Mesh to keep birds out from under the panels",          icon: "leaf" },
     { id: "battery",    label: "Add a Battery",      price: "Quote",    desc: "Grid-connect, off-grid, or AC-coupled storage",          icon: "battery" },
     { id: "ev",         label: "EV Charger",         price: "Quote",    desc: "Smart solar EV charger — Zappi, Tesla or Wallbox",       icon: "zap" },
     { id: "hotwater",   label: "Hot Water Diverter", price: "From $390",desc: "Divert excess solar to your hot water system",          icon: "sun" },
@@ -17975,7 +18429,7 @@ function ClientBook() {
     const meta = TYPES.find(t => t.id === type) || {};
     const isQuote = kind === "quote" || kind === "review";
     // Quote-style enquiries (battery/EV/etc.) show as a generic request; datable services carry their real type.
-    const bookingType = ["clean", "test", "inspection"].includes(type) ? type : "service_request";
+    const bookingType = ["clean", "inspection", "test", "fault_finding", "inverter_check", "warranty_claim", "callout", "pigeon_proofing"].includes(type) ? type : "service_request";
     const dateStr = "2026-07-" + String(date).padStart(2, "0");
     const noteBits = [];
     if (isQuote) {
@@ -19860,13 +20314,13 @@ const $$ = n => "$" + Math.round(n).toLocaleString();
 const CLEAN_JOBS_INIT = [
   { id: "SS-1044", client: "Nguyen Residence", suburb: "Logan QLD", address: "14 Solar St, Logan QLD 4114", phone: "0412 345 678", email: "nguyen@email.com", date: "Tue 25 May", type: "Panel Clean", count: "22 panels", system: "6.6 kW · Jinko 300W × 22", crew: "Mia Tran", status: "scheduled", value: 480, notes: "", result: "" },
   { id: "SS-1051", client: "Brookman Home", suburb: "Cleveland QLD", address: "7 Harbour Rd, Cleveland QLD 4163", phone: "0423 456 789", email: "brookman@email.com", date: "Wed 26 May", type: "Panel Clean", count: "16 panels", system: "5 kW · Trina 310W × 16", crew: "Joel Ruiz", status: "scheduled", value: 360, notes: "", result: "" },
-  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", address: "23 Trade Dr, Acacia Ridge QLD 4110", phone: "07 3344 5678", email: "admin@healywarehouse.com.au", date: "Thu 28 May", type: "Operational Test", count: "24 kW system", system: "24 kW · Sungrow SH25T", crew: "Dan Webb", status: "scheduled", value: 650, notes: "Access via rear gate — call ahead", result: "" },
+  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", address: "23 Trade Dr, Acacia Ridge QLD 4110", phone: "07 3344 5678", email: "admin@healywarehouse.com.au", date: "Thu 28 May", type: "Operational Testing", count: "24 kW system", system: "24 kW · Sungrow SH25T", crew: "Dan Webb", status: "scheduled", value: 650, notes: "Access via rear gate — call ahead", result: "" },
   { id: "SS-1030", client: "Riverside Cafe", suburb: "Brisbane QLD", address: "1 River Esplanade, Brisbane QLD 4000", phone: "07 3210 9876", email: "manager@riversidecafe.com.au", date: "Fri 29 May", type: "Panel Clean + Test", count: "22 panels", system: "8.8 kW · REC Alpha 400W × 22", crew: "Mia Tran", status: "scheduled", value: 720, notes: "", result: "" },
   { id: "SS-1024", client: "Marlow Cottage", suburb: "Redlands QLD", address: "3 Bayside Cres, Redlands QLD 4165", phone: "0434 567 890", email: "marlow@email.com", date: "Mon 19 May", type: "Annual Service", count: "12 panels", system: "5 kW · Jinko 415W × 12", crew: "Joel Ruiz", status: "done", value: 280, notes: "All panels cleaned, inverter checked", result: "pass" },
   { id: "SS-1020", client: "Patel Townhouse", suburb: "Ipswich QLD", address: "88 Queen St, Ipswich QLD 4305", phone: "0445 678 901", email: "patel@email.com", date: "Fri 16 May", type: "Panel Clean", count: "10 panels", system: "3.3 kW · Trina 330W × 10", crew: "Mia Tran", status: "done", value: 220, notes: "", result: "pass" },
 ];
 const CLEAN_CREW = ["Dan Webb", "Kira Park", "Mia Tran", "Joel Ruiz", "Unassigned"];
-const CLEAN_TYPES = ["Panel Clean", "Operational Test", "Panel Clean + Test", "Annual Service", "Inspection", "Fault Diagnosis"];
+const CLEAN_TYPES = ["Panel Clean", "Operational Testing", "Panel Clean + Test", "Annual Service", "Site Inspection", "Fault Finding", "Inverter Check", "Inverter Warranty Claim", "Site Call-out", "Pigeon Proofing", "Miscellaneous"];
 const CLEAN_RESULTS = ["pass", "fail", "partial"];
 
 function CleanJobModal({ job, onSave, onClose }) {
@@ -21953,6 +22407,7 @@ const TITLES = {
     schedule:     ["Schedule", "Jobs, installs and appointments calendar"],
     journey:      ["Client Journey", "Each customer from enquiry to handover"],
     quotes:       ["Quotes & PV-AI", "Build quotes · design the array · send to client"],
+    quickquotes:  ["Quick Quotes", "Single jobs & items · costing sheet · packing slip"],
     stc:          ["STC Calculator", "Small-scale technology certificates for solar & batteries"],
     catalog:      ["Product Catalog", "Your priced products & services"],
     inventory:    ["Inventory", "Stock levels & over-the-counter sales"],
@@ -21991,6 +22446,7 @@ const TITLES = {
     documents:  ["Documents", "Quotes, certificates, warranties"],
     messages:   ["Messages", "Chat with your crew"],
     billing:    ["Billing", "Invoices & payments"],
+    cquotes:    ["Quotes", "Quotes from your provider"],
     book:       ["Book a Service", "Request an appointment — confirmed by your provider"],
     settings:   ["Settings", "Account"],
   },
@@ -22047,6 +22503,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "schedule":      return <TenantCalendar key={tenant} tenantId={tenant} />;
       case "journey":       return <ClientJourney />;
       case "quotes":        return <QuoteSystem />;
+      case "quickquotes":   return <QuickQuotes />;
       case "stc":           return <StcCalculator />;
       case "catalog":       return <TenantCatalog />;
       case "inventory":     return <TenantInventory />;
@@ -22093,6 +22550,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "documents": return <ClientDocs />;
       case "messages":  return <ClientMessages />;
       case "billing":   return <ClientBilling />;
+      case "cquotes":   return <ClientQuotes />;
       case "book":      return <ClientCalendar key={tenant} tenantId={tenant} clientName={user.name} />;
       case "settings":  return <Settings portal={portal} brand={brand} user={user} />;
       default:          return <Placeholder id={screen} portal={portal} />;
