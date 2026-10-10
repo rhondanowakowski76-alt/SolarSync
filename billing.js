@@ -225,6 +225,7 @@ async function handleEvent(event) {
     const sub = await stripe().subscriptions.retrieve(o.subscription, { expand: ["items.data.price"] });
     await syncSubscription(sub);
     const tid = sub.metadata && sub.metadata.tenant_id;
+    if (tid && PLANS[sub.metadata.plan]) await run("update tenants set plan=$1 where id=$2", [sub.metadata.plan, tid]);
     if (tid && sub.metadata.founder === "1")
       await run(`update tenants set founder=true, founder_until=now() + interval '${FOUNDER_MONTHS} months' where id=$1`, [tid]);
     await audit(null, "subscription_started", sub.id, tid, { founder: sub.metadata.founder === "1" });
@@ -266,7 +267,14 @@ function register(app, { h, ok }) {
     const t = await tenantRow(req);
     if (liveSub(t)) return res.status(409).json({ error: "already_subscribed" });
     if (compActive(t)) return res.status(409).json({ error: "complimentary" });
-    const plan = PLANS[t.plan] ? t.plan : "Growth";
+    // The plan chosen on the Subscription screen; it only takes effect once Stripe
+    // confirms the subscription (webhook below), so it can't be unlocked for free.
+    const want = String((req.body && req.body.plan) || "");
+    const plan = PLANS[want] ? want : (PLANS[t.plan] ? t.plan : "Growth");
+    if (PLANS[plan].seats != null) {
+      const u = await seatUsage(t.id);
+      if (u.used > PLANS[plan].seats + u.extra) return res.status(409).json({ error: "too_many_people", used: u.used, limit: PLANS[plan].seats + u.extra });
+    }
     const interval = INTERVALS.includes(req.body && req.body.interval) ? req.body.interval : "month";
     let customer = t.stripe_customer_id;
     if (!customer) {
@@ -277,12 +285,12 @@ function register(app, { h, ok }) {
     const line_items = [{ price: await planPrice(plan, interval), quantity: 1, tax_rates: tax }];
     // Carry over seats/add-ons already in use (e.g. switched on before billing started).
     if (t.extra_seats > 0) line_items.push({ price: await seatPrice(interval), quantity: t.extra_seats, tax_rates: tax });
-    const founder = !t.founder && t.plan !== "Templates" && (await foundersTaken()) < FOUNDER_SLOTS;
+    const founder = !t.founder && plan !== "Templates" && (await foundersTaken()) < FOUNDER_SLOTS;
     const session = await stripe().checkout.sessions.create({
       mode: "subscription", customer, line_items,
       payment_method_collection: "always",
       ...(founder ? { discounts: [{ coupon: await founderCoupon() }] } : {}),
-      subscription_data: { trial_period_days: TRIAL_DAYS, metadata: { tenant_id: t.id, founder: founder ? "1" : "0" } },
+      subscription_data: { trial_period_days: TRIAL_DAYS, metadata: { tenant_id: t.id, founder: founder ? "1" : "0", plan } },
       metadata: { tenant_id: t.id },
       success_url: baseUrl(req) + "/app?billing=done",
       cancel_url: baseUrl(req) + "/app?billing=cancelled",
@@ -347,6 +355,11 @@ function register(app, { h, ok }) {
     if (!need(res)) return;
     const plan = String((req.body && req.body.plan) || "");
     const t = await tenantRow(req);
+    // Without a paying subscription the plan is chosen at checkout instead — otherwise
+    // anyone could move themselves onto a bigger plan for nothing. Complimentary plans
+    // are set by SolarSync.
+    if (compActive(t)) return res.status(409).json({ error: "complimentary" });
+    if (!liveSub(t)) return res.status(409).json({ error: "no_subscription" });
     const fail = await changePlan(t, plan, req.user.sub);
     if (fail) return res.status(fail.status).json(fail.body);
     ok(res, { ok: true, seats: await seatUsage(t.id) });
