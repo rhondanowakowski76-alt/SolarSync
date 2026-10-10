@@ -11097,21 +11097,28 @@ function MyColoursRow({ selected, onPick, mine }) {
   );
 }
 const GRID_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, "A100", "A200", "A400", "A700"];
+// Bright accent rows (A100–A700) first, then the 50–900 shades.
+const GRID_ORDER = [10, 11, 12, 13, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 function ColourGrid({ selected, onPick, open = true }) {
   const sel = String(selected || "").toUpperCase();
   return (
     <details open={open} style={{ marginBottom: 14 }} data-testid="colour-grid">
       <summary style={{ ...groupLabel, cursor: "pointer" }}>Full colour range</summary>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLOUR_GRID.length}, 1fr)`, gridAutoFlow: "column", gridTemplateRows: "repeat(14, 14px)", gap: 2, marginTop: 6 }}>
-        {COLOUR_GRID.flatMap(col => GRID_SHADES.map((shade, i) => {
-          const h = col.colours[i];
-          if (!h) return <span key={col.name + i} />;
-          const label = col.name + " " + shade + " · " + h;
-          return <button type="button" key={h + i} title={label} aria-label={label} onClick={() => onPick(h)}
-            style={{ padding: 0, minWidth: 0, height: 14, borderRadius: 2, background: h, cursor: "pointer", border: "none", outline: sel === h ? "2px solid #fff" : "none", outlineOffset: 1 }} />;
-        }))}
-      </div>
-      <div className="card-sub" style={{ fontSize: 11, marginTop: 6 }}>Tap any colour to use it. Bottom four rows are the bright accent shades.</div>
+      {[["Bright", GRID_ORDER.slice(0, 4)], ["All shades", GRID_ORDER.slice(4)]].map(([title, rows]) => (
+        <div key={title} style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10, color: "var(--tx-faint)", fontFamily: "var(--font-head)", marginBottom: 4 }}>{title}</div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLOUR_GRID.length}, 1fr)`, gridAutoFlow: "column", gridTemplateRows: `repeat(${rows.length}, 20px)`, gap: 3 }}>
+            {COLOUR_GRID.flatMap(col => rows.map(i => {
+              const h = col.colours[i];
+              if (!h) return <span key={col.name + i} />;
+              const label = col.name + " " + GRID_SHADES[i] + " · " + h;
+              return <button type="button" key={h + i} title={label} aria-label={label} onClick={() => onPick(h)}
+                style={{ padding: 0, minWidth: 0, height: 20, borderRadius: 3, background: h, cursor: "pointer", border: "none", outline: sel === h ? "2px solid #fff" : "none", outlineOffset: 1 }} />;
+            }))}
+          </div>
+        </div>
+      ))}
+      <div className="card-sub" style={{ fontSize: 11, marginTop: 6 }}>Tap any colour to use it. Hover to see its code.</div>
     </details>
   );
 }
