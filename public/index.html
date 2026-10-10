@@ -6279,7 +6279,12 @@ function useQuotes() {
         : await api.post("/quotes", payload);
       await refresh();
       return saved;
-    } catch (e) { window.ssToast && window.ssToast("Could not save quote — check your connection", "error"); return null; }
+    } catch (e) {
+      // Support view can't save a company's quotes (their customers stay private) — say so plainly.
+      const sup = e && (e.message === "support_read_only" || e.message === "support_restricted");
+      window.ssToast && window.ssToast(sup ? "Quotes can't be saved in support view — the company's customers stay private. To test saving and proposals, use Tester Access (Helios Solar sample company)." : "Could not save quote — check your connection", "error");
+      return null;
+    }
   };
   const loadQuote = async (id) => {
     if (!authed) return null;
