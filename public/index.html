@@ -6552,17 +6552,17 @@ const BOLD_CSS = `
 .bp-pg .logo .badge img{display:block;max-height:64px;max-width:200px;object-fit:contain}
 .bp-pg .logo .ini{width:64px;height:64px;border-radius:12px;background:var(--b1);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Red Hat Display',Arial,sans-serif;font-weight:900;font-size:26px}
 .bp-pg .logo .txt{font-size:19px;line-height:1.15;font-weight:500;color:var(--logoInk);max-width:260px}
-.bp-pg .logo.on .txt{color:#fff}
+.bp-pg .logo.on .txt{color:var(--on,#fff)}
 .bp-pg .pgno{position:absolute;right:28px;bottom:18px;font-size:12px;font-weight:600;color:#fff;background:var(--b3);border-radius:12px;padding:2px 10px;z-index:9}
 .bp-pg .card{position:absolute;display:flex;align-items:center}
 .bp-pg .card .thumb{width:130px;height:146px;border-radius:8px;background-color:var(--b2);background-size:cover;background-position:center;flex:none;position:relative;z-index:2;box-shadow:0 6px 14px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center}
 .bp-pg .card .thumb.soft{background:var(--soft)}
-.bp-pg .card .panel{background:var(--card);color:#fff;min-height:118px;border-radius:0 10px 10px 0;margin-left:-6px;padding:14px 26px 14px 46px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.bp-pg .card .panel{background:var(--card);color:var(--on,#fff);min-height:118px;border-radius:0 10px 10px 0;margin-left:-6px;padding:14px 26px 14px 46px;flex:1;display:flex;flex-direction:column;justify-content:center}
 .bp-pg .card .panel b{font-weight:400;font-size:25px;line-height:1.15}
 .bp-pg .card .panel p{font-size:14.5px;line-height:1.3;opacity:.92;margin-top:4px}
 .bp-pg .copy h4{font-weight:500;font-size:26px;margin-bottom:4px;color:var(--ink)}
 .bp-pg .copy p{font-size:16px;line-height:1.4;padding-left:26px;color:var(--ink);opacity:.92;margin-bottom:20px}
-.bp-pg .stat{background:var(--card);color:#fff;border-radius:10px;padding:18px 24px}
+.bp-pg .stat{background:var(--card);color:var(--on,#fff);border-radius:10px;padding:18px 24px}
 .bp-pg .stat b{display:block;font-family:'Red Hat Display',Arial,sans-serif;font-weight:900;font-size:42px;line-height:1}
 .bp-pg .stat span{font-size:15px;opacity:.9}
 .bp-pg table{border-collapse:collapse;width:100%}
@@ -6600,7 +6600,9 @@ function boldMix(a, b, t) {
 }
 function boldPalette(look, base) {
   if (look === "dark") return { "--bg": "#06162e", "--ink": "#ffffff", "--muted": "#9aa8c0", "--b1": "#0f4f9a", "--b2": "#1d6fd1", "--b3": "#0a3770", "--card": "#0e2a52", "--logoInk": "#ffffff", "--soft": "#0c2346" };
-  if (look === "brand" && /^#[0-9a-f]{6}$/i.test(base || "")) return { "--bg": "#ffffff", "--ink": "#141414", "--muted": "#6b7280", "--b1": boldMix(base, "#ffffff", 0.08), "--b2": boldMix(base, "#ffffff", 0.32), "--b3": boldMix(base, "#000000", 0.06), "--card": base, "--logoInk": boldMix(base, "#000000", 0.45), "--soft": boldMix(base, "#ffffff", 0.9) };
+  // Brand: the company colour as an accent, balanced with silver and charcoal
+  // grey so a strong colour (orange, red) doesn't take over the page.
+  if (look === "brand" && /^#[0-9a-f]{6}$/i.test(base || "")) return { "--bg": "#ffffff", "--ink": "#141414", "--muted": "#6b7280", "--b1": base, "--b2": "#c5cbd3", "--b3": "#3d4550", "--card": "#e4e8ed", "--logoInk": boldMix(base, "#000000", 0.45), "--soft": "#eef0f3", "--hero": "#dde2e8", "--heroAcc": base, "--wk": boldMix(base, "#000000", 0.3), "--bar": "#dde2e8", "--on": "#111111" };
   return { "--bg": "#ffffff", "--ink": "#0b0b0b", "--muted": "#6b7280", "--b1": "#003a78", "--b2": "#0052a0", "--b3": "#00295a", "--card": "#00336d", "--logoInk": "#0a2f66", "--soft": "#eef3fa" };
 }
 
@@ -6710,7 +6712,7 @@ function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locke
         {T("cover.tagline", d.tagline || "Designed to maximise your savings and long-term performance", { style: { position: "absolute", left: 80, top: 170, width: 360, fontSize: 16, lineHeight: 1.35, color: "var(--muted)" } })}
         {T("cover.title", "Your solar\nsolution", { className: "h", style: { position: "absolute", left: 80, top: 290, width: 800, fontSize: 92 } })}
         <div style={{ position: "absolute", left: 86, top: 510, fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: ".55em", color: "var(--ink)" }}>PROPOSAL</div>
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 120, background: "var(--b3)", color: "#fff", display: "flex", gap: 90, padding: "28px 80px", zIndex: 3 }}>
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 120, background: "var(--bar, var(--b3))", color: "var(--on, #fff)", display: "flex", gap: 90, padding: "28px 80px", zIndex: 3 }}>
           {[["Prepared for:", d.client], ["Date:", d.date], ["Proposal:", d.quoteNo]].map(([l, v]) => (
             <div key={l}><span style={{ display: "block", fontSize: 16, opacity: .85, fontWeight: 300 }}>{l}</span><b style={{ fontWeight: 400, fontSize: 23 }}>{v}</b></div>
           ))}
@@ -6820,13 +6822,13 @@ function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locke
       const war = (tpl.warranties && tpl.warranties.length) ? tpl.warranties : [{ label: "Panels", value: "25 yrs" }, { label: "Inverter", value: "10 yrs" }, { label: "Battery", value: "10 yrs" }, { label: "Workmanship", value: "10 yrs" }];
       return (
         <Pg k="invest">
-          <div className="slab s1" style={{ left: 0, top: 0, width: 520, height: 720, clipPath: "polygon(0 0,100% 0,82% 100%,0 100%)" }} />
-          <div className="slab s3" style={{ left: 0, top: 520, width: 300, height: 200, clipPath: "polygon(0 30%,100% 100%,0 100%)" }} />
+          <div className="slab" style={{ left: 0, top: 0, width: 520, height: 720, background: "var(--hero, var(--b1))", clipPath: "polygon(0 0,100% 0,82% 100%,0 100%)" }} />
+          <div className="slab" style={{ left: 0, top: 520, width: 300, height: 200, background: "var(--heroAcc, var(--b3))", clipPath: "polygon(0 30%,100% 100%,0 100%)" }} />
           <Logo x={80} y={60} on />
-          <div style={{ position: "absolute", left: 80, top: 210, width: 340, color: "#fff", zIndex: 3 }}>
+          <div style={{ position: "absolute", left: 80, top: 210, width: 340, color: "var(--on, #fff)", zIndex: 3 }}>
             <div style={{ fontSize: 17, opacity: .85 }}>Your investment (inc. GST)</div>
             <div style={{ fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 900, fontSize: 78, lineHeight: 1 }}>{money(d.total)}</div>
-            <table style={{ marginTop: 30, color: "#fff" }}><tbody>
+            <table style={{ marginTop: 30, color: "var(--on, #fff)" }}><tbody>
               {d.rows.map(([l, v]) => <tr key={l}><td>{l}</td><td className="r">{v}</td></tr>)}
             </tbody></table>
           </div>
@@ -6859,7 +6861,7 @@ function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locke
         <div style={{ position: "absolute", left: 80, top: 290, width: 480 }}>
           {[["Week 1", "Design approval & grid application", "We finalise your design and apply to your network."], ["Week 2", "Equipment delivered", "Panels, inverter and battery arrive, checked and ready."], ["Week 3", "Installation day", "Our accredited team, usually done in one day."], ["Week 3", "Testing & handover", "Meter change, app set-up and your handover pack."]].map(([w, t, dd], i) => (
             <div key={i} style={{ display: "flex", gap: 16, marginBottom: 16 }}>
-              {T(`timeline.${i + 1}w`, w, { style: { flex: "none", width: 76, fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 900, fontSize: 15, color: "var(--b2)", paddingTop: 5, textTransform: "uppercase" } })}
+              {T(`timeline.${i + 1}w`, w, { style: { flex: "none", width: 76, fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 900, fontSize: 15, color: "var(--wk, var(--b2))", paddingTop: 5, textTransform: "uppercase" } })}
               <div>{T(`timeline.${i + 1}t`, t, { style: { fontSize: 20, fontWeight: 500 } })}{T(`timeline.${i + 1}d`, dd, { style: { fontSize: 14.5, color: "var(--muted)" } })}</div>
             </div>
           ))}
@@ -6876,7 +6878,7 @@ function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locke
         <div style={{ position: "absolute", left: 80, top: 260, width: 520, display: "grid", gap: 18 }}>
           {[["medal", "Clean Energy Council accredited", "Every design and install meets Australian standards."], ["star", "Tier 1 components", "Premium panels, inverters and batteries from established manufacturers."], ["shield", "Workmanship warranty", "On top of manufacturer warranties, with local service when you need it."], ["tools", "Local installers", "Add your number of installs, years in business and review rating."]].map(([ic, t, dd], i) => (
             <div key={i} style={{ display: "flex", gap: 16 }}>
-              <div style={{ flex: "none", width: 52, height: 52, borderRadius: 10, background: "var(--card)", display: "flex", alignItems: "center", justifyContent: "center" }}><BpIcon k={ic} size={28} color="#fff" /></div>
+              <div style={{ flex: "none", width: 52, height: 52, borderRadius: 10, background: "var(--card)", display: "flex", alignItems: "center", justifyContent: "center" }}><BpIcon k={ic} size={28} color="var(--on, #fff)" /></div>
               <div>{T(`whyus.${i + 1}t`, t, { style: { fontSize: 19, fontWeight: 500 } })}{T(`whyus.${i + 1}d`, dd, { style: { fontSize: 14.5, color: "var(--muted)" } })}</div>
             </div>
           ))}
@@ -6924,10 +6926,10 @@ function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locke
           ))}
         </div>
         <Ph slot="sky" style={{ left: 705, top: 300, width: 575, height: 375, clipPath: "polygon(0 0,100% 0,100% 100%,22% 100%)" }} />
-        <div className="slab s3" style={{ left: 0, top: 655, width: 1110, height: 110 }} />
+        <div className="slab" style={{ left: 0, top: 655, width: 1110, height: 110, background: "var(--bar, var(--b3))" }} />
         <div className="slab s2" style={{ left: 1085, top: 48, width: 200, height: 672, clipPath: "polygon(28% 0,100% 0,96% 100%,0 100%)", zIndex: 3 }} />
         <div className="slab s1" style={{ left: 1150, top: 250, width: 130, height: 470, zIndex: 2 }} />
-        <div style={{ position: "absolute", left: 84, top: 676, color: "#fff", fontSize: 13, opacity: .9, zIndex: 4 }}>{[d.legal, d.abn && "ABN " + d.abn, d.licence && "Licence " + d.licence].filter(Boolean).join(" · ")}</div>
+        <div style={{ position: "absolute", left: 84, top: 676, color: "var(--on, #fff)", fontSize: 13, opacity: .9, zIndex: 4 }}>{[d.legal, d.abn && "ABN " + d.abn, d.licence && "Licence " + d.licence].filter(Boolean).join(" · ")}</div>
       </Pg>
     ),
   };
