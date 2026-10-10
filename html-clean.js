@@ -42,11 +42,12 @@ function cleanHtml(html) {
   return sanitizeHtml(String(html), OPTS);
 }
 
-// Plain-text field (letterhead name, address…): stored as plain text (tags and
-// control characters removed, length-capped); it is HTML-escaped wherever it's shown.
+// Plain-text field (letterhead name, address…): stored as plain text (angle brackets
+// and control characters removed, length-capped); it is HTML-escaped wherever it's shown.
 function cleanText(v, max = 300) {
   if (v == null) return null;
-  return String(v).replace(/<[^>]*>/g, "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").slice(0, max);
+  // Angle brackets are dropped outright (no tag-matching regex to get around).
+  return String(v).replace(/[<>]/g, "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").slice(0, max);
 }
 
 // Logo / image URL: an inline raster image or an https URL only.
