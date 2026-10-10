@@ -583,17 +583,26 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
     return res.status(404).json({ error: "not_found" });
   }
-  const d = req.body || {};
+  let d = req.body || {};
+  if (req.user.app_role === "client") {
+    // A customer can move or cancel their own request, never confirm it themselves
+    // or change the job details; a moved request goes back to the business to approve.
+    const moved = (d.date != null && d.date !== cur.date) || (d.time != null && d.time !== cur.time);
+    d = { date: d.date, time: d.time, end_time: d.end_time ?? d.end, notes: d.notes,
+      status: d.status === "cancelled" ? "cancelled" : (moved ? "pending" : cur.status) };
+  }
   if (req.user.app_role !== "client" && !d.force) {
     const clashes = await fieldWork.crewClashes(cur.tenant_id, d.installer ?? cur.installer, d.date ?? cur.date);
     // Only block when this edit changes who or when; never block an unrelated status update.
     const changed = (d.installer != null && d.installer !== cur.installer) || (d.date != null && d.date !== cur.date);
     if (clashes.length && changed) return res.status(409).json({ error: "crew_unavailable", clashes });
   }
-  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, updated_at=now() where id=$12`,
+  // The customer name is free text for staff; a customer's own name stays as it is.
+  const client = req.user.app_role === "client" ? cur.client : (d.client ?? cur.client);
+  await run(`update bookings set type=$1, title=$2, date=$3, time=$4, end_time=$5, suburb=$6, job_id=$7, status=$8, notes=$9, value=$10, installer=$11, client=$12, updated_at=now() where id=$13`,
     [d.type ?? cur.type, d.title ?? cur.title, d.date ?? cur.date, d.time ?? cur.time,
      (d.end_time ?? d.end) ?? cur.end_time, d.suburb ?? cur.suburb, (d.job_id ?? d.jobId) ?? cur.job_id,
-     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, cur.id]);
+     d.status ?? cur.status, d.notes ?? cur.notes, d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, client, cur.id]);
   await audit(req.user.sub, "update_booking", cur.id, cur.tenant_id, { status: d.status });
   ok(res, await one(`select ${BOOK_COLS} from bookings where id=$1`, [cur.id]));
 }));

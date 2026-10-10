@@ -11509,9 +11509,17 @@ function _evtFromBooking(b) {
     suburb: b.suburb || "", installer: b.installer || "", status: b.status || "confirmed",
     notes: b.notes || "", jobId: b.job_id || "", value: b.value || 0, src: b.source || "tenant" };
 }
+// In a support session existing events are shown with details hidden, so only new
+// events can be added; say so plainly instead of blaming the connection.
+function calSupportMsg(e) {
+  const code = String((e && (e.message || (e.data && e.data.error))) || e || "");
+  return /support_read_only|support_restricted/.test(code)
+    ? "Support session: you can add new events, but existing ones can't be changed here — their details are hidden for privacy"
+    : "";
+}
 function _bookingFromEvt(e) {
   return { type: e.type, title: e.title, date: e.date, time: e.time, end_time: e.end,
-    suburb: e.suburb, job_id: e.jobId, status: e.status, notes: e.notes,
+    client: e.client, suburb: e.suburb, job_id: e.jobId, status: e.status, notes: e.notes,
     value: e.value || 0, installer: e.installer, source: e.src || "tenant" };
 }
 
@@ -11552,7 +11560,7 @@ function useCalData(tenantId) {
       window.ssToast && window.ssToast(
         code.includes("no_client_record")
           ? "Your login isn't linked to a customer profile yet — ask your provider to finish setting up your portal"
-          : "Could not save — check your connection and try again", "error");
+          : calSupportMsg(code) || "Could not save — check your connection and try again", "error");
       return null;   // signal failure so the caller does NOT show a false success
     }
   };
@@ -11563,13 +11571,13 @@ function useCalData(tenantId) {
       if (!saved) return null;
       setEvts(p => p.map(e => e.id === ev.id ? _evtFromBooking(saved) : e));
       return ev;
-    } catch (e) { window.ssToast && window.ssToast("Could not update event", "error"); return null; }
+    } catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) || "Could not update event", "error"); return null; }
   };
   const deleteEvt = async id => {
     setEvts(p => p.filter(e => e.id !== id));            // optimistic
     if (!authed) return;
     try { await api.del("/bookings/" + id); }
-    catch (e) { window.ssToast && window.ssToast("Could not delete event", "error"); }
+    catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) || "Could not delete event", "error"); }
   };
   return { evts, addEvt, updateEvt, deleteEvt };
 }
@@ -11624,7 +11632,7 @@ function useAvailability() {
   const add = async d => {
     if (!authed) { const local = { ...d, id: "av" + Date.now(), person: d.person || calMe().display_name, kind: d.kind || "unavailable", date_to: d.date_to || d.date_from }; setList(p => [...p, local]); return local; }
     try { const r = await api.post("/availability", d); setList(p => [...p, r]); return r; }
-    catch (e) { window.ssToast && window.ssToast("Could not save — check the dates and try again", "error"); return null; }
+    catch (e) { window.ssToast && window.ssToast(calSupportMsg(e) ? "Support session: staff availability is private and can't be changed here" : "Could not save — check the dates and try again", "error"); return null; }
   };
   const remove = async id => {
     if (authed) {
