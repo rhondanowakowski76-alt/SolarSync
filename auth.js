@@ -4,7 +4,19 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-only-change-me";
+// Never sign with a guessable secret in production. If JWT_SECRET is missing (or too
+// short) on a live server, use a random per-boot secret instead: everyone has to sign
+// in again after a restart, but nobody can forge a token from a public default.
+const JWT_SECRET = (() => {
+  const s = process.env.JWT_SECRET || "";
+  if (s.length >= 32) return s;
+  if (process.env.NODE_ENV === "production") {
+    console.error("[security] JWT_SECRET is missing or shorter than 32 characters — using a random per-boot secret. Set JWT_SECRET to keep sessions across restarts.");
+    return crypto.randomBytes(48).toString("hex");
+  }
+  return s || "dev-only-change-me";
+})();
+const PIN_TICKET_TTL = "10m";
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
 
@@ -49,7 +61,15 @@ function mintAccess(u) {
     { sub: u.id, app_role: u.app_role, tenant_id: u.tenant_id || "", display_name: u.display_name },
     JWT_SECRET, { expiresIn: ACCESS_TTL });
 }
-function mintRefresh(u) { return jwt.sign({ sub: u.id, typ: "refresh" }, JWT_SECRET, { expiresIn: REFRESH_TTL }); }
+// `tv` = the user's token_version; bumping it (admin reset) kills every refresh token.
+function mintRefresh(u) { return jwt.sign({ sub: u.id, typ: "refresh", tv: u.token_version || 0 }, JWT_SECRET, { expiresIn: REFRESH_TTL }); }
+// Short-lived proof that the PIN step passed — required before the authenticator
+// step (or first-time enrolment) can issue a session.
+function mintPinTicket(u) { return jwt.sign({ sub: u.id, typ: "pin_ok" }, JWT_SECRET, { expiresIn: PIN_TICKET_TTL }); }
+function pinTicketOk(ticket, userId) {
+  try { const p = jwt.verify(String(ticket || ""), JWT_SECRET); return p.typ === "pin_ok" && p.sub === userId; }
+  catch { return false; }
+}
 function verify(token) { return jwt.verify(token, JWT_SECRET); }
 
 // ---------- middleware ----------
@@ -57,7 +77,8 @@ function authRequired(req, res, next) {
   const h = req.headers.authorization || "";
   const tok = h.startsWith("Bearer ") ? h.slice(7) : null;
   if (!tok) return res.status(401).json({ error: "no_token" });
-  try { req.user = verify(tok); next(); }
+  // Only access tokens carry no `typ`; refresh, PIN-ticket and tester tokens are not sessions.
+  try { const p = verify(tok); if (p.typ) throw new Error("wrong_type"); req.user = p; next(); }
   catch { return res.status(401).json({ error: "bad_token" }); }
 }
 function requireRole(...roles) {
@@ -69,6 +90,6 @@ function lockedOut(u) { return u.locked_until && new Date(u.locked_until) > new 
 
 module.exports = {
   bcrypt, randomBase32, verifyTotp, otpauthUri,
-  mintAccess, mintRefresh, verify, authRequired, requireRole,
+  mintAccess, mintRefresh, mintPinTicket, pinTicketOk, verify, authRequired, requireRole,
   lockedOut, JWT_SECRET,
 };

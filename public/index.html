@@ -2293,8 +2293,8 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     lookup: (name) => call("/auth/lookup", { method: "POST", body: { name } }),
     pin: (user_id, pin) => call("/auth/pin", { method: "POST", body: { user_id, pin } }),
     setPin: (user_id, pin, code) => call("/auth/set-pin", { method: "POST", body: { user_id, pin, code } }),
-    enrol: (user_id) => call("/auth/enrol", { method: "POST", body: { user_id } }),
-    totp: (user_id, code) => call("/auth/totp", { method: "POST", body: { user_id, code } }),
+    enrol: (user_id, ticket) => call("/auth/enrol", { method: "POST", body: { user_id, ticket } }),
+    totp: (user_id, code, ticket) => call("/auth/totp", { method: "POST", body: { user_id, code, ticket } }),
     backup: (user_id, code) => call("/auth/backup", { method: "POST", body: { user_id, code } }),
     regenBackup: () => call("/auth/backup/regenerate", { method: "POST" }),
     get: (p) => call(p),
@@ -3145,22 +3145,26 @@ function LoginScreen({ onLogin }) {
     setStep(2);
   };
 
+  // Holds the short-lived "PIN passed" ticket between the PIN and authenticator steps.
+  const pinTicketRef = useRef("");
+
   // STEP 2 — PIN. Verify the PIN, then the authenticator code captured on step 1.
   const submitPin = async (value) => {
     setBusy(true); setError("");
     const uid = userId || await resolveUid();
     if (!uid) { setPin(""); setBusy(false); return; }
+    let ticket = "";
     try {
-      await window.ssApi.pin(uid, value);                 // 1) PIN
+      ticket = (await window.ssApi.pin(uid, value)).ticket;   // 1) PIN — returns the PIN-passed ticket
     } catch (e) {
       const err = e.data && e.data.error;
       setPin(""); setBusy(false);
-      if (err === "needs_enrol") { setStep(4); setEnrolling(false); setError("First time here? Let's set up your account."); return; }
+      if (err === "needs_enrol") { pinTicketRef.current = e.data.ticket || ""; setStep(4); setEnrolling(false); setError("First time here? Let's set up your account."); return; }
       if (err === "locked") { setError("Too many attempts. Locked for a few minutes."); return; }
       setError("Incorrect PIN."); return;
     }
     try {
-      const r = await window.ssApi.totp(uid, totp);        // 2) authenticator code from step 1
+      const r = await window.ssApi.totp(uid, totp, ticket); // 2) authenticator code from step 1
       window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
       setTimeout(() => onLogin(r.user), 420);
     } catch (e) {
@@ -3210,7 +3214,8 @@ function LoginScreen({ onLogin }) {
     } catch (e) {
       const err = e.data && e.data.error;
       if (err === "needs_enrol") {
-        try { const r = await window.ssApi.enrol(uid); setSecret(r.secret || ""); setQr(r.qr || ""); setEnrolling(true); }
+        pinTicketRef.current = e.data.ticket || "";
+        try { const r = await window.ssApi.enrol(uid, pinTicketRef.current); setSecret(r.secret || ""); setQr(r.qr || ""); setEnrolling(true); }
         catch (e2) { setError("Enrolment failed. Try again."); }
       } else if (err === "locked") { setError("Too many attempts. Locked for a few minutes."); }
       else { setError("That PIN wasn't right — check the one your administrator gave you."); }
@@ -3224,7 +3229,7 @@ function LoginScreen({ onLogin }) {
     if (digits.length !== 6) return;
     setBusy(true); setError("");
     try {
-      const r = await window.ssApi.totp(userId, digits);
+      const r = await window.ssApi.totp(userId, digits, pinTicketRef.current);
       window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
       setTimeout(() => onLogin(r.user), 420);
     } catch (e) { setError("Incorrect code — check your authenticator app."); setTotp(""); }
@@ -10337,6 +10342,7 @@ function TenantSubscription() {
   const [b, setB] = React.useState(null);
   const [busy, setBusy] = React.useState("");
   const [iv, setIv] = React.useState(null);     // billing period chosen before starting
+  const [pick, setPick] = React.useState(null); // plan chosen before starting (applied when Stripe confirms)
   const load = () => api.get("/billing").then(setB).catch(() => setB({ error: true }));
   React.useEffect(() => {
     if (api && api.getToken && api.getToken()) load(); else setB({ preview: true });
@@ -10388,8 +10394,8 @@ function TenantSubscription() {
                   {[["month", "Monthly"], ["year", "Annual — 2 months free"]].map(([k, l]) => (
                     <button key={k} type="button" className={"btn" + (period === k ? " btn-primary" : "")} style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={() => setIv(k)}>{l}</button>))}
                 </div>
-                <button className="btn btn-primary" disabled={!!busy || !b.configured} onClick={() => redirect("/billing/checkout", { interval: period })}>
-                  Start {b.trial_days}-day free trial</button>
+                <button className="btn btn-primary" disabled={!!busy || !b.configured} onClick={() => redirect("/billing/checkout", { interval: period, plan: pick || s.plan })}>
+                  Start {b.trial_days}-day free trial{pick && pick !== s.plan ? " on " + pick : ""}</button>
               </div>)}
         </div>
         {yearly && <div className="card-sub" style={{ marginBottom: 6 }}>Annual: 12 months for the price of {b.annual_months}. Extra seats and add-ons are billed yearly too.</div>}
@@ -10431,7 +10437,10 @@ function TenantSubscription() {
               <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue-light)" }}>${amt(p.price).toLocaleString("en-AU")}<span className="card-sub">{yearly ? "/yr" : "/mo"} + GST</span></div>
               {yearly && <div className="card-sub">≈ ${(amt(p.price) / 12).toFixed(2)}/month</div>}
               <div className="card-sub">{p.seats == null ? "Unlimited seats" : p.seats + (p.seats === 1 ? " seat" : " seats") + " included"}</div>
-              {isAdmin && !comp && name !== s.plan && (
+              {isAdmin && !comp && !live && (
+                <button className={"btn" + ((pick || s.plan) === name ? " btn-primary" : "")} style={{ marginTop: 8 }} disabled={!!busy}
+                  onClick={() => setPick(name)}>{(pick || s.plan) === name ? "Selected" : "Choose " + name}</button>)}
+              {isAdmin && !comp && live && name !== s.plan && (
                 <button className="btn" style={{ marginTop: 8 }} disabled={!!busy} onClick={() => {
                   if (!window.confirm("Switch to " + name + " ($" + amt(p.price).toLocaleString("en-AU") + per + " + GST)?" + (live ? " The difference is charged or credited pro-rata now." : ""))) return;
                   go("change plan", async () => { await api.post("/billing/plan", { plan: name }); toast("Plan changed to " + name); await load(); });
@@ -13588,15 +13597,17 @@ function openResellerInvoicePDF(inv, b, items, subtotal, gst, total) {
 window.ssPayslipPDF = function (brand, ps) {
   brand = brand || { name: "SolarSync CRM", accent: ["#3A7DFF","#3A7DFF","#0F1E3A"] };
   var details = (window.ssBrandDetails && brand.id) ? window.ssBrandDetails(brand.id) : {};
-  var name = details.legalName || brand.name;
+  var E = window.ssEsc;
+  var rawName = String(details.legalName || brand.name || "");
+  var name = E(rawName);
   var acc = (brand.accent && brand.accent[2]) || "#0a3d6e";
   var today = new Date().toLocaleDateString("en-AU", { day:"2-digit", month:"long", year:"numeric" });
   var sub = [];
-  if (details.address) sub.push(details.address);
-  if (details.phone)   sub.push("Ph " + details.phone);
-  if (details.email)   sub.push(details.email);
-  if (details.abn)     sub.push("ABN " + details.abn);
-  if (details.license) sub.push("Lic " + details.license);
+  if (details.address) sub.push(E(details.address));
+  if (details.phone)   sub.push("Ph " + E(details.phone));
+  if (details.email)   sub.push(E(details.email));
+  if (details.abn)     sub.push("ABN " + E(details.abn));
+  if (details.license) sub.push("Lic " + E(details.license));
   if (!sub.length && brand.domain) sub.push(brand.domain);
   var headerHtml;
   if (brand.realLogo) {
@@ -13610,17 +13621,17 @@ window.ssPayslipPDF = function (brand, ps) {
       '</div>' +
       (sub.length ? '<div style="margin-left:auto;text-align:right"><div class="cosub">' + sub.join("<br>") + '</div></div>' : '') + '</div>';
   } else {
-    var logoHtml = details.logo
-      ? '<img src="' + details.logo + '" style="max-width:132px;max-height:66px;object-fit:contain" />'
-      : '<div style="width:54px;height:54px;border-radius:11px;background:' + acc + ';color:#fff;display:flex;align-items:center;justify-content:center;font:800 22px -apple-system,sans-serif">' + name.charAt(0).toUpperCase() + '</div>';
+    var logoHtml = window.ssSafeImg(details.logo)
+      ? '<img src="' + E(window.ssSafeImg(details.logo)) + '" style="max-width:132px;max-height:66px;object-fit:contain" />'
+      : '<div style="width:54px;height:54px;border-radius:11px;background:' + acc + ';color:#fff;display:flex;align-items:center;justify-content:center;font:800 22px -apple-system,sans-serif">' + E(rawName.charAt(0).toUpperCase()) + '</div>';
     headerHtml = '<div class="hd">' + logoHtml + '<div><div class="co">' + name + '</div><div class="cosub">' + sub.join(" &nbsp;·&nbsp; ") + '</div></div></div>';
   }
   var lineRows = (ps.lines || []).map(function (l) {
     var neg = l[1] < 0;
-    return '<tr><td>' + l[0] + '</td><td style="text-align:right' + (neg ? ';color:#c0392b' : '') + '">' +
+    return '<tr><td>' + E(l[0]) + '</td><td style="text-align:right' + (neg ? ';color:#c0392b' : '') + '">' +
       (neg ? '−$' + Math.abs(l[1]).toLocaleString() : '$' + (l[1]).toLocaleString()) + '</td></tr>';
   }).join("");
-  var html = '<!doctype html><html><head><meta charset="utf-8"><title>Payslip — ' + ps.name + '</title>' +
+  var html = '<!doctype html><html><head><meta charset="utf-8"><title>Payslip — ' + E(ps.name) + '</title>' +
     '<style>@page{margin:18mm}body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;color:#1a2230;max-width:640px;margin:32px auto;padding:0 22px}' +
     '.hd{display:flex;align-items:center;gap:14px;border-bottom:3px solid ' + acc + ';padding-bottom:14px;margin-bottom:6px}' +
     '.co{font-size:19px;font-weight:800}.cosub{font-size:11.5px;color:#5a6678;margin-top:2px}' +
@@ -13633,7 +13644,7 @@ window.ssPayslipPDF = function (brand, ps) {
     '@media print{.pbtn{display:none}body{margin:0}}</style></head><body>' +
     '<button class="pbtn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>' +
     headerHtml +
-    '<h1>Payslip</h1><div class="meta">' + ps.name + (ps.role ? ' · ' + ps.role : '') + ' &nbsp;·&nbsp; Pay period: ' + (ps.period || today) + '</div>' +
+    '<h1>Payslip</h1><div class="meta">' + E(ps.name) + (ps.role ? ' · ' + E(ps.role) : '') + ' &nbsp;·&nbsp; Pay period: ' + E(ps.period || today) + '</div>' +
     '<table>' + lineRows +
     '<tr class="tot"><td>Net pay</td><td style="text-align:right;color:#3A7DFF">$' + ps.net.toLocaleString() + '</td></tr></table>' +
     '<div class="superbox"><span>Superannuation (' + (ps.superRate || "12%") + ') — paid to your fund</span><strong style="color:' + acc + '">$' + (ps.superAmt || 0).toLocaleString() + '</strong></div>' +
@@ -14582,7 +14593,7 @@ function DocEditor({ doc, onSave, onClose, brandHeader, lockedNote, clientPublis
   React.useLayoutEffect(() => {
     setTitle(doc.title);
     if (editorRef.current) {
-      editorRef.current.innerHTML = doc.body || "";
+      editorRef.current.innerHTML = window.ssCleanHtml(doc.body || "");
     }
   }, [doc.id]);
   const fmt = cmd => { if (!editorRef.current) return; editorRef.current.focus(); document.execCommand(cmd, false, null); };
@@ -14623,7 +14634,7 @@ function DocEditor({ doc, onSave, onClose, brandHeader, lockedNote, clientPublis
     w.document.write("<!doctype html><html><head><meta charset='utf-8'><title>" + title.replace(/</g, "&lt;") + "</title>" +
       "<style>body{font-family:Calibri,'Segoe UI',sans-serif;font-size:14px;line-height:1.55;color:#1a2230;max-width:780px;margin:24px auto;padding:0 24px}" +
       "h1,h2,h3,h4,b,strong{color:#0f1e3a}img{max-width:100%;height:auto}table{border-collapse:collapse;width:100%}td,th{padding:4px 8px}" +
-      "@media print{body{margin:0}}</style></head><body>" + body +
+      "@media print{body{margin:0}}</style></head><body>" + window.ssCleanHtml(body) +
       "<script>setTimeout(function(){window.print()},400)<\/script></body></html>");
     w.document.close();
   };
@@ -14929,25 +14940,57 @@ window.ssSaveBrandDetails = function (tenantId, d) {
   try { localStorage.setItem("ss_letterhead_" + tenantId, JSON.stringify(d || {})); } catch (e) {}
 };
 
+// ── HTML safety helpers ──────────────────────────────────────────────
+// Escape any text (names, addresses…) before it goes into an HTML string.
+window.ssEsc = function (v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; });
+};
+// Only inline raster images or https URLs are allowed as logo/image sources.
+window.ssSafeImg = function (u) {
+  u = String(u || "");
+  return /^(data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=\s]+$|https:\/\/[^\s"'<>]+$)/.test(u) ? u : "";
+};
+// Clean HTML that came from the server or a file before it is rendered: removes
+// scripts, frames, embeds, event handlers (onerror=…) and javascript: links, while
+// keeping the document's layout and styling.
+window.ssCleanHtml = function (html) {
+  var tpl = document.createElement("template");
+  tpl.innerHTML = String(html == null ? "" : html);
+  tpl.content.querySelectorAll("script, iframe, frame, frameset, object, embed, applet, base, meta, link, noscript, template").forEach(function (el) { el.remove(); });
+  tpl.content.querySelectorAll("form").forEach(function (f) { while (f.firstChild) f.parentNode.insertBefore(f.firstChild, f); f.remove(); });
+  tpl.content.querySelectorAll("*").forEach(function (el) {
+    Array.prototype.slice.call(el.attributes).forEach(function (a) {
+      var n = a.name.toLowerCase(), v = String(a.value || "").replace(/[\s\u0000-\u001f]+/g, "").toLowerCase();
+      if (n.indexOf("on") === 0 || n === "formaction" || n === "action" || n === "srcdoc") { el.removeAttribute(a.name); return; }
+      if (/^(href|src|xlink:href|background|poster|data)$/.test(n) &&
+          (/^(javascript|vbscript):/.test(v) || (v.indexOf("data:") === 0 && !(el.tagName === "IMG" && /^data:image\//.test(v)))))
+        el.removeAttribute(a.name);
+    });
+  });
+  return tpl.innerHTML;
+};
+
 // Branded letterhead prepended to the Word export when branding is unlocked.
 // Uses only table/td/span/img/br (no <div>) so the div→p conversion in
 // downloadDocAsWord leaves the header layout intact.
 window.ssBrandHeader = function (brand, details) {
   details = details || (brand && brand.id ? window.ssBrandDetails(brand.id) : {}) || {};
-  var name = details.legalName || (brand && brand.name) || "";
+  var E = window.ssEsc;
+  var rawName = String(details.legalName || (brand && brand.name) || "");
+  var name = E(rawName);
   if (!name) return "";
-  var accent = (brand && brand.accent && brand.accent[2]) || "#1a4a6b";
-  var domain = (brand && brand.domain) || "";
+  var accent = E((brand && brand.accent && brand.accent[2]) || "#1a4a6b");
+  var domain = E((brand && brand.domain) || "");
 
   var line2 = [];
-  if (details.address) line2.push(details.address);
-  if (details.phone)   line2.push("Ph " + details.phone);
-  if (details.email)   line2.push(details.email);
+  if (details.address) line2.push(E(details.address));
+  if (details.phone)   line2.push("Ph " + E(details.phone));
+  if (details.email)   line2.push(E(details.email));
   var line3 = [];
-  if (details.abn)     line3.push("ABN " + details.abn);
-  if (details.license) line3.push("Lic " + details.license);
+  if (details.abn)     line3.push("ABN " + E(details.abn));
+  if (details.license) line3.push("Lic " + E(details.license));
   if (domain)          line3.push(domain);
-  else if (brand && brand.tagline && !line3.length) line3.push(brand.tagline);
+  else if (brand && brand.tagline && !line3.length) line3.push(E(brand.tagline));
 
   var logoCell = "", spacer = "";
   if (brand && brand.realLogo) {
@@ -14955,14 +14998,14 @@ window.ssBrandHeader = function (brand, details) {
     logoCell = '<td style="border:none;width:66px;vertical-align:middle;padding:0 0 8pt 0">' +
       '<img src={window.SS_LOGO} style="width:58px;height:58px" /></td>';
     spacer = '<td style="border:none;width:14pt"></td>';
-  } else if (details.logo) {
+  } else if (window.ssSafeImg(details.logo)) {
     logoCell = '<td style="border:none;width:96px;vertical-align:middle;padding:0 0 8pt 0">' +
-      '<img src="' + details.logo + '" style="max-width:88px;max-height:88px" /></td>';
+      '<img src="' + E(window.ssSafeImg(details.logo)) + '" style="max-width:88px;max-height:88px" /></td>';
     spacer = '<td style="border:none;width:14pt"></td>';
   } else {
     logoCell = '<td style="border:none;width:56px;height:56px;background:' + accent + ';color:#ffffff;' +
       'font-family:Calibri,Arial,sans-serif;font-size:24pt;font-weight:bold;text-align:center;vertical-align:middle">' +
-      name.charAt(0).toUpperCase() + '</td>';
+      E(rawName.charAt(0).toUpperCase()) + '</td>';
     spacer = '<td style="border:none;width:14pt"></td>';
   }
 
@@ -14990,7 +15033,7 @@ window.ssClientBlock = function (client) {
   var cells = rows.map(function (r) {
     return '<tr style="border:none">' +
       '<td style="border:none;padding:1pt 12pt 1pt 0;font-family:Calibri,Arial,sans-serif;font-size:9.5pt;color:#888888;font-weight:bold;white-space:nowrap;vertical-align:top">' + r[0] + '</td>' +
-      '<td style="border:none;padding:1pt 0;font-family:Calibri,Arial,sans-serif;font-size:9.5pt;color:#222222">' + r[1] + '</td></tr>';
+      '<td style="border:none;padding:1pt 0;font-family:Calibri,Arial,sans-serif;font-size:9.5pt;color:#222222">' + window.ssEsc(r[1]) + '</td></tr>';
   }).join("");
   return '<table style="width:100%;border:none;margin-bottom:14pt"><tr style="border:none"><td style="border:none;padding:0">' +
     '<span style="display:block;font-family:Calibri,Arial,sans-serif;font-size:8.5pt;letter-spacing:0.08em;color:#999999;font-weight:bold;text-transform:uppercase;margin-bottom:4pt">Prepared for</span>' +
@@ -15030,11 +15073,11 @@ window.ssAutofillForm = function (html, c) {
     var v = valueFor(tok);
     return v == null
       ? '<span style="background:#ffd43b;color:#1a1a1a;padding:1px 7px;border-radius:3px;font-weight:700;border:1px solid #e0a800">[' + tok + ']</span>'
-      : v;
+      : window.ssEsc(v);
   });
   // Pass 2: any remaining bare [TOKEN] text.
   out = out.replace(/\[([^\]\n]{1,60})\]/g, function (m, tok) {
-    var v = valueFor(tok); return v == null ? m : v;
+    var v = valueFor(tok); return v == null ? m : window.ssEsc(v);
   });
   // Take the <body> inner content (drop doctype/html/head), then strip anything that would
   // render as raw code in the contentEditable editor or can't survive editing: <script>,
@@ -15046,7 +15089,7 @@ window.ssAutofillForm = function (html, c) {
   var tpl = document.createElement("template");
   tpl.innerHTML = bodyInner;
   tpl.content.querySelectorAll("script, style, button.print-btn, button.no-print, .no-print button").forEach(function (el) { el.remove(); });
-  return tpl.innerHTML;
+  return window.ssCleanHtml(tpl.innerHTML);
 };
 
 // Pull the <style> blocks out of a form's HTML so the published copy can be re-styled
@@ -16204,7 +16247,7 @@ function ContractorComplianceReports({ brand }) {
               <span style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(58,125,255,0.1)", border: "1px solid rgba(58,125,255,0.25)", display: "grid", placeItems: "center", flexShrink: 0 }}>
                 <Icon d={ICONS.compliance} size={16} stroke={1.9} style={{ color: "var(--amber)" }} />
               </span>
-              <div className="card-title" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: doc.title }} />
+              <div className="card-title" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(doc.title) }} />
             </div>
             <div className="card-sub" style={{ marginBottom: 10, fontSize: 12 }}>{doc.desc}</div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -16892,7 +16935,7 @@ function ClientReports() {
           <div key={r.id} className="comp-row" style={{ padding:"14px 4px" }}>
             <span className="comp-check ok"><Icon d={ICONS.compliance} size={14} stroke={2.2} /></span>
             <div style={{ minWidth:0 }}>
-              <div className="comp-label" dangerouslySetInnerHTML={{ __html: r.title }} />
+              <div className="comp-label" dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(r.title) }} />
               <div className="card-sub">Issued {fmtDate(r.date)}</div>
             </div>
             <span style={{ marginLeft:"auto", display:"flex", gap:10 }}>
@@ -16906,11 +16949,11 @@ function ClientReports() {
         <div className="drawer-scrim" onClick={() => setView(null)}>
           <div onClick={e=>e.stopPropagation()} style={{ position:"fixed", inset:28, margin:"auto", maxWidth:860, background:"#fff", borderRadius:14, display:"flex", flexDirection:"column", overflow:"hidden", zIndex:200 }}>
             <div style={{ padding:"12px 18px", borderBottom:"1px solid #ddd", display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ flex:1, fontFamily:"var(--font-head)", fontWeight:700, color:"#1a2733" }} dangerouslySetInnerHTML={{ __html: view.title }} />
+              <div style={{ flex:1, fontFamily:"var(--font-head)", fontWeight:700, color:"#1a2733" }} dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(view.title) }} />
               <button className="btn btn-primary" onClick={() => download(view)}><Icon d={ICONS.download} size={14} stroke={2} /> Download Word</button>
               <button className="icon-btn" onClick={() => setView(null)} style={{ width:32, height:32, color:"#333" }}><Icon d="M18 6L6 18M6 6l12 12" size={15} stroke={2.2} /></button>
             </div>
-            <div style={{ flex:1, overflow:"auto", padding:"24px 30px", color:"#1a1a1a", fontFamily:"Calibri,Arial,sans-serif", lineHeight:1.5 }} dangerouslySetInnerHTML={{ __html: view.body }} />
+            <div style={{ flex:1, overflow:"auto", padding:"24px 30px", color:"#1a1a1a", fontFamily:"Calibri,Arial,sans-serif", lineHeight:1.5 }} dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(view.body) }} />
           </div>
         </div>
       )}
@@ -17150,7 +17193,7 @@ function ClientDocs() {
               <button className="btn" data-no-doc-handler="1" onClick={() => window.print()} style={{ padding: "5px 12px", fontSize: 12 }}><Icon d={ICONS.download} size={13} stroke={2} /> Print / Save PDF</button>
               <button className="btn" data-no-doc-handler="1" onClick={() => setViewDoc(null)} style={{ padding: "5px 10px", fontSize: 12 }}><Icon d={ICONS.x} size={14} stroke={2} /></button>
             </div>
-            <div style={{ overflowY: "auto", padding: "26px 30px", background: "#fff", color: "#1a1a1a" }} dangerouslySetInnerHTML={{ __html: viewDoc.body_html }} />
+            <div style={{ overflowY: "auto", padding: "26px 30px", background: "#fff", color: "#1a1a1a" }} dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(viewDoc.body_html) }} />
           </div>
         </div>
       )}
@@ -19424,7 +19467,7 @@ function ComplianceReportDocs({ brand, client }) {
                 <Icon d={ICONS.compliance} size={17} stroke={1.9} style={{ color: "var(--amber)" }} />
               </span>
               <div style={{ flex: 1 }}>
-                <div className="card-title" style={{ fontSize: 13.5 }} dangerouslySetInnerHTML={{ __html: doc.title }} />
+                <div className="card-title" style={{ fontSize: 13.5 }} dangerouslySetInnerHTML={{ __html: window.ssCleanHtml(doc.title) }} />
               </div>
             </div>
             <div className="card-sub" style={{ marginBottom: 12 }}>{doc.desc}</div>

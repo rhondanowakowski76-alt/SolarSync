@@ -14,6 +14,7 @@ const billing = require("./billing");
 const stc = require("./stc");
 const platformHealth = require("./platform-health");
 const proposalTemplate = require("./proposal-template");
+const { cleanHtml, cleanText, safeImageUrl } = require("./html-clean");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -89,24 +90,34 @@ async function tenantSuspended(u) {
   return !!(t && t.status === "suspended");
 }
 
+// A disabled account (or one in a suspended tenant) can't sign in by any route.
+async function loginBlocked(u, res) {
+  if (u.status && u.status !== "active") { res.status(403).json({ error: "disabled" }); return true; }
+  if (await tenantSuspended(u)) { res.status(403).json({ error: "suspended" }); return true; }
+  return false;
+}
+
 app.post("/api/auth/pin", h(async (req, res) => {
   const { user_id, pin } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u) return res.status(404).json({ error: "not_found" });
-  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
+  if (await loginBlocked(u, res)) return;
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   if (!u.pin_hash) return res.status(409).json({ error: "no_pin", must_set: true });
   if (!A.bcrypt.compareSync(String(pin), u.pin_hash)) { await bumpFail(u); return res.status(401).json({ error: "bad_pin" }); }
   await clearFail(u.id);
-  if (!u.totp_enrolled) return res.status(409).json({ error: "needs_enrol", must_enrol: true });
-  ok(res, { challenge: true });
+  // The ticket proves the PIN passed; /totp and /enrol refuse to run without it.
+  const ticket = A.mintPinTicket(u);
+  if (!u.totp_enrolled) return res.status(409).json({ error: "needs_enrol", must_enrol: true, ticket });
+  ok(res, { challenge: true, ticket });
 }));
 
 app.post("/api/auth/totp", h(async (req, res) => {
-  const { user_id, code } = req.body || {};
+  const { user_id, code, ticket } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u || !u.totp_secret) return res.status(404).json({ error: "not_found" });
-  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
+  if (!A.pinTicketOk(ticket, u.id)) return res.status(401).json({ error: "pin_required" });
+  if (await loginBlocked(u, res)) return;
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   if (!A.verifyTotp(u.totp_secret, code)) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
   await clearFail(u.id);
@@ -119,9 +130,13 @@ app.post("/api/auth/totp", h(async (req, res) => {
 }));
 
 app.post("/api/auth/enrol", h(async (req, res) => {
-  const { user_id } = req.body || {};
+  const { user_id, ticket } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u) return res.status(404).json({ error: "not_found" });
+  // Only straight after a correct PIN, and never over an authenticator that's already set up.
+  if (!A.pinTicketOk(ticket, u.id)) return res.status(401).json({ error: "pin_required" });
+  if (await loginBlocked(u, res)) return;
+  if (u.totp_enrolled) return res.status(409).json({ error: "already_enrolled" });
   const secret = A.randomBase32();
   await run("update users set totp_secret=$1 where id=$2", [secret, u.id]);  // enrolled flag set on first verify
   const uri = A.otpauthUri(u.display_name, secret);
@@ -132,8 +147,11 @@ app.post("/api/auth/enrol", h(async (req, res) => {
 app.post("/api/auth/set-pin", h(async (req, res) => {
   const { user_id, pin, code } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
-  if (!u || !u.totp_secret) return res.status(404).json({ error: "not_found" });
-  if (!A.verifyTotp(u.totp_secret, code)) return res.status(401).json({ error: "bad_code" });
+  if (!u || !u.totp_secret || !u.totp_enrolled) return res.status(404).json({ error: "not_found" });
+  if (await loginBlocked(u, res)) return;
+  if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
+  if (!A.verifyTotp(u.totp_secret, code)) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
+  await clearFail(u.id);
   if (!/^\d{6}$/.test(String(pin))) return res.status(400).json({ error: "pin_format" });
   await run("update users set pin_hash=$1, must_reset=false where id=$2", [A.bcrypt.hashSync(String(pin), 10), u.id]);
   // Setting a PIN proves control of the authenticator — a good moment to hand the
@@ -150,7 +168,7 @@ app.post("/api/auth/backup", h(async (req, res) => {
   const { user_id, code } = req.body || {};
   const u = await one("select * from users where id=$1", [user_id]);
   if (!u) return res.status(404).json({ error: "not_found" });
-  if (await tenantSuspended(u)) return res.status(403).json({ error: "suspended" });
+  if (await loginBlocked(u, res)) return;
   if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
   const norm = normBackup(code);
   if (norm.length < 8) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
@@ -186,6 +204,8 @@ app.post("/api/auth/refresh", h(async (req, res) => {
   if (p.typ !== "refresh") return res.status(401).json({ error: "bad_token" });
   const u = await one("select * from users where id=$1", [p.sub]);
   if (!u) return res.status(404).json({ error: "not_found" });
+  if ((p.tv || 0) !== (u.token_version || 0)) return res.status(401).json({ error: "bad_token" });
+  if (await loginBlocked(u, res)) return;
   ok(res, { access_token: A.mintAccess(u) });
 }));
 
@@ -194,7 +214,7 @@ app.post("/api/admin/reset-user", A.authRequired, A.requireRole("reseller", "ten
   const target = await one("select * from users where id=$1", [user_id]);
   if (!target) return res.status(404).json({ error: "not_found" });
   if (!isReseller(req) && target.tenant_id !== tenantOf(req)) return res.status(403).json({ error: "forbidden" });
-  await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null where id=$1", [user_id]);
+  await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id]);
   await audit(req.user.sub, "admin_reset", user_id, target.tenant_id);
   ok(res, { ok: true });
 }));
@@ -289,7 +309,11 @@ app.get("/api/letterhead", A.authRequired, h(async (req, res) =>
   ok(res, (await one("select * from letterheads where tenant_id=$1", [tenantOf(req)])) || {})));
 
 app.put("/api/letterhead", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
-  const d = req.body || {};
+  const b = req.body || {};
+  const logo = safeImageUrl(b.logo_url);
+  if (logo === undefined) return res.status(400).json({ error: "bad_logo" });
+  const d = { legal_name: cleanText(b.legal_name), abn: cleanText(b.abn, 40), address: cleanText(b.address, 500),
+    phone: cleanText(b.phone, 60), email: cleanText(b.email, 200), licence: cleanText(b.licence, 100), logo_url: logo };
   await run(`insert into letterheads (tenant_id, legal_name, abn, address, phone, email, licence, logo_url, updated_at)
     values ($1,$2,$3,$4,$5,$6,$7,$8,now())
     on conflict (tenant_id) do update set legal_name=excluded.legal_name, abn=excluded.abn, address=excluded.address,
@@ -304,17 +328,16 @@ app.put("/api/letterhead", A.authRequired, A.requireRole("tenant_admin", "staff"
 app.get("/api/report-templates", A.authRequired, h(async (req, res) =>
   ok(res, await rows("select key, category, title, body_html from report_templates"))));
 
-app.get("/api/reports", A.authRequired, h(async (req, res) => {
-  const r = isReseller(req)
-    ? await rows("select * from reports order by updated_at desc")
-    : await rows("select * from reports where tenant_id=$1 order by updated_at desc", [tenantOf(req)]);
-  ok(res, r);
+// Staff-side report list: own book only (the reseller sees its own 'reseller-platform'
+// book, never other tenants' customer reports). Customers use /api/client/reports.
+app.get("/api/reports", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
+  ok(res, await rows("select * from reports where tenant_id=$1 order by updated_at desc", [tenantOf(req)]));
 }));
 
 app.post("/api/reports", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
   const id = rid(); const d = req.body || {};
   await run(`insert into reports (id, tenant_id, template_key, job_ref, title, body_html, status, created_by)
-    values ($1,$2,$3,$4,$5,$6,'draft',$7)`, [id, tenantOf(req), d.template_key, d.job_ref, d.title, d.body_html, req.user.sub]);
+    values ($1,$2,$3,$4,$5,$6,'draft',$7)`, [id, tenantOf(req), d.template_key, d.job_ref, d.title, cleanHtml(d.body_html), req.user.sub]);
   ok(res, { id });
 }));
 
@@ -322,7 +345,7 @@ app.put("/api/reports/:id", A.authRequired, A.requireRole("tenant_admin", "staff
   const r = await one("select * from reports where id=$1", [req.params.id]);
   if (!r || r.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
-  await run("update reports set title=$1, body_html=$2, updated_at=now() where id=$3", [d.title ?? r.title, d.body_html ?? r.body_html, r.id]);
+  await run("update reports set title=$1, body_html=$2, updated_at=now() where id=$3", [d.title ?? r.title, d.body_html != null ? cleanHtml(d.body_html) : r.body_html, r.id]);
   ok(res, { ok: true });
 }));
 
@@ -330,9 +353,12 @@ app.post("/api/reports/:id/publish", A.authRequired, A.requireRole("tenant_admin
   const r = await one("select * from reports where id=$1", [req.params.id]);
   if (!r || r.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const { client_id, title, body_html } = req.body || {};
+  // The customer must belong to this tenant.
+  const cl = await one("select id from clients where id=$1 and tenant_id=$2", [client_id, r.tenant_id]);
+  if (!cl) return res.status(404).json({ error: "client_not_found" });
   await run("delete from report_publications where report_id=$1 and client_id=$2", [r.id, client_id]);
   await run(`insert into report_publications (id, report_id, tenant_id, client_id, title, body_html)
-    values ($1,$2,$3,$4,$5,$6)`, [rid(), r.id, r.tenant_id, client_id, title || r.title, body_html || r.body_html]);
+    values ($1,$2,$3,$4,$5,$6)`, [rid(), r.id, r.tenant_id, client_id, title || r.title, cleanHtml(body_html || r.body_html)]);
   await run("update reports set status='published' where id=$1", [r.id]);
   await audit(req.user.sub, "publish_report", r.id, r.tenant_id, { client_id });
   ok(res, { ok: true });
@@ -719,12 +745,10 @@ app.post("/api/messages", A.authRequired, A.requireRole("tenant_admin", "staff",
 const TEAM_COLS = "id, tenant_id, name, role, type, licence, hrs, status, jobs, rate, approved, updated_at, created_at";
 
 app.get("/api/team", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
-  // Reseller default view = oversight of everyone; ?mine=1 = only the
-  // reseller's OWN staff (kept in the separate 'reseller-platform' book).
+  // The reseller only ever sees its own staff book — other tenants' staff and
+  // contractors (names, licences, pay rates) are private to that tenant.
   const r = isReseller(req)
-    ? (req.query.mine
-        ? await rows(`select ${TEAM_COLS} from team_members where tenant_id='reseller-platform' and active=true order by name`)
-        : await rows(`select ${TEAM_COLS} from team_members where active=true order by name`))
+    ? await rows(`select ${TEAM_COLS} from team_members where tenant_id='reseller-platform' and active=true order by name`)
     : await rows(`select ${TEAM_COLS} from team_members where tenant_id=$1 and active=true order by name`, [tenantOf(req)]);
   // Contractors can see who's on the crew, but not what everyone is paid.
   ok(res, req.user.app_role === "contractor" ? r.map(({ rate, ...m }) => m) : r);
@@ -1318,7 +1342,7 @@ app.post("/api/testers/issue", A.authRequired, A.requireRole("reseller"), h(asyn
   );
   // Sign JWT with the same secret used for normal auth.
   const expSec = expiresAt ? Math.floor(expiresAt.getTime() / 1000) : Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365 * 10;
-  const token = jwt.sign({ typ: "tester", id, name: String(name).trim(), email: finalEmail, scope: ["tenant","contractor","client"], exp: expSec }, process.env.JWT_SECRET || "dev-only-change-me");
+  const token = jwt.sign({ typ: "tester", id, name: String(name).trim(), email: finalEmail, scope: ["tenant","contractor","client"], exp: expSec }, A.JWT_SECRET);
   await audit(req.user.sub, "tester_issue", id, null, { name, email: finalEmail, expiresAt });
   ok(res, {
     id, name: String(name).trim(), email: finalEmail, plan: "Scale",
@@ -1364,7 +1388,7 @@ app.post("/api/testers/redeem", h(async (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: "token_required" });
   let p;
-  try { p = jwt.verify(token, process.env.JWT_SECRET || "dev-only-change-me"); }
+  try { p = jwt.verify(token, A.JWT_SECRET); }
   catch (e) { return res.status(401).json({ error: "invalid_token" }); }
   if (p.typ !== "tester" || !p.id) return res.status(401).json({ error: "invalid_token" });
   const row = await one(`select * from beta_testers where id=$1`, [p.id]);
@@ -1421,7 +1445,7 @@ function extractFormHtml(file) {
   if (!isHtmlMime && !HTML_EXT.test(file.originalname)) return null;
   let text;
   try { text = file.buffer.toString("utf8"); } catch (e) { return null; }
-  if (/<html[\s>]|<!doctype html/i.test(text.slice(0, 2000))) return text.slice(0, 2000000);
+  if (/<html[\s>]|<!doctype html/i.test(text.slice(0, 2000))) return cleanHtml(text.slice(0, 2000000));
   return null;
 }
 
@@ -1438,6 +1462,9 @@ async function documentLibraryUnlocked(tenant_id) {
 // which only passes req,res and would leave next undefined on the pass-through path).
 async function requireDocLibrary(req, res, next) {
   try {
+    // The library is the company's internal file store — never open to customer logins
+    // (they get only what's published to them, via /api/client/documents).
+    if (!["tenant_admin", "staff", "contractor", "reseller"].includes(req.user && req.user.app_role)) return res.status(403).json({ error: "forbidden" });
     if (!storage.isConfigured()) return res.status(503).json({ error: "storage_not_configured" });
     if (!(await documentLibraryUnlocked(tenantOf(req), req.query.token))) return res.status(402).json({ error: "addon_required", addon: "document-library" });
     next();
@@ -1579,7 +1606,7 @@ app.post("/api/tenant/documents/:id/publish", A.authRequired, requireDocLibrary,
   // Optional filled/edited HTML (from the autofill + editor flow). When present the customer
   // views it as a rendered document; otherwise they download the original Spaces file.
   const body_html = (req.body && typeof req.body.body_html === "string" && req.body.body_html.trim())
-    ? req.body.body_html.slice(0, 2000000) : null;
+    ? cleanHtml(req.body.body_html.slice(0, 2000000)) : null;
   if (d.doc_group) await run("delete from document_publications where client_id=$1 and doc_group=$2", [client_id, d.doc_group]);
   await run(
     `insert into document_publications (id, document_id, doc_group, tenant_id, client_id, title, filename, mime_type, size_bytes, spaces_key, body_html, published_by)
@@ -1805,6 +1832,14 @@ async function startupBackfill() {
           values ($1,'tenant-helios',$2,$3,$4,$5,$6,$7,$8,$9)`,
           ["tm-" + Buffer.from(name).toString("hex").slice(0, 8), name, role, type, licence, hrs, status, jobs, rate]);
       }
+    }
+
+    // On a live server, sample logins still on the published default PIN (123456)
+    // and never set up are switched off — anyone could otherwise sign in as them.
+    // Set DEMO_LOGINS=1 to keep them for demos.
+    if (process.env.NODE_ENV === "production" && process.env.DEMO_LOGINS !== "1") {
+      for (const u of await rows("select id, pin_hash from users where status='active' and totp_enrolled=false and id in ('u-reseller','u-admin','u-contractor','u-client')"))
+        if (u.pin_hash && A.bcrypt.compareSync("123456", u.pin_hash)) await run("update users set status='disabled' where id=$1", [u.id]);
     }
   } catch (e) { console.error("startupBackfill failed:", e.message); }
 }

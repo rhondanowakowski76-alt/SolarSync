@@ -20,6 +20,7 @@
     "multer": "^2.0.1",
     "pg": "^8.21.0",
     "qrcode": "^1.5.4",
+    "sanitize-html": "2.17.0",
     "stripe": "^16.8.0"
   },
   "overrides": {

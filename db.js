@@ -355,6 +355,7 @@ async function migrate() {
     `create table if not exists stc_postcode_zones ( pc_from int not null, pc_to int not null, zone int not null, loaded_at timestamptz default now())`,
     `create index if not exists stc_pc_idx on stc_postcode_zones (pc_from, pc_to)`,
     `alter table tenants add column if not exists stc_settings jsonb default '{}'`,
+    `alter table users add column if not exists token_version int default 0`,
     // Bold proposal template (proposal-template.js): company settings and photos.
     `create table if not exists proposal_templates ( tenant_id text primary key, settings jsonb default '{}', updated_at timestamptz default now())`,
     `create table if not exists proposal_photos ( tenant_id text not null, slot text not null, data text not null, updated_at timestamptz default now(), primary key (tenant_id, slot))`,
