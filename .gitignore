@@ -3,3 +3,4 @@ data/
 *.log
 .env
 data-backups/
+dist/

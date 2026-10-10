@@ -341,6 +341,12 @@ async function migrate() {
     `alter table tenants add column if not exists extra_seats int default 0`,
     `alter table tenants add column if not exists founder boolean default false`,
     `alter table tenants add column if not exists founder_until timestamptz`,
+    `alter table tenants add column if not exists billing_interval text default 'month'`,
+    // Complimentary (free) access the reseller grants: until a date, or for life.
+    `alter table tenants add column if not exists comp_until timestamptz`,
+    `alter table tenants add column if not exists comp_lifetime boolean default false`,
+    `alter table tenants add column if not exists comp_note text`,
+    `alter table tenants add column if not exists comp_seats int default 0`,
     `alter table tenant_addons add column if not exists billed boolean default false`,
     `create table if not exists platform_settings ( key text primary key, value text )`,
     `create table if not exists ai_usage ( tenant_id text not null, month text not null, count int default 0, primary key (tenant_id, month))`,
@@ -349,6 +355,9 @@ async function migrate() {
     `create table if not exists stc_postcode_zones ( pc_from int not null, pc_to int not null, zone int not null, loaded_at timestamptz default now())`,
     `create index if not exists stc_pc_idx on stc_postcode_zones (pc_from, pc_to)`,
     `alter table tenants add column if not exists stc_settings jsonb default '{}'`,
+    // Bold proposal template (proposal-template.js): company settings and photos.
+    `create table if not exists proposal_templates ( tenant_id text primary key, settings jsonb default '{}', updated_at timestamptz default now())`,
+    `create table if not exists proposal_photos ( tenant_id text not null, slot text not null, data text not null, updated_at timestamptz default now(), primary key (tenant_id, slot))`,
   ];
   for (const s of stmts) { try { await _db.query(s); } catch (e) { console.error("migrate stmt failed:", e.message); } }
 }

@@ -12,6 +12,8 @@ const supportAccess = require("./support-access");
 const fieldWork = require("./field-work");
 const billing = require("./billing");
 const stc = require("./stc");
+const platformHealth = require("./platform-health");
+const proposalTemplate = require("./proposal-template");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -19,12 +21,15 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
+// Measure /api traffic, response times and errors for the reseller's Platform Health screen.
+app.use(platformHealth.track);
 // The Stripe webhook needs the raw body to verify its signature, so it's skipped
 // here and parsed by its own express.raw() handler instead.
 const jsonBody = express.json({ limit: "12mb" });
 app.use((req, res, next) => req.path === "/api/webhooks/stripe" ? next() : jsonBody(req, res, next));
 // Tenant-requested support sessions: restrict + mask every /api call they make.
 app.use("/api", supportAccess.limits.api, supportAccess.guard());
+app.use("/api", proposalTemplate.templatesOnlyGuard());
 
 const ok = (res, body) => res.json(body);
 // The reseller keeps its OWN ERP book under the fixed id "reseller-platform"
@@ -239,6 +244,9 @@ fieldWork.register(app, { h, ok });
 billing.register(app, { h, ok });
 // STC calculator: postcode zones, tenant STC/battery rates.
 stc.register(app, { h, ok });
+// Real platform health (reseller).
+platformHealth.register(app, { h, ok });
+proposalTemplate.register(app, { h, ok });
 
 // ============================================================
 // AI ASSISTANT — customer-service copilot (staff) + client helper
@@ -842,14 +850,14 @@ app.post("/api/onsite-reports", A.authRequired, A.requireRole("tenant_admin", "s
 // ============================================================
 app.get("/api/my-features", A.authRequired, h(async (req, res) => {
   if (isReseller(req)) return ok(res, { erp_enabled: true, accounting_provider: "builtin" });
-  const t = await one("select erp_enabled, accounting_provider from tenants where id=$1", [tenantOf(req)]);
-  ok(res, { erp_enabled: t ? t.erp_enabled !== false : true, accounting_provider: (t && t.accounting_provider) || "builtin" });
+  const t = await one("select erp_enabled, accounting_provider, plan from tenants where id=$1", [tenantOf(req)]);
+  ok(res, { erp_enabled: t ? t.erp_enabled !== false : true, accounting_provider: (t && t.accounting_provider) || "builtin", templates_only: !!t && t.plan === "Templates" });
 }));
 
 app.get("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
-  const cur = await one("select id, erp_enabled, accounting_provider from tenants where id=$1", [req.params.id]);
+  const cur = await one("select id, erp_enabled, accounting_provider, plan from tenants where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
-  ok(res, cur);
+  ok(res, { id: cur.id, erp_enabled: cur.erp_enabled, accounting_provider: cur.accounting_provider, templates_only: cur.plan === "Templates" });
 }));
 
 app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
@@ -866,15 +874,17 @@ app.put("/api/tenants/:id/features", A.authRequired, A.requireRole("reseller"), 
 // ============================================================
 // TENANT LIFECYCLE (reseller-only): list, provision, plan, suspend
 // ============================================================
-const PLAN_PRICES = { Solo: 79, Starter: 199, Growth: 499, Scale: 899 };
+const PLAN_PRICES = { Solo: 79, Starter: 199, Growth: 599, Scale: 899, Templates: 19 };
 
 app.get("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
-  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at from tenants where id <> 'reseller-platform' order by created_at");
+  const ts = await rows("select id, name, domain, plan, status, region, branding, created_at, comp_lifetime, comp_until, comp_note, comp_seats, billing_status from tenants where id <> 'reseller-platform' order by created_at");
   const counts = await rows("select tenant_id, count(*)::int as n from users where status='active' and tenant_id is not null group by tenant_id");
   const cmap = {}; for (const c of counts) cmap[c.tenant_id] = c.n;
   const inst = await rows("select tenant_id, count(*)::int as n from deals where stage='installed' and tenant_id is not null group by tenant_id");
   const imap = {}; for (const c of inst) imap[c.tenant_id] = c.n;
-  ok(res, ts.map(t => ({ ...t, users: cmap[t.id] || 0, installs: imap[t.id] || 0, mrr: PLAN_PRICES[t.plan] || 0 })));
+  // Complimentary tenants pay nothing, so they add nothing to revenue.
+  ok(res, ts.map(t => ({ ...t, complimentary: billing.compActive(t), users: cmap[t.id] || 0, installs: imap[t.id] || 0,
+    mrr: billing.compActive(t) ? 0 : (PLAN_PRICES[t.plan] || 0) })));
 }));
 
 // Portal health for each tenant — counts and dates only, never names, contact
@@ -953,7 +963,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   const name = String(b.name || "").trim();
   const domain = String(b.domain || "").trim().toLowerCase();
   const region = String(b.region || "").trim();
-  const plan = ["Solo", "Starter", "Growth", "Scale"].includes(b.plan) ? b.plan : "Growth";
+  const plan = ["Solo", "Starter", "Growth", "Scale", "Templates"].includes(b.plan) ? b.plan : "Growth";
   const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) return res.status(400).json({ error: "name_required" });
   if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
@@ -980,12 +990,32 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
 
 app.put("/api/tenants/:id/plan", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
   const plan = String((req.body || {}).plan || "");
-  if (!["Solo", "Starter", "Growth", "Scale"].includes(plan)) return res.status(400).json({ error: "bad_plan" });
-  const cur = await one("select id from tenants where id=$1", [req.params.id]);
+  const cur = await one("select * from tenants where id=$1", [req.params.id]);
   if (!cur) return res.status(404).json({ error: "not_found" });
-  await run("update tenants set plan=$1 where id=$2", [plan, cur.id]);
-  await audit(req.user.sub, "tenant_plan", cur.id, cur.id, { plan });
+  // Same path as the tenant's own plan change, so their Stripe subscription follows.
+  const fail = await billing.changePlan(cur, plan, req.user.sub);
+  if (fail) return res.status(fail.status).json(fail.body);
   ok(res, { id: cur.id, plan });
+}));
+
+// Free portal use for a tenant: { mode: "none" | "until" | "lifetime", until, note,
+// extra_seats } — the free seats only count while the free access lasts. Not a tester account — the tenant sees a normal portal.
+app.put("/api/tenants/:id/complimentary", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
+  const d = req.body || {};
+  const cur = await one("select * from tenants where id=$1", [req.params.id]);
+  if (!cur) return res.status(404).json({ error: "not_found" });
+  const mode = ["none", "until", "lifetime"].includes(d.mode) ? d.mode : null;
+  if (!mode) return res.status(400).json({ error: "bad_mode" });
+  if (mode === "until" && !(d.until && new Date(d.until) > new Date())) return res.status(400).json({ error: "until_must_be_future" });
+  // A paying subscription would keep charging them; cancel it in Stripe first.
+  if (mode !== "none" && cur.stripe_subscription_id && ["trialing", "active", "past_due"].includes(cur.billing_status))
+    return res.status(409).json({ error: "has_subscription" });
+  const seats = mode === "none" ? 0 : Math.max(0, Math.min(500, parseInt(d.extra_seats, 10) || 0));
+  await run("update tenants set comp_lifetime=$1, comp_until=$2, comp_note=$3, comp_seats=$4 where id=$5",
+    [mode === "lifetime", mode === "until" ? new Date(d.until) : null, mode === "none" ? null : String(d.note || "").slice(0, 200) || null, seats, cur.id]);
+  await audit(req.user.sub, "tenant_complimentary", cur.id, cur.id, { mode, until: d.until || null, comp_seats: seats });
+  const t = await one("select id, comp_lifetime, comp_until, comp_note, comp_seats from tenants where id=$1", [cur.id]);
+  ok(res, { ...t, extra_seats: t.comp_seats });
 }));
 
 app.put("/api/tenants/:id/status", A.authRequired, A.requireRole("reseller"), h(async (req, res) => {
@@ -1623,7 +1653,11 @@ app.use("/api/staff", A.authRequired, staffSeats);
 // ============================================================
 app.get("/api/health", h(async (req, res) => ok(res, { ok: true, ts: Date.now() })));
 
-const BUNDLE = path.join(__dirname, "public", "index.html");
+// The precompiled app (node build.js → dist/index.html) when present; otherwise the
+// source page, which compiles itself in the browser.
+const BUILT = path.join(__dirname, "dist", "index.html");
+const BUNDLE = fs.existsSync(BUILT) ? BUILT : path.join(__dirname, "public", "index.html");
+console.log("[app] serving " + path.relative(__dirname, BUNDLE));
 const LANDING = path.join(__dirname, "public", "landing.html");
 const PRIVACY = path.join(__dirname, "public", "privacy.html");
 const TERMS = path.join(__dirname, "public", "terms.html");

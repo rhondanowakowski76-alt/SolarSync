@@ -1,7 +1,7 @@
 // SolarSync — tenant subscriptions through Stripe.
 //
 //   Plans (AUD per month, ex-GST; GST is added at checkout):
-//     Solo $79 · 2 seats   Starter $199 · 5 seats   Growth $499 · 25 seats   Scale $899 · unlimited
+//     Solo $79 · 2 seats   Starter $199 · 5 seats   Growth $599 · 25 seats   Scale $899 · unlimited
 //   Extra seat: $15/month each. Add-ons from the `addons` table (AI assistant $19).
 //
 //   - A seat is any active tenant login: tenant admins, staff and contractors.
@@ -19,15 +19,23 @@ const A = require("./auth");
 const PLANS = {
   Solo: { price: 79, seats: 2 },
   Starter: { price: 199, seats: 5 },
-  Growth: { price: 499, seats: 25 },
+  Growth: { price: 599, seats: 25 },
   Scale: { price: 899, seats: null },   // unlimited
+  // Proposal templates only (Documents, Proposal Template, Branding) — for
+  // companies that don't use the CRM. Full plans include the templates.
+  Templates: { price: 19, seats: 1 },
 };
 const SEAT_PRICE = 15;
 const TRIAL_DAYS = 14;
+// Annual billing: the year costs this many months (12 months for the price of 10).
+// Every item on a subscription shares one interval, so seats and add-ons on an
+// annual subscription are billed yearly too.
+const ANNUAL_MONTHS = 10;
+const INTERVALS = ["month", "year"];
 // Founding customers: the first FOUNDER_SLOTS tenants to start a subscription get
-// FOUNDER_PERCENT off everything for FOUNDER_MONTHS. A place is taken only when the
+// FOUNDER_PERCENT off their plan (not seats or add-ons) for FOUNDER_MONTHS. A place is taken only when the
 // subscription actually starts, not when someone opens the checkout page.
-const FOUNDER_SLOTS = 15;
+const FOUNDER_SLOTS = 20;
 const FOUNDER_PERCENT = 30;
 const FOUNDER_MONTHS = 12;
 const AI_MONTHLY_CAP = 300;             // assistant replies per tenant per month
@@ -57,43 +65,67 @@ async function gstRate() {
   return r.id;
 }
 
-// A monthly AUD price, created the first time it's needed. The key includes the
-// amount, so changing a price here creates a new Stripe price automatically.
-async function priceFor(key, name, dollars) {
-  const k = `stripe_price:${key}:${Math.round(dollars * 100)}`;
+// An AUD price (monthly, or yearly at ANNUAL_MONTHS × the monthly amount), created
+// the first time it's needed. The key includes the amount, so changing a price here
+// creates a new Stripe price automatically.
+// One Stripe product per plan, so the founder coupon can be limited to plans.
+async function planProduct(key, name) {
+  const k = `stripe_product:${key}`;
+  let id = await setting(k);
+  if (id) return id;
+  const p = await stripe().products.create({ name: "SolarSync " + name, metadata: { ss_key: key } });
+  await setSetting(k, p.id);
+  return p.id;
+}
+async function priceFor(key, name, monthlyDollars, interval = "month") {
+  const yearly = interval === "year";
+  const cents = Math.round(monthlyDollars * (yearly ? ANNUAL_MONTHS : 1) * 100);
+  const plan = key.startsWith("plan-");
+  const k = `stripe_price:${key}:${cents}` + (yearly ? ":year" : "") + (plan ? ":prod" : "");
   let id = await setting(k);
   if (id) return id;
   const p = await stripe().prices.create({
-    currency: "aud", unit_amount: Math.round(dollars * 100), recurring: { interval: "month" },
-    product_data: { name: "SolarSync " + name }, metadata: { ss_key: key },
+    currency: "aud", unit_amount: cents, recurring: { interval: yearly ? "year" : "month" },
+    ...(plan ? { product: await planProduct(key, name) } : { product_data: { name: "SolarSync " + name + (yearly ? " (annual)" : "") } }),
+    metadata: { ss_key: key },
   });
   await setSetting(k, p.id);
   return p.id;
 }
 async function founderCoupon() {
-  const k = `stripe_coupon:founder:${FOUNDER_PERCENT}:${FOUNDER_MONTHS}`;
+  const k = `stripe_coupon:founder:${FOUNDER_PERCENT}:${FOUNDER_MONTHS}:plans`;
   let id = await setting(k);
   if (id) return id;
-  const c = await stripe().coupons.create({ name: "Founding customer", percent_off: FOUNDER_PERCENT,
-    duration: "repeating", duration_in_months: FOUNDER_MONTHS });
+  // Plans only — seats and add-ons are charged in full.
+  const products = [];
+  for (const plan of Object.keys(PLANS)) if (plan !== "Templates") products.push(await planProduct("plan-" + plan.toLowerCase(), plan + " plan"));
+  const c = await stripe().coupons.create({ name: "Founding customer (plan only)", percent_off: FOUNDER_PERCENT,
+    duration: "repeating", duration_in_months: FOUNDER_MONTHS, applies_to: { products } });
   await setSetting(k, c.id);
   return c.id;
 }
 const foundersTaken = async () => (await one("select count(*)::int as n from tenants where founder=true")).n;
 
-const planPrice = (plan) => priceFor("plan-" + plan.toLowerCase(), plan + " plan", PLANS[plan].price);
-const seatPrice = () => priceFor("seat", "extra seat", SEAT_PRICE);
-async function addonPrice(key) {
+// Free portal use granted by the reseller (lifetime, or until a date). These tenants
+// are never billed; the reseller sets their plan and any free extra seats.
+const compActive = (t) => !!t && (t.comp_lifetime === true || (t.comp_until && new Date(t.comp_until) > new Date()));
+const compInfo = (t) => compActive(t) ? { lifetime: t.comp_lifetime === true, until: t.comp_lifetime ? null : t.comp_until } : null;
+
+const intervalOf = (t) => (t && t.billing_interval === "year") ? "year" : "month";
+const planPrice = (plan, interval) => priceFor("plan-" + plan.toLowerCase(), plan + " plan", PLANS[plan].price, interval);
+const seatPrice = (interval) => priceFor("seat", "extra seat", SEAT_PRICE, interval);
+async function addonPrice(key, interval) {
   const a = await one("select key, name, price from addons where key=$1", [key]);
   if (!a || !(Number(a.price) > 0)) return null;
-  return priceFor("addon-" + key, a.name + " add-on", Number(a.price));
+  return priceFor("addon-" + key, a.name + " add-on", Number(a.price), interval);
 }
 
 async function seatUsage(tenantId) {
-  const t = await one("select plan, extra_seats from tenants where id=$1", [tenantId]);
+  const t = await one("select plan, extra_seats, comp_seats, comp_lifetime, comp_until from tenants where id=$1", [tenantId]);
   const plan = PLANS[t && t.plan] ? t.plan : "Growth";
   const base = PLANS[plan].seats;
-  const extra = Number(t && t.extra_seats) || 0;
+  // Paid extra seats, plus any free seats while complimentary access lasts.
+  const extra = (Number(t && t.extra_seats) || 0) + (compActive(t) ? Number(t.comp_seats) || 0 : 0);
   const used = (await one(`select count(*)::int as n from users where tenant_id=$1 and status='active' and app_role = any($2)`,
     [tenantId, SEAT_ROLES])).n;
   return { plan, included: base, extra, limit: base == null ? null : base + extra, used };
@@ -102,8 +134,11 @@ async function seatUsage(tenantId) {
 // Called before creating a staff/contractor login. Returns null when allowed.
 async function seatBlock(tenantId) {
   const u = await seatUsage(tenantId);
-  if (u.limit != null && u.used >= u.limit) return { error: "seat_limit", ...u, seat_price: SEAT_PRICE };
-  return null;
+  if (u.limit == null || u.used < u.limit) return null;
+  const t = await one("select billing_interval, comp_lifetime, comp_until from tenants where id=$1", [tenantId]);
+  const yearly = intervalOf(t) === "year";
+  return { error: "seat_limit", ...u, complimentary: compActive(t),
+    seat_price: SEAT_PRICE * (yearly ? ANNUAL_MONTHS : 1), seat_period: yearly ? "year" : "month" };
 }
 
 // AI assistant: needs the add-on, and is capped per month. Returns null when allowed.
@@ -126,15 +161,17 @@ async function syncSubscription(sub) {
     || ((await one("select id from tenants where stripe_subscription_id=$1", [sub.id])) || {}).id;
   if (!tenantId) return;
   const items = (sub.items && sub.items.data) || [];
-  const seatId = await setting(`stripe_price:seat:${SEAT_PRICE * 100}`);
-  const seats = items.filter(i => i.price && i.price.id === seatId).reduce((n, i) => n + (i.quantity || 0), 0);
+  const keyOf = i => (i.price && i.price.metadata && i.price.metadata.ss_key) || "";
+  const seats = items.filter(i => keyOf(i) === "seat").reduce((n, i) => n + (i.quantity || 0), 0);
+  const planItem = items.find(i => keyOf(i).startsWith("plan-"));
+  const interval = planItem && planItem.price.recurring && planItem.price.recurring.interval === "year" ? "year" : "month";
   const ended = sub.status === "canceled" || sub.status === "incomplete_expired";
   await run(`update tenants set stripe_subscription_id=$1, stripe_customer_id=coalesce($2, stripe_customer_id),
-      billing_status=$3, trial_ends_at=$4, current_period_end=$5, extra_seats=$6 where id=$7`,
+      billing_status=$3, trial_ends_at=$4, current_period_end=$5, extra_seats=$6, billing_interval=$7 where id=$8`,
     [sub.id, typeof sub.customer === "string" ? sub.customer : null, sub.status,
      sub.trial_end ? new Date(sub.trial_end * 1000) : null,
      sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
-     ended ? 0 : seats, tenantId]);
+     ended ? 0 : seats, interval, tenantId]);
   // Billed add-ons follow the subscription: on while billed, off once removed or
   // cancelled. Add-ons the reseller switched on for free (billed=false) are untouched.
   const billed = new Set(items.map(i => i.price && i.price.metadata && i.price.metadata.ss_key).filter(Boolean));
@@ -148,6 +185,36 @@ async function syncSubscription(sub) {
       await run("update tenant_addons set active=false, billed=false where tenant_id=$1 and addon_key=$2", [tenantId, a.key]);
     }
   }
+}
+
+// Change a tenant's plan, and their Stripe subscription with it when they have one
+// (difference charged or credited pro-rata now). Used by the tenant's own
+// Subscription screen and by the reseller. Returns null on success, else
+// { status, body } describing why nothing changed.
+async function changePlan(t, plan, by) {
+  if (!PLANS[plan]) return { status: 400, body: { error: "bad_plan" } };
+  if (plan === t.plan) return null;
+  // Moving down must still fit everyone currently using a seat.
+  const u = await seatUsage(t.id);
+  if (PLANS[plan].seats != null && u.used > PLANS[plan].seats + u.extra)
+    return { status: 409, body: { error: "too_many_people", used: u.used, limit: PLANS[plan].seats + u.extra } };
+  if (t.stripe_subscription_id && LIVE_STATUSES.includes(t.billing_status)) {
+    if (!stripe()) return { status: 503, body: { error: "stripe_not_configured" } };
+    const sub = await stripe().subscriptions.retrieve(t.stripe_subscription_id, { expand: ["items.data.price"] });
+    const cur = sub.items.data.find(i => String(i.price.metadata && i.price.metadata.ss_key || "").startsWith("plan-"));
+    try {
+      await stripe().subscriptions.update(sub.id, {
+        items: [cur ? { id: cur.id, price: await planPrice(plan, intervalOf(t)) } : { price: await planPrice(plan, intervalOf(t)), tax_rates: [await gstRate()] }],
+        proration_behavior: "always_invoice", payment_behavior: "error_if_incomplete",
+      });
+    } catch (e) {
+      if (!String(e && e.type || "").startsWith("Stripe")) throw e;
+      return { status: 402, body: { error: "payment_failed", message: e.message || "Card declined" } };
+    }
+  }
+  await run("update tenants set plan=$1 where id=$2", [plan, t.id]);
+  await audit(by, "billing_plan", plan, t.id, { from: t.plan });
+  return null;
 }
 
 // Stripe webhook events this module cares about. Returns true when handled.
@@ -185,6 +252,7 @@ function register(app, { h, ok }) {
     ok(res, {
       configured: !!stripe(), status: t.billing_status || "none", trial_ends_at: t.trial_ends_at,
       current_period_end: t.current_period_end, plans: PLANS, seat_price: SEAT_PRICE, trial_days: TRIAL_DAYS,
+      interval: intervalOf(t), annual_months: ANNUAL_MONTHS, complimentary: compInfo(t),
       seats: await seatUsage(t.id), addons, ai_monthly_cap: AI_MONTHLY_CAP,
       founder: !!t.founder, founder_until: t.founder_until,
       founder_offer: { percent: FOUNDER_PERCENT, months: FOUNDER_MONTHS, slots: FOUNDER_SLOTS,
@@ -197,17 +265,19 @@ function register(app, { h, ok }) {
     if (!need(res)) return;
     const t = await tenantRow(req);
     if (liveSub(t)) return res.status(409).json({ error: "already_subscribed" });
+    if (compActive(t)) return res.status(409).json({ error: "complimentary" });
     const plan = PLANS[t.plan] ? t.plan : "Growth";
+    const interval = INTERVALS.includes(req.body && req.body.interval) ? req.body.interval : "month";
     let customer = t.stripe_customer_id;
     if (!customer) {
       customer = (await stripe().customers.create({ name: t.name, metadata: { tenant_id: t.id } })).id;
       await run("update tenants set stripe_customer_id=$1 where id=$2", [customer, t.id]);
     }
     const tax = [await gstRate()];
-    const line_items = [{ price: await planPrice(plan), quantity: 1, tax_rates: tax }];
+    const line_items = [{ price: await planPrice(plan, interval), quantity: 1, tax_rates: tax }];
     // Carry over seats/add-ons already in use (e.g. switched on before billing started).
-    if (t.extra_seats > 0) line_items.push({ price: await seatPrice(), quantity: t.extra_seats, tax_rates: tax });
-    const founder = !t.founder && (await foundersTaken()) < FOUNDER_SLOTS;
+    if (t.extra_seats > 0) line_items.push({ price: await seatPrice(interval), quantity: t.extra_seats, tax_rates: tax });
+    const founder = !t.founder && t.plan !== "Templates" && (await foundersTaken()) < FOUNDER_SLOTS;
     const session = await stripe().checkout.sessions.create({
       mode: "subscription", customer, line_items,
       payment_method_collection: "always",
@@ -217,7 +287,7 @@ function register(app, { h, ok }) {
       success_url: baseUrl(req) + "/app?billing=done",
       cancel_url: baseUrl(req) + "/app?billing=cancelled",
     });
-    await audit(req.user.sub, "billing_checkout", session.id, t.id, { plan, founder });
+    await audit(req.user.sub, "billing_checkout", session.id, t.id, { plan, founder, interval });
     ok(res, { url: session.url });
   }));
 
@@ -246,7 +316,7 @@ function register(app, { h, ok }) {
     const t = await tenantRow(req);
     if (!liveSub(t)) return res.status(409).json({ error: "no_subscription" });
     const n = Math.min(Math.max(parseInt(req.body && req.body.count, 10) || 1, 1), 50);
-    try { await addItem(t, await seatPrice(), n); }
+    try { await addItem(t, await seatPrice(intervalOf(t)), n); }
     catch (e) { return paymentError(res, e); }
     await audit(req.user.sub, "billing_add_seats", t.id, t.id, { count: n });
     ok(res, { ok: true, seats: await seatUsage(t.id) });
@@ -256,7 +326,8 @@ function register(app, { h, ok }) {
     if (!need(res)) return;
     const t = await tenantRow(req);
     if (!liveSub(t)) return res.status(409).json({ error: "no_subscription" });
-    const price = await addonPrice(req.params.key);
+    if (t.plan === "Templates") return res.status(409).json({ error: "templates_plan" });
+    const price = await addonPrice(req.params.key, intervalOf(t));
     if (!price) return res.status(404).json({ error: "addon_not_found" });
     const on = !(req.body && req.body.active === false);
     if (on) {
@@ -275,25 +346,9 @@ function register(app, { h, ok }) {
   app.post("/api/billing/plan", ...admin, h(async (req, res) => {
     if (!need(res)) return;
     const plan = String((req.body && req.body.plan) || "");
-    if (!PLANS[plan]) return res.status(400).json({ error: "bad_plan" });
     const t = await tenantRow(req);
-    if (plan === t.plan) return ok(res, { ok: true });
-    // Moving down must still fit everyone currently using a seat.
-    const u = await seatUsage(t.id);
-    if (PLANS[plan].seats != null && u.used > PLANS[plan].seats + u.extra)
-      return res.status(409).json({ error: "too_many_people", used: u.used, limit: PLANS[plan].seats + u.extra });
-    if (liveSub(t)) {
-      const sub = await stripe().subscriptions.retrieve(t.stripe_subscription_id, { expand: ["items.data.price"] });
-      const cur = sub.items.data.find(i => String(i.price.metadata && i.price.metadata.ss_key || "").startsWith("plan-"));
-      try {
-        await stripe().subscriptions.update(sub.id, {
-          items: [cur ? { id: cur.id, price: await planPrice(plan) } : { price: await planPrice(plan), tax_rates: [await gstRate()] }],
-          proration_behavior: "always_invoice", payment_behavior: "error_if_incomplete",
-        });
-      } catch (e) { return paymentError(res, e); }
-    }
-    await run("update tenants set plan=$1 where id=$2", [plan, t.id]);
-    await audit(req.user.sub, "billing_plan", plan, t.id, { from: t.plan });
+    const fail = await changePlan(t, plan, req.user.sub);
+    if (fail) return res.status(fail.status).json(fail.body);
     ok(res, { ok: true, seats: await seatUsage(t.id) });
   }));
 
@@ -311,4 +366,4 @@ function register(app, { h, ok }) {
   }));
 }
 
-module.exports = { register, handleEvent, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
+module.exports = { register, handleEvent, changePlan, compActive, seatBlock, seatUsage, aiBlock, PLANS, SEAT_PRICE };
