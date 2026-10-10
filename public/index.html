@@ -8913,221 +8913,125 @@ function ToggleSwitch({ on, onChange, disabled }) {
 }
 
 /* ── Accounting Integration Tab ─────────────────────────────── */
-const ACCT_PLATFORMS = [
-  { id:"xero",   name:"Xero",   rec:true,  url:"https://login.xero.com/identity/user/login",  desc:"Two-way sync for invoices, payments and contacts. Recommended for most Australian solar businesses." },
-  { id:"myob",   name:"MYOB",   rec:false, url:"https://login.myob.com/account/login",         desc:"Sync invoices, items and supplier bills with MYOB Business or AccountRight." },
-  { id:"reckon", name:"Reckon", rec:false, url:"https://identity.reckon.com/",                 desc:"Connect Reckon One — push invoices, pull payments, reconcile automatically." },
-];
-
-const ACCT_SYNCS = [
-  { id:"inv",      label:"Invoices → accounting",   sub:"Auto-push on invoice creation",   col:0 },
-  { id:"pay",      label:"Payments ← accounting",   sub:"Pull every 15 minutes",           col:1 },
-  { id:"contacts", label:"Contacts sync",            sub:"Bi-directional",                  col:0 },
-  { id:"coa",      label:"Chart of accounts",        sub:"Solar default mapping applied",   col:1 },
-  { id:"tax",      label:"Tax codes",                sub:"GST 10% (AU)",                    col:0 },
-  { id:"items",    label:"Item codes",               sub:"Mapped from quote templates",      col:1 },
-];
-
-const ACCT_INV_SYNCS = [
-  { id:"stock",    label:"Stock levels → accounting",   sub:"Push inventory counts on each adjustment",  col:0 },
-  { id:"po",       label:"Purchase orders → accounting", sub:"Auto-create bills from POs",              col:1 },
-  { id:"cogs",     label:"COGS auto-posting",            sub:"Cost of goods on invoice creation",        col:0 },
-  { id:"valuation",label:"Inventory valuation export",   sub:"FIFO — pushed to balance sheet",           col:1 },
+// MYOB is a real, live connection (myob.js on the server). Xero and Reckon aren't
+// connected yet — their import files are available from Accounting → Exports.
+const ACCT_SOON = [
+  { id:"xero",   name:"Xero",   desc:"Live sync is on the way. Until then, download Xero import files from Accounting → Invoices." },
+  { id:"reckon", name:"Reckon", desc:"Live sync is on the way. Until then, use the general journal export from Accounting." },
 ];
 
 function IntegrationsTab() {
-  const [platform, setPlatform] = useTE("xero");
-  const [connected, setConnected] = useTE(false);
-  const [connecting, setConnecting] = useTE(false);
-  const [lastSync, setLastSync] = useTE(null);
-  const [syncToggles, setSyncToggles] = useTE({ inv:false, pay:false, contacts:false, coa:false, tax:false, items:false });
-  const [invToggles, setInvToggles] = useTE({ stock:false, po:false, cogs:false, valuation:false });
-  const [stripeOn, setStripeOn] = useTE(false);
-  const [stripeToggles, setStripeToggles] = useTE({ paynow:false, autoreconcile:false, surcharge:false });
+  const api = window.ssApi;
+  const toast = (m, k) => window.ssToast && window.ssToast(m, k);
+  const [st, setSt] = useTE(null);
+  const [busy, setBusy] = useTE("");
+  const [form, setForm] = useTE(null);
+  const role = ((api.getUser && api.getUser()) || {}).app_role;
+  const isAdmin = role === "tenant_admin";
 
-  const toggleSync = id => setSyncToggles(p => ({ ...p, [id]: !p[id] }));
-  const toggleInv  = id => setInvToggles(p  => ({ ...p, [id]: !p[id] }));
-  const toggleStripe = id => setStripeToggles(p => ({ ...p, [id]: !p[id] }));
+  const load = () => api.get("/integrations/myob")
+    .then(s => { setSt(s); setForm(s.settings); })
+    .catch(() => setSt({ error: true }));
+  React.useEffect(() => {
+    load();
+    // Coming back from MYOB's sign-in page.
+    const p = new URLSearchParams(location.search).get("myob");
+    if (p) {
+      const msg = { connected:"MYOB connected", cancelled:"MYOB sign-in was cancelled", expired:"The MYOB sign-in took too long — try again",
+        no_file:"No MYOB company file was chosen — try again and pick your file", failed:"MYOB couldn't be connected — try again" }[p];
+      if (msg) toast(msg, p === "connected" ? undefined : "error");
+      try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    }
+  }, []);
 
-  const handleConnect = () => {
-    const p = ACCT_PLATFORMS.find(p=>p.id===platform);
-    const name = p.name;
-    setConnecting(true);
-    window.ssToast && window.ssToast("Opening secure " + name + " sign-in…");
-    // Open the provider's real sign-in page in a new tab. On a live deployment the
-    // OAuth callback returns an access token to the backend; the local state below
-    // reflects the connection once the operator signs in.
-    if (p.url) { try { window.open(p.url, "_blank", "noopener,noreferrer"); } catch (e) {} }
-    setTimeout(() => {
-      setConnecting(false);
-      setConnected(true);
-      // Turn the recommended two-way syncs on automatically, as a real connect would.
-      setSyncToggles({ inv:true, pay:true, contacts:true, coa:true, tax:true, items:true });
-      setLastSync(new Date());
-      window.ssToast && window.ssToast(name + " connected — invoices, payments & contacts now syncing");
-    }, 1300);
+  const go = async (label, fn) => {
+    setBusy(label);
+    try { await fn(); }
+    catch (e) {
+      const err = e.data && e.data.error;
+      toast(err === "myob_not_configured" ? "MYOB isn't switched on for this platform yet"
+        : err === "myob_reconnect" ? "MYOB sign-in has expired — connect MYOB again"
+        : (e.data && e.data.message) || "Something went wrong — try again", "error");
+    } finally { setBusy(""); load(); }
   };
-  const handleDisconnect = () => {
-    setConnected(false);
-    setLastSync(null);
-    setSyncToggles({ inv:false, pay:false, contacts:false, coa:false, tax:false, items:false });
-    setInvToggles({ stock:false, po:false, cogs:false, valuation:false });
-    window.ssToast && window.ssToast("Accounting integration disconnected");
-  };
-  const fmtSync = d => d ? d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }) : "—";
+  const connect = () => go("connect", async () => { const r = await api.post("/integrations/myob/connect", {}); location.href = r.url; });
+  const sync = () => go("sync", async () => {
+    const r = await api.post("/integrations/myob/sync", {});
+    toast("MYOB synced — " + r.pushed + " invoice" + (r.pushed === 1 ? "" : "s") + " sent, " + r.paid + " marked paid" + (r.errors.length ? " (" + r.errors.length + " need attention)" : ""), r.errors.length ? "error" : undefined);
+  });
+  const save = () => go("save", async () => { await api.put("/integrations/myob/settings", form); toast("MYOB settings saved"); });
+  const disconnect = () => { if (window.confirm("Disconnect MYOB? Invoices already sent stay in MYOB.")) go("disconnect", () => api.del("/integrations/myob")); };
+  const fmt = d => d ? new Date(d).toLocaleString("en-AU", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "never";
 
-  const plat = ACCT_PLATFORMS.find(p=>p.id===platform);
+  const Dot = ({ on, label }) => (
+    <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:12.5, fontFamily:"var(--font-head)", fontWeight:700, color: on ? "var(--success)" : "var(--tx-faint)" }}>
+      <span style={{ width:8, height:8, borderRadius:4, background: on ? "var(--success)" : "rgba(255,255,255,0.2)" }} />{label}
+    </span>);
 
   return (
-    <div className="fade-in" style={{ display:"flex", flexDirection:"column", gap:"var(--gap)" }}>
+    <div className="fade-in" style={{ display:"flex", flexDirection:"column", gap:"var(--gap)" }} data-testid="integrations">
+      <div className="panel panel-pad chrome-top" data-testid="myob-card">
+        <div className="card-head" style={{ marginBottom:14, flexWrap:"wrap", gap:10 }}>
+          <div>
+            <div className="card-title">MYOB</div>
+            <div className="card-sub">Sends your invoices to MYOB Business or AccountRight (customer and GST included) and marks them paid here when they're paid in MYOB.</div>
+          </div>
+          {st && !st.error && <Dot on={st.connected} label={st.connected ? "Connected" + (st.business_name ? " — " + st.business_name : "") : st.status === "expired" ? "Sign-in expired" : "Not connected"} />}
+        </div>
 
-      {/* ── Platform selector ── */}
+        {!st ? <div className="card-sub">Loading…</div>
+        : st.error ? <div className="card-sub">Couldn't load the MYOB connection.</div>
+        : !st.configured ? (
+          <div className="comp-note" style={{ display:"block" }} data-testid="myob-not-configured">
+            MYOB connection isn't switched on for this platform yet. Meanwhile, download MYOB journal files from Accounting → Invoices and import them into MYOB.
+          </div>)
+        : !st.connected ? (
+          <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+            {isAdmin
+              ? <button className="btn btn-primary" disabled={!!busy} onClick={connect} data-testid="myob-connect">{busy === "connect" ? "Opening MYOB…" : "Connect MYOB"}</button>
+              : <div className="card-sub">Ask your account admin to connect MYOB.</div>}
+            <div className="card-sub" style={{ maxWidth:520 }}>You'll sign in on MYOB's own page and choose your company file. You need to be an Administrator user of that file.</div>
+          </div>)
+        : (<>
+          <div style={{ display:"flex", gap:24, flexWrap:"wrap", fontSize:14, marginBottom:14 }}>
+            <div><div className="card-sub">Last sync</div><div style={{ fontWeight:700, color:"var(--tx-hi)" }}>{fmt(st.last_sync)}</div></div>
+            <div><div className="card-sub">Invoices sent to MYOB</div><div style={{ fontWeight:700, color:"var(--tx-hi)" }}>{st.invoices_pushed}</div></div>
+          </div>
+          {st.last_error && <div className="comp-note" style={{ display:"block", marginBottom:12, color:"var(--amber)" }} data-testid="myob-error">Last problem: {st.last_error}</div>}
+          {isAdmin && form && (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12, marginBottom:14 }}>
+              <label className="card-sub">Income account (MYOB account number)
+                <input className="field-input" value={form.income_account} onChange={e => setForm({ ...form, income_account: e.target.value })} placeholder="4-1000" /></label>
+              <label className="card-sub">GST tax code
+                <input className="field-input" value={form.tax_code} onChange={e => setForm({ ...form, tax_code: e.target.value })} placeholder="GST" /></label>
+              <label className="card-sub" style={{ display:"flex", alignItems:"center", gap:10, paddingTop:18 }}>
+                <ToggleSwitch on={!!form.auto_push} onChange={v => setForm({ ...form, auto_push: v })} /> Send new invoices automatically</label>
+            </div>)}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <button className="btn btn-primary" disabled={!!busy} onClick={sync} data-testid="myob-sync">{busy === "sync" ? "Syncing…" : "Sync now"}</button>
+            {isAdmin && <button className="btn" disabled={!!busy} onClick={save}>Save settings</button>}
+            {isAdmin && <button className="btn" disabled={!!busy} onClick={disconnect} style={{ color:"var(--amber)" }}>Disconnect</button>}
+          </div>
+          <div className="card-sub" style={{ marginTop:10 }}>Syncs automatically every 15 minutes.</div>
+        </>)}
+        {st && st.configured && st.status === "expired" && isAdmin && (
+          <div className="card-sub" style={{ marginTop:10 }}>MYOB's sign-in has expired. Click Connect MYOB to sign in again — nothing already sent is lost.</div>)}
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:"var(--gap)" }}>
+        {ACCT_SOON.map(p => (
+          <div key={p.id} className="panel panel-pad chrome-top">
+            <div className="card-head" style={{ marginBottom:8 }}>
+              <div className="card-title">{p.name}</div>
+              <span className="card-sub" style={{ fontFamily:"var(--font-head)", fontWeight:700 }}>Coming soon</span>
+            </div>
+            <div className="card-sub">{p.desc}</div>
+          </div>))}
+      </div>
+
       <div className="panel panel-pad chrome-top">
-        <div className="card-head" style={{ marginBottom:16 }}>
-          <div>
-            <div className="card-title">Accounting Integrations</div>
-            <div className="card-sub">Connect your accounting package to sync invoices, payments, contacts and stock</div>
-          </div>
-          {connected && (
-            <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:12.5, fontFamily:"var(--font-head)", fontWeight:700, color:"var(--success)" }}>
-              <span style={{ width:8, height:8, borderRadius:4, background:"var(--success)" }} />
-              {plat.name} connected
-            </span>
-          )}
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
-          {ACCT_PLATFORMS.map(ap => {
-            const isSel = platform === ap.id;
-            const isConn = connected && isSel;
-            return (
-              <button key={ap.id} onClick={() => setPlatform(ap.id)}
-                style={{ textAlign:"left", padding:"18px 18px 16px", borderRadius:14, border:"2px solid " + (isSel ? "rgba(58,125,255,0.5)" : "var(--line)"), background: isSel ? "rgba(58,125,255,0.07)" : "rgba(255,255,255,0.02)", cursor:"pointer", position:"relative", transition:"all 0.15s" }}>
-                {ap.rec && <span style={{ position:"absolute", top:12, right:12, fontSize:10.5, fontFamily:"var(--font-head)", fontWeight:700, color:"var(--blue-light)", background:"rgba(58,125,255,0.12)", border:"1px solid rgba(58,125,255,0.25)", padding:"2px 8px", borderRadius:6 }}>Recommended</span>}
-                <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:20, color:"var(--tx-hi)", marginBottom:10 }}>{ap.name}</div>
-                <div style={{ fontSize:13, color:"var(--tx-dim)", lineHeight:1.55, marginBottom:14 }}>{ap.desc}</div>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                  <span style={{ display:"flex", alignItems:"center", gap:6, fontSize:12.5, color: isConn ? "var(--success)" : "var(--tx-faint)", fontFamily:"var(--font-head)" }}>
-                    <span style={{ width:7, height:7, borderRadius:3.5, background: isConn ? "var(--success)" : "rgba(255,255,255,0.2)", flexShrink:0 }} />
-                    {isConn ? "Connected" : "Not connected"}
-                  </span>
-                  {!isConn && isSel && (
-                    <span style={{ fontSize:13, color:"var(--blue-light)", fontFamily:"var(--font-head)", fontWeight:600 }}>Connect →</span>
-                  )}
-                  {isConn && (
-                    <span style={{ fontSize:12, color:"var(--tx-faint)", fontFamily:"var(--font-head)" }}>Active</span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Connection + sync settings ── */}
-      <div className="panel chrome-top" style={{ overflow:"hidden" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"var(--pad)", borderBottom:"1px solid var(--line)" }}>
-          <div>
-            <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:15, color:"var(--tx-hi)" }}>{plat.name} account</div>
-            <div className="card-sub">Sign in with your {plat.name} credentials to enable sync</div>
-          </div>
-          {!connected ? (
-            <button className="btn btn-primary" style={{ padding:"9px 20px", fontSize:13, opacity: connecting ? 0.7 : 1 }} onClick={handleConnect} disabled={connecting}>
-              <Icon d={ICONS.send} size={14} stroke={2} /> {connecting ? "Signing in…" : "Sign in to " + plat.name}
-            </button>
-          ) : (
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              <span className="card-sub" style={{ fontSize:12, fontFamily:"var(--font-head)" }}>Last sync {fmtSync(lastSync)}</span>
-              <button className="btn" style={{ padding:"9px 20px", fontSize:13, color:"var(--amber)", borderColor:"rgba(58,125,255,0.3)" }} onClick={handleDisconnect}>
-                Disconnect
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Sync toggles — 2-col grid */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr" }}>
-          {ACCT_SYNCS.map((s, i) => (
-            <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"15px var(--pad)", borderBottom:"1px solid var(--line)", borderRight: s.col === 0 ? "1px solid var(--line)" : "none" }}>
-              <div>
-                <div style={{ fontFamily:"var(--font-head)", fontWeight:600, fontSize:13.5, color:"var(--tx-hi)" }}>{s.label}</div>
-                <div className="card-sub" style={{ fontSize:12 }}>{s.sub}</div>
-              </div>
-              <ToggleSwitch on={syncToggles[s.id]} onChange={() => toggleSync(s.id)} disabled={!connected} />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Inventory integration ── */}
-      <div className="panel chrome-top" style={{ overflow:"hidden" }}>
-        <div style={{ padding:"var(--pad)", borderBottom:"1px solid var(--line)" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <span className="kpi-ico" style={{ color:"var(--teal)", width:36, height:36 }}><Icon d={ICONS.layers} size={18} stroke={2} /></span>
-            <div>
-              <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:15, color:"var(--tx-hi)" }}>Inventory Integration</div>
-              <div className="card-sub">Sync stock levels, purchase orders and COGS directly to your accounting package</div>
-            </div>
-          </div>
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr" }}>
-          {ACCT_INV_SYNCS.map((s) => (
-            <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"15px var(--pad)", borderBottom:"1px solid var(--line)", borderRight: s.col === 0 ? "1px solid var(--line)" : "none" }}>
-              <div>
-                <div style={{ fontFamily:"var(--font-head)", fontWeight:600, fontSize:13.5, color:"var(--tx-hi)" }}>{s.label}</div>
-                <div className="card-sub" style={{ fontSize:12 }}>{s.sub}</div>
-              </div>
-              <ToggleSwitch on={invToggles[s.id]} onChange={() => toggleInv(s.id)} disabled={!connected} />
-            </div>
-          ))}
-        </div>
-        {!connected && (
-          <div style={{ padding:"10px var(--pad)", background:"rgba(58,125,255,0.04)", borderTop:"1px solid var(--line)" }}>
-            <div style={{ fontSize:12.5, color:"var(--tx-faint)", fontFamily:"var(--font-head)" }}>
-              <Icon d={ICONS.alert} size={12} stroke={2} style={{ verticalAlign:"-2px", marginRight:6 }} />
-              Connect an accounting package above to enable inventory sync
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Stripe payments ── */}
-      <div style={{ borderRadius:16, overflow:"hidden", background:"#0d1b30", border:"1px solid rgba(58,125,255,0.2)" }}>
-        <div style={{ padding:"var(--pad)" }}>
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:16, flexWrap:"wrap" }}>
-            <div>
-              <div style={{ fontSize:11, fontFamily:"var(--font-head)", fontWeight:800, letterSpacing:"0.1em", color:"#63B3ED", textTransform:"uppercase", marginBottom:6 }}>Stripe Payments</div>
-              <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:20, color:"#e8f4ff", marginBottom:8 }}>Accept card payments on every invoice</div>
-              <div style={{ fontSize:13.5, color:"rgba(58,125,255,0.85)", lineHeight:1.6, maxWidth:500 }}>
-                Every invoice carries a pay-now link. Payments reconcile automatically against your accounting integration above.
-              </div>
-            </div>
-            {!stripeOn ? (
-              <button onClick={() => { setStripeOn(true); window.ssToast && window.ssToast("Stripe connected — redirect to Stripe onboarding"); }}
-                style={{ padding:"11px 22px", borderRadius:10, border:"none", background:"#635BFF", color:"#fff", fontFamily:"var(--font-head)", fontWeight:700, fontSize:14, cursor:"pointer", flexShrink:0, whiteSpace:"nowrap" }}>
-                Connect Stripe →
-              </button>
-            ) : (
-              <span style={{ display:"flex", alignItems:"center", gap:7, fontSize:13, fontFamily:"var(--font-head)", fontWeight:700, color:"#4FD8A4", flexShrink:0 }}>
-                <span style={{ width:8, height:8, borderRadius:4, background:"#4FD8A4" }} /> Stripe connected
-              </span>
-            )}
-          </div>
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", borderTop:"1px solid rgba(58,125,255,0.15)" }}>
-          {[
-            { id:"paynow",        label:"Pay-now links",     sub:"On every invoice PDF and email" },
-            { id:"autoreconcile", label:"Auto-reconcile",    sub:"Payments matched to invoices" },
-            { id:"surcharge",     label:"Surcharge pass-through", sub:"1.75% card fee to customer" },
-          ].map((s, i) => (
-            <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px", borderRight: i < 2 ? "1px solid rgba(58,125,255,0.15)" : "none" }}>
-              <div>
-                <div style={{ fontFamily:"var(--font-head)", fontWeight:600, fontSize:13, color:"#e8f4ff" }}>{s.label}</div>
-                <div style={{ fontSize:11.5, color:"rgba(58,125,255,0.65)" }}>{s.sub}</div>
-              </div>
-              <ToggleSwitch on={stripeToggles[s.id]} onChange={() => toggleStripe(s.id)} disabled={!stripeOn} />
-            </div>
-          ))}
-        </div>
+        <div className="card-title" style={{ marginBottom:6 }}>Card payments</div>
+        <div className="card-sub">Customers can pay invoices by card from their portal, and a card-paid invoice is marked paid here automatically. Record that payment in MYOB as usual — sending card payments to MYOB automatically isn't built yet.</div>
       </div>
     </div>
   );
@@ -9206,7 +9110,8 @@ function NewInvoiceModal({ onClose, onCreate }) {
 }
 
 function TenantFinancials() {
-  const [tab, setTab] = useTE("overview");
+  // Returning from MYOB's sign-in page lands straight on the Integrations tab.
+  const [tab, setTab] = useTE(/[?&]myob=/.test(location.search) ? "integrations" : "overview");
   const [selInv, setSelInv] = useTE(null);
   const [showNew, setShowNew] = useTE(false);
   const [revRange, setRevRange] = useTE("6mo");
@@ -22157,6 +22062,8 @@ function App() {
     window.addEventListener("ss:goto-screen", h);
     return () => window.removeEventListener("ss:goto-screen", h);
   }, [portal, screen]);
+  // Back from MYOB's sign-in page (/app?myob=…) → open Financials → Integrations.
+  useEffM(() => { if (portal === "tenant" && /[?&]myob=/.test(location.search)) setScreen("financials"); }, [portal]);
 
   if (!authed) return <LoginScreen onLogin={applyLogin} />;
   // Demo vs live: the "viewing as" portal switcher only appears when demo

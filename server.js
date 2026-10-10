@@ -15,6 +15,7 @@ const stc = require("./stc");
 const platformHealth = require("./platform-health");
 const proposalTemplate = require("./proposal-template");
 const { cleanHtml, cleanText, safeImageUrl } = require("./html-clean");
+const myob = require("./myob");
 
 const app = express();
 // Gzip responses — the single-page app is several MB of text and compresses ~3x.
@@ -1213,6 +1214,7 @@ app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff",
   await audit(req.user.sub, "create_invoice", id, tenantOf(req));
   const inv = await one("select * from invoices where id=$1", [id]);
   try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (invoice) failed:", e.message); }
+  myob.onInvoiceCreated(inv);   // pushes to the tenant's MYOB file when connected (never blocks)
   ok(res, inv);
 }));
 
@@ -1233,6 +1235,7 @@ app.post("/api/quotes/:id/invoice", A.authRequired, A.requireRole("tenant_admin"
   await audit(req.user.sub, "quote_to_invoice", id, q.tenant_id, { quote: q.id });
   const inv = await one("select * from invoices where id=$1", [id]);
   try { await erp.postInvoiceCreated(inv, req.user.sub); } catch (e) { console.error("ledger post (quote invoice) failed:", e.message); }
+  myob.onInvoiceCreated(inv);
   ok(res, inv);
 }));
 
@@ -1669,6 +1672,7 @@ app.get("/api/roof-image", (req, res) => {
 // financial reports, BAS, bank rec, Xero/MYOB export (erp.js)
 // ============================================================
 erp.register(app, { h, ok, tenantOf });
+myob.register(app, { h, ok, erp });
 
 // ============================================================
 // Staff & contractor seat management (staff-seats.js)
