@@ -10981,19 +10981,19 @@ const PALETTES = [
   { id: "slate",      name: "Slate",         accent: ["#B8C8D8","#6A8090","#2A4050"], glow: "106,128,144"  },
   { id: "steel",      name: "Steel",         accent: ["#C8D0D8","#7080A0","#304060"], glow: "112,128,160"  },
   /* Vivid — full-saturation colours across the whole spectrum, for the dark portal */
-  { id: "vblue",      name: "Electric Blue", accent: ["#8AB4FF","#2F6BFF","#0A2FA8"], glow: "47,107,255"   },
-  { id: "vroyal",     name: "Royal Blue",    accent: ["#9AA8FF","#3D4BFF","#1A1F9E"], glow: "61,75,255"    },
-  { id: "vcyan",      name: "Vivid Cyan",    accent: ["#80F0FF","#00C2FF","#006A99"], glow: "0,194,255"    },
-  { id: "vturq",      name: "Turquoise",     accent: ["#7FFFE8","#00E0C0","#007A68"], glow: "0,224,192"    },
-  { id: "vgreen",     name: "Vivid Green",   accent: ["#8CFFB0","#00E060","#007A30"], glow: "0,224,96"     },
-  { id: "vlime",      name: "Vivid Lime",    accent: ["#E0FF80","#A8F000","#507800"], glow: "168,240,0"    },
-  { id: "vyellow",    name: "Vivid Yellow",  accent: ["#FFF080","#FFD500","#A07800"], glow: "255,213,0"    },
-  { id: "vorange",    name: "Vivid Orange",  accent: ["#FFC080","#FF8A00","#A84800"], glow: "255,138,0"    },
-  { id: "vred",       name: "Vivid Red",     accent: ["#FF9A9A","#FF2E2E","#A80000"], glow: "255,46,46"    },
-  { id: "vpink",      name: "Hot Pink",      accent: ["#FF9AD0","#FF2E9A","#A8005A"], glow: "255,46,154"   },
-  { id: "vmagenta",   name: "Vivid Magenta", accent: ["#FF9AF5","#F020E0","#8A0088"], glow: "240,32,224"   },
-  { id: "vpurple",    name: "Vivid Purple",  accent: ["#D0A8FF","#9B30FF","#5000A8"], glow: "155,48,255"   },
-  { id: "vviolet",    name: "Ultra Violet",  accent: ["#B8A8FF","#6E3BFF","#3200B0"], glow: "110,59,255"   },
+  { id: "vblue",      name: "Electric Blue", accent: ["#2F6BFF","#2F6BFF","#0A2FA8"], glow: "47,107,255"   },
+  { id: "vroyal",     name: "Royal Blue",    accent: ["#3D4BFF","#3D4BFF","#1A1F9E"], glow: "61,75,255"    },
+  { id: "vcyan",      name: "Vivid Cyan",    accent: ["#00C2FF","#00C2FF","#006A99"], glow: "0,194,255"    },
+  { id: "vturq",      name: "Turquoise",     accent: ["#00E0C0","#00E0C0","#007A68"], glow: "0,224,192"    },
+  { id: "vgreen",     name: "Vivid Green",   accent: ["#00E060","#00E060","#007A30"], glow: "0,224,96"     },
+  { id: "vlime",      name: "Vivid Lime",    accent: ["#A8F000","#A8F000","#507800"], glow: "168,240,0"    },
+  { id: "vyellow",    name: "Vivid Yellow",  accent: ["#FFD500","#FFD500","#A07800"], glow: "255,213,0"    },
+  { id: "vorange",    name: "Vivid Orange",  accent: ["#FF8A00","#FF8A00","#A84800"], glow: "255,138,0"    },
+  { id: "vred",       name: "Vivid Red",     accent: ["#FF2E2E","#FF2E2E","#A80000"], glow: "255,46,46"    },
+  { id: "vpink",      name: "Hot Pink",      accent: ["#FF2E9A","#FF2E9A","#A8005A"], glow: "255,46,154"   },
+  { id: "vmagenta",   name: "Vivid Magenta", accent: ["#F020E0","#F020E0","#8A0088"], glow: "240,32,224"   },
+  { id: "vpurple",    name: "Vivid Purple",  accent: ["#9B30FF","#9B30FF","#5000A8"], glow: "155,48,255"   },
+  { id: "vviolet",    name: "Ultra Violet",  accent: ["#6E3BFF","#6E3BFF","#3200B0"], glow: "110,59,255"   },
   /* Base44 Collection — the exact palette from the Base44 proposal template */
   { id: "b44navy",    name: "Base44 Navy",    accent: ["#94A3B8","#334155","#0F172A"], glow: "51,65,85"     },
   { id: "b44indigo",  name: "Base44 Indigo",  accent: ["#A5B4FC","#6366F2","#4338CA"], glow: "99,102,242"   },
@@ -11206,7 +11206,9 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
   const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
   const mix = (h, to, t) => "#" + hexRgb(h).map(v => Math.round(v + (to - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
   // One colour → a matching light / main / dark set.
-  const shadesOf = h => [mix(h, 255, 0.45), h.toUpperCase(), mix(h, 0, 0.45)];
+  // One colour → light / main / dark. Light = the colour itself (like the original
+  // SolarSync Blue) so buttons, bars and highlights stay full-strength, not pastel.
+  const shadesOf = h => [h.toUpperCase(), h.toUpperCase(), mix(h, 0, 0.55)];
   const customSet = custom || (isValidHex(customHex) ? shadesOf(customHex) : null);
   const hexPal = customSet
     ? { id: "custom", name: "Custom", accent: customSet, glow: hexRgb(customSet[1]).join(",") }
@@ -11385,7 +11387,7 @@ function BrandingEditor({ brand, tenantId, onSaved }) {
             <div style={{ display: "grid", gridTemplateColumns: showPB ? "1fr 1fr" : "repeat(3,1fr)", gap: 12, padding: 18 }}>
               {(showPB ? ["My System", "Next Service"] : ["Active Jobs", "Revenue", "Compliance"]).map((t, i) => (
                 <div key={i} className="panel" style={{ padding: 14 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 9, marginBottom: 10, background: "rgba(58,125,255,0.2)", boxShadow: "inset 0 0 0 1px rgba(58,125,255,0.25)" }} />
+                  <div style={{ width: 30, height: 30, borderRadius: 9, marginBottom: 10, background: `rgba(${pal.glow},0.28)`, boxShadow: `inset 0 0 0 1px rgba(${pal.glow},0.45)` }} />
                   <div style={{ fontSize: 11.5, color: "var(--tx-dim)", fontFamily: "var(--font-head)" }}>{t}</div>
                   <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 24, color: "var(--tx-hi)" }}>{showPB ? ["6.6kW", "Jul 14"][i] : ["12", "$156k", "84%"][i]}</div>
                   <div style={{ height: 3, borderRadius: 2, marginTop: 10, background: "var(--blue-light)" }} />
@@ -13312,7 +13314,7 @@ const PROV_PALETTES = [
 function provShades(h) {
   const rgb = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
   const mix = (to, t) => "#" + rgb.map(v => Math.round(v + (to - v) * t).toString(16).padStart(2, "0")).join("").toUpperCase();
-  return [mix(255, 0.45), h.toUpperCase(), mix(0, 0.45)];
+  return [h.toUpperCase(), h.toUpperCase(), mix(0, 0.55)];
 }
 function ProvisionModal({ onClose }) {
   const [step, setStep] = useStateR(1);
