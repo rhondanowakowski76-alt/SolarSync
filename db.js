@@ -18,7 +18,12 @@ async function init() {
       ssl: { rejectUnauthorized: false },
       max: 5,
       options: "-c search_path=app,public",   // use our own schema (PG15+ locks down public)
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
     });
+    // Maintenance or failover drops idle connections; without a listener that error
+    // would stop the whole server. The pool opens fresh connections on the next query.
+    _db.on("error", (e) => console.error("[db] idle connection dropped:", e.code || e.message));
   } else {
     const { PGlite } = require("@electric-sql/pglite");
     const path = require("path");
@@ -36,9 +41,20 @@ async function db() {
 }
 
 // Both pg.Pool and PGlite expose .query(sql, params) -> { rows }
+// A query hit by a database restart (maintenance or failover, usually 5–10 seconds)
+// is retried: either it never connected, or the server cancelled it and rolled it
+// back (57P0x), so retrying can't apply anything twice.
+const CONNECT_FAIL = new Set(["ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "57P01", "57P02", "57P03"]);
+const connectFailed = (e) => CONNECT_FAIL.has(e.code) || /timeout exceeded when trying to connect/i.test(e.message || "");
 async function query(sql, params = []) {
   const d = await db();
-  return d.query(sql, params);
+  for (let attempt = 0; ; attempt++) {
+    try { return await d.query(sql, params); }
+    catch (e) {
+      if (!process.env.DATABASE_URL || attempt >= 4 || !connectFailed(e)) throw e;
+      await new Promise(r => setTimeout(r, 1000 * 2 ** attempt));   // 1s, 2s, 4s, 8s
+    }
+  }
 }
 async function rows(sql, params = []) { return (await query(sql, params)).rows; }
 async function one(sql, params = []) { return (await query(sql, params)).rows[0] || null; }
