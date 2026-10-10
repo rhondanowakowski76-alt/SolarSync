@@ -11448,8 +11448,13 @@ const { useState: useCalS, useEffect: useCalE } = React;
 const CAL_TYPES = [
   { id: "install",         label: "Installation",  color: "#0F1E3A"   },
   { id: "clean",           label: "Panel Clean",   color: "#3A7DFF"   },
-  { id: "inspection",      label: "Inspection",    color: "#1E5BD6"   },
-  { id: "test",            label: "Testing",       color: "#FFC93C"   },
+  { id: "inspection",      label: "Site Inspection", color: "#1E5BD6" },
+  { id: "test",            label: "Operational Testing", color: "#FFC93C" },
+  { id: "fault_finding",   label: "Fault Finding", color: "#E5484D"   },
+  { id: "inverter_check",  label: "Inverter Check", color: "#F08C2E"  },
+  { id: "warranty_claim",  label: "Inverter Warranty Claim", color: "#B8558C" },
+  { id: "callout",         label: "Site Call-out", color: "#6B4FD8"   },
+  { id: "pigeon_proofing", label: "Pigeon Proofing", color: "#3F8F4F" },
   { id: "handover",        label: "Handover",      color: "#0F1E3A"   },
   { id: "service_request", label: "Svc Request",   color: "#3A7DFF"   },
   { id: "misc",            label: "Miscellaneous", color: "#2E9E8F"   },
@@ -12746,8 +12751,13 @@ window.ResellerCalendar = ResellerCalendar;
 
 const CLIENT_SVC = [
   { id: "clean",      label: "Panel Clean",       desc: "Remove dust, grime and bird waste" },
-  { id: "inspection", label: "System Inspection",  desc: "Full electrical and mounting check" },
-  { id: "test",       label: "Performance Test",   desc: "Inverter output and monitoring check" },
+  { id: "inspection", label: "Site Inspection",    desc: "Full electrical and mounting check" },
+  { id: "test",       label: "Operational Testing", desc: "System output and monitoring check" },
+  { id: "fault_finding",   label: "Fault Finding",   desc: "Track down why the system isn't working" },
+  { id: "inverter_check",  label: "Inverter Check",  desc: "Error codes, output and connections checked" },
+  { id: "warranty_claim",  label: "Inverter Warranty Claim", desc: "We test the inverter and lodge the claim" },
+  { id: "callout",         label: "Site Call-out",   desc: "A technician visits your site (call-out fee applies)" },
+  { id: "pigeon_proofing", label: "Pigeon Proofing", desc: "Mesh to keep birds out from under the panels" },
   { id: "misc",       label: "Miscellaneous",      desc: "Any other job — tell us what you need" },
   { id: "other",      label: "Other / General",    desc: "Any other service or enquiry" },
 ];
@@ -12781,7 +12791,7 @@ function ClientCalendar({ tenantId, clientName }) {
     // so a silent failure (e.g. account not linked) can never look like success.
     const created = await addEvt({
       title: myClient + " — " + (isQuote ? "Quote: " : "") + svcLabel,
-      type: !isQuote && ["clean", "inspection", "test", "misc"].includes(svcType) ? svcType : "service_request",
+      type: !isQuote && ["clean", "inspection", "test", "fault_finding", "inverter_check", "warranty_claim", "callout", "pigeon_proofing", "misc"].includes(svcType) ? svcType : "service_request",
       date: isQuote ? "" : reqDate, time: isQuote ? "" : reqTime,
       end: isQuote ? "" : reqTime, client: myClient, suburb: "", installer: "",
       status: "pending", notes: (isQuote ? "Quote request. " : "") + (reqNotes || ""), jobId: "", src: "client",
@@ -16061,7 +16071,7 @@ const $ = n => "$" + Math.round(n).toLocaleString();
 const TODAY_JOBS = [
   { id: "SS-1042", client: "Smith Residence", suburb: "Toowoomba QLD", time: "8:30 AM", type: "Solar Install", system: "6.6 kW · 16 panels", status: "In progress", eta: "Finishing today" },
   { id: "SS-1044", client: "Nguyen Residence", suburb: "Logan QLD", time: "1:00 PM", type: "Panel Cleaning", system: "22 panels", status: "Scheduled", eta: "2h site time" },
-  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", time: "3:30 PM", type: "Operational Test", system: "24 kW system", status: "Scheduled", eta: "1h on-site" },
+  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", time: "3:30 PM", type: "Operational Testing", system: "24 kW system", status: "Scheduled", eta: "1h on-site" },
 ];
 
 function ContractorToday({ user }) {
@@ -18163,8 +18173,13 @@ function ClientBook() {
   const [quoteInverter, setQuoteInverter] = useCL(CLIENT.inverter);
   const TYPES = [
     { id: "clean",      label: "Panel Cleaning",     price: "$220",     desc: "Soft-wash clean of all 16 panels · ~2 hrs on-site",      icon: "clean" },
-    { id: "test",       label: "Performance Test",   price: "$180",     desc: "Full string test, inverter check, output report",         icon: "pulse" },
-    { id: "inspection", label: "Health Inspection",  price: "Included", desc: "Annual visual & electrical safety inspection",            icon: "eye" },
+    { id: "test",       label: "Operational Testing", price: "$180",    desc: "Full string test, inverter check, output report",         icon: "pulse" },
+    { id: "inspection", label: "Site Inspection",    price: "Included", desc: "Annual visual & electrical safety inspection",            icon: "eye" },
+    { id: "fault_finding",   label: "Fault Finding",   price: "Quote", desc: "Track down why the system isn't working",                icon: "alert" },
+    { id: "inverter_check",  label: "Inverter Check",  price: "Quote", desc: "Error codes, output and connections checked",            icon: "bolt" },
+    { id: "warranty_claim",  label: "Inverter Warranty Claim", price: "Quote", desc: "We test the inverter and lodge the claim",       icon: "compliance" },
+    { id: "callout",         label: "Site Call-out",   price: "Call-out fee", desc: "A technician visits your site",                    icon: "pin" },
+    { id: "pigeon_proofing", label: "Pigeon Proofing", price: "Quote", desc: "Mesh to keep birds out from under the panels",          icon: "leaf" },
     { id: "battery",    label: "Add a Battery",      price: "Quote",    desc: "Grid-connect, off-grid, or AC-coupled storage",          icon: "battery" },
     { id: "ev",         label: "EV Charger",         price: "Quote",    desc: "Smart solar EV charger — Zappi, Tesla or Wallbox",       icon: "zap" },
     { id: "hotwater",   label: "Hot Water Diverter", price: "From $390",desc: "Divert excess solar to your hot water system",          icon: "sun" },
@@ -18177,7 +18192,7 @@ function ClientBook() {
     const meta = TYPES.find(t => t.id === type) || {};
     const isQuote = kind === "quote" || kind === "review";
     // Quote-style enquiries (battery/EV/etc.) show as a generic request; datable services carry their real type.
-    const bookingType = ["clean", "test", "inspection"].includes(type) ? type : "service_request";
+    const bookingType = ["clean", "inspection", "test", "fault_finding", "inverter_check", "warranty_claim", "callout", "pigeon_proofing"].includes(type) ? type : "service_request";
     const dateStr = "2026-07-" + String(date).padStart(2, "0");
     const noteBits = [];
     if (isQuote) {
@@ -20062,13 +20077,13 @@ const $$ = n => "$" + Math.round(n).toLocaleString();
 const CLEAN_JOBS_INIT = [
   { id: "SS-1044", client: "Nguyen Residence", suburb: "Logan QLD", address: "14 Solar St, Logan QLD 4114", phone: "0412 345 678", email: "nguyen@email.com", date: "Tue 25 May", type: "Panel Clean", count: "22 panels", system: "6.6 kW · Jinko 300W × 22", crew: "Mia Tran", status: "scheduled", value: 480, notes: "", result: "" },
   { id: "SS-1051", client: "Brookman Home", suburb: "Cleveland QLD", address: "7 Harbour Rd, Cleveland QLD 4163", phone: "0423 456 789", email: "brookman@email.com", date: "Wed 26 May", type: "Panel Clean", count: "16 panels", system: "5 kW · Trina 310W × 16", crew: "Joel Ruiz", status: "scheduled", value: 360, notes: "", result: "" },
-  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", address: "23 Trade Dr, Acacia Ridge QLD 4110", phone: "07 3344 5678", email: "admin@healywarehouse.com.au", date: "Thu 28 May", type: "Operational Test", count: "24 kW system", system: "24 kW · Sungrow SH25T", crew: "Dan Webb", status: "scheduled", value: 650, notes: "Access via rear gate — call ahead", result: "" },
+  { id: "SS-1045", client: "Healy Warehouse", suburb: "Acacia Ridge QLD", address: "23 Trade Dr, Acacia Ridge QLD 4110", phone: "07 3344 5678", email: "admin@healywarehouse.com.au", date: "Thu 28 May", type: "Operational Testing", count: "24 kW system", system: "24 kW · Sungrow SH25T", crew: "Dan Webb", status: "scheduled", value: 650, notes: "Access via rear gate — call ahead", result: "" },
   { id: "SS-1030", client: "Riverside Cafe", suburb: "Brisbane QLD", address: "1 River Esplanade, Brisbane QLD 4000", phone: "07 3210 9876", email: "manager@riversidecafe.com.au", date: "Fri 29 May", type: "Panel Clean + Test", count: "22 panels", system: "8.8 kW · REC Alpha 400W × 22", crew: "Mia Tran", status: "scheduled", value: 720, notes: "", result: "" },
   { id: "SS-1024", client: "Marlow Cottage", suburb: "Redlands QLD", address: "3 Bayside Cres, Redlands QLD 4165", phone: "0434 567 890", email: "marlow@email.com", date: "Mon 19 May", type: "Annual Service", count: "12 panels", system: "5 kW · Jinko 415W × 12", crew: "Joel Ruiz", status: "done", value: 280, notes: "All panels cleaned, inverter checked", result: "pass" },
   { id: "SS-1020", client: "Patel Townhouse", suburb: "Ipswich QLD", address: "88 Queen St, Ipswich QLD 4305", phone: "0445 678 901", email: "patel@email.com", date: "Fri 16 May", type: "Panel Clean", count: "10 panels", system: "3.3 kW · Trina 330W × 10", crew: "Mia Tran", status: "done", value: 220, notes: "", result: "pass" },
 ];
 const CLEAN_CREW = ["Dan Webb", "Kira Park", "Mia Tran", "Joel Ruiz", "Unassigned"];
-const CLEAN_TYPES = ["Panel Clean", "Operational Test", "Panel Clean + Test", "Annual Service", "Inspection", "Fault Diagnosis"];
+const CLEAN_TYPES = ["Panel Clean", "Operational Testing", "Panel Clean + Test", "Annual Service", "Site Inspection", "Fault Finding", "Inverter Check", "Inverter Warranty Claim", "Site Call-out", "Pigeon Proofing", "Miscellaneous"];
 const CLEAN_RESULTS = ["pass", "fail", "partial"];
 
 function CleanJobModal({ job, onSave, onClose }) {
