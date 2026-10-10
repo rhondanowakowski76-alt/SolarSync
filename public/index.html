@@ -2729,7 +2729,7 @@ const BRANDS = {
     id: "voltaic", name: "Voltaic Energy", word: ["Voltaic", "Energy"],
     accent: ["#C9B0FF", "#8B5CF6", "#5B27C4"], glow: "139,92,246",
     tagline: "Smarter solar, stored", plan: "Growth", since: "2024",
-    domain: "app.voltaic.energy", region: "VIC", users: 21, installs: 187, mrr: 499,
+    domain: "app.voltaic.energy", region: "VIC", users: 21, installs: 187, mrr: 599,
   },
   azure: {
     id: "azure", name: "Azimuth Solar", word: ["Azimuth", "Solar"],
@@ -3743,6 +3743,7 @@ const PORTAL_NAV = {
     { id: "documents", label: "Documents", icon: "docs" },
     { id: "forms", label: "AS Forms", icon: "compliance" },
     { id: "branding", label: "Branding", icon: "palette" },
+    { id: "proposaltpl", label: "Proposal Template", icon: "docs" },
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "subscription", label: "Subscription", icon: "card" },
   ],
@@ -3771,6 +3772,9 @@ const PORTAL_NAV = {
   ],
 };
 window.PORTAL_NAV = PORTAL_NAV;
+// What a company on the Templates plan ($19/month, templates only) can open.
+const TEMPLATES_PLAN_SCREENS = ["proposaltpl", "branding", "documents", "subscription"];
+window.TEMPLATES_PLAN_SCREENS = TEMPLATES_PLAN_SCREENS;
 
 const PORTAL_LABEL = {
   reseller: { title: "Reseller Portal", who: "SolarSync CRM — platform owner", role: "Reseller Admin" },
@@ -6518,6 +6522,664 @@ const SITE_MARKERS = {
   switchboard: { label: "Switchboard",  color: "#F04545", letter: "S" },
 };
 
+/* ============================================================
+   "Bold" proposal template — 12 landscape (16:9) pages.
+   Every text block is editable in place (plain text only), every photo can be
+   swapped, and the look is Blue, Dark or the tenant's brand colour. The tenant's
+   company template (Settings → Proposal template) sets defaults; each proposal
+   can then be changed on its own. Server: proposal-template.js.
+   ============================================================ */
+const BOLD_PAGES = [
+  ["cover", "Cover"], ["intro", "Introduction"], ["overview", "Project overview"], ["glance", "System at a glance"],
+  ["benefits", "Benefits"], ["savings", "Your savings"], ["invest", "Investment & sign-off"], ["timeline", "Installation timeline"],
+  ["whyus", "Why choose us"], ["next", "What happens next"], ["ready", "Ready to get started"], ["contact", "Contact us"],
+];
+const BOLD_PHOTOS = [
+  ["hero", "Cover — finished home"], ["team", "Introduction — your team"], ["meter", "Card — system size"], ["app", "Card — output / monitoring"],
+  ["panels", "Card — panels"], ["inverter", "Card — inverter & battery"], ["install", "Timeline — install / aerial"], ["closeup", "Why us — second home"],
+  ["handover", "Next steps — handover"], ["sign", "Card — accept"], ["phone", "Card — get in touch"], ["sky", "Contact page"],
+];
+const BOLD_CSS = `
+.bp-pg{width:1280px;height:720px;position:relative;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Poppins,Arial,sans-serif;box-sizing:border-box}
+.bp-pg *{box-sizing:border-box;margin:0;padding:0}
+.bp-pg .h{font-family:'Red Hat Display',Arial,sans-serif;font-weight:900;text-transform:uppercase;letter-spacing:-.01em;line-height:.95;color:var(--ink)}
+.bp-pg .slab{position:absolute;filter:drop-shadow(-10px 8px 14px rgba(0,0,0,.28))}
+.bp-pg .s1{background:var(--b1)}.bp-pg .s2{background:var(--b2)}.bp-pg .s3{background:var(--b3)}
+.bp-pg .ph{position:absolute;background-color:var(--b2);background-size:cover;background-position:center}
+.bp-pg .ph.empty{display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.85);font-size:15px}
+.bp-pg .logo{position:absolute;display:flex;align-items:center;gap:14px;z-index:5}
+.bp-pg .logo .badge{background:#fff;border-radius:12px;padding:8px 12px;display:flex;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.bp-pg .logo .badge img{display:block;max-height:64px;max-width:200px;object-fit:contain}
+.bp-pg .logo .ini{width:64px;height:64px;border-radius:12px;background:var(--b1);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Red Hat Display',Arial,sans-serif;font-weight:900;font-size:26px}
+.bp-pg .logo .txt{font-size:19px;line-height:1.15;font-weight:500;color:var(--logoInk);max-width:260px}
+.bp-pg .logo.on .txt{color:#fff}
+.bp-pg .pgno{position:absolute;right:28px;bottom:18px;font-size:12px;font-weight:600;color:#fff;background:var(--b3);border-radius:12px;padding:2px 10px;z-index:9}
+.bp-pg .card{position:absolute;display:flex;align-items:center}
+.bp-pg .card .thumb{width:130px;height:146px;border-radius:8px;background-color:var(--b2);background-size:cover;background-position:center;flex:none;position:relative;z-index:2;box-shadow:0 6px 14px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center}
+.bp-pg .card .thumb.soft{background:var(--soft)}
+.bp-pg .card .panel{background:var(--card);color:#fff;min-height:118px;border-radius:0 10px 10px 0;margin-left:-6px;padding:14px 26px 14px 46px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.bp-pg .card .panel b{font-weight:400;font-size:25px;line-height:1.15}
+.bp-pg .card .panel p{font-size:14.5px;line-height:1.3;opacity:.92;margin-top:4px}
+.bp-pg .copy h4{font-weight:500;font-size:26px;margin-bottom:4px;color:var(--ink)}
+.bp-pg .copy p{font-size:16px;line-height:1.4;padding-left:26px;color:var(--ink);opacity:.92;margin-bottom:20px}
+.bp-pg .stat{background:var(--card);color:#fff;border-radius:10px;padding:18px 24px}
+.bp-pg .stat b{display:block;font-family:'Red Hat Display',Arial,sans-serif;font-weight:900;font-size:42px;line-height:1}
+.bp-pg .stat span{font-size:15px;opacity:.9}
+.bp-pg table{border-collapse:collapse;width:100%}
+.bp-pg td{padding:10px 0;font-size:16px;border-bottom:1px solid rgba(255,255,255,.2)}
+.bp-pg td.r{text-align:right}
+.bp-pg .row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(127,127,127,.25);font-size:15.5px;color:var(--ink)}
+.bp-pg [contenteditable]{outline:none;border-radius:3px;cursor:text}
+.bp-pg [contenteditable]:hover{box-shadow:0 0 0 2px rgba(29,111,209,.45)}
+.bp-pg [contenteditable]:focus{box-shadow:0 0 0 2px #1d6fd1;background:rgba(255,255,255,.08)}
+.bp-pg .swap{position:absolute;inset:auto 10px 10px auto;z-index:20;background:rgba(0,0,0,.65);color:#fff;font-size:12px;border-radius:6px;padding:4px 9px;cursor:pointer;border:0;font-family:Poppins,Arial}
+`;
+const BOLD_ICON = {
+  dollar: "M12 2v20M17 6.5C16 5 14.3 4.5 12 4.5c-2.8 0-4.5 1.3-4.5 3.3 0 4.7 9.5 2.6 9.5 7.6 0 2.1-1.9 3.6-5 3.6-2.6 0-4.4-.8-5.4-2.5",
+  leaf: "M5 19c9 1 14-5 14-15C9 4 4 9 5 19zM5 19l8-8",
+  plug: "M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5",
+  doc: "M7 2h7l5 5v15H7zM14 2v5h5M10 13h6M10 17h6",
+  shield: "M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5zM8.5 12l2.5 2.5 4.5-5",
+  medal: "M12 3a6 6 0 1 0 0 12 6 6 0 1 0 0-12zM8.5 14L7 22l5-3 5 3-1.5-8",
+  tools: "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z",
+  star: "M12 2l3 6.5 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21l1.5-7L2 9.3l7-.8z",
+  phone: "M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z",
+  mail: "M3 5h18v14H3zM3 7l9 6 9-6",
+  globe: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
+  pin: "M12 22s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12zM12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5",
+};
+const BpIcon = ({ k, size, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={BOLD_ICON[k]} /></svg>
+);
+
+// Colours — keep in step with palette() in proposal-template.js.
+function boldMix(a, b, t) {
+  const p = x => [1, 3, 5].map(i => parseInt(x.slice(i, i + 2), 16));
+  const A1 = p(a), B1 = p(b);
+  return "#" + A1.map((v, i) => Math.round(v + (B1[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+function boldPalette(look, base) {
+  if (look === "dark") return { "--bg": "#06162e", "--ink": "#ffffff", "--muted": "#9aa8c0", "--b1": "#0f4f9a", "--b2": "#1d6fd1", "--b3": "#0a3770", "--card": "#0e2a52", "--logoInk": "#ffffff", "--soft": "#0c2346" };
+  if (look === "brand" && /^#[0-9a-f]{6}$/i.test(base || "")) return { "--bg": "#ffffff", "--ink": "#141414", "--muted": "#6b7280", "--b1": boldMix(base, "#ffffff", 0.08), "--b2": boldMix(base, "#ffffff", 0.32), "--b3": boldMix(base, "#000000", 0.06), "--card": base, "--logoInk": boldMix(base, "#000000", 0.45), "--soft": boldMix(base, "#ffffff", 0.9) };
+  return { "--bg": "#ffffff", "--ink": "#0b0b0b", "--muted": "#6b7280", "--b1": "#003a78", "--b2": "#0052a0", "--b3": "#00295a", "--card": "#00336d", "--logoInk": "#0a2f66", "--soft": "#eef3fa" };
+}
+
+// Shrink a picked photo to ~1600px JPEG before it is stored.
+function boldResize(file, max) {
+  return new Promise((res, rej) => {
+    if (!file || !/^image\//.test(file.type)) return rej(new Error("not_image"));
+    const r = new FileReader();
+    r.onload = ev => {
+      const im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, (max || 1600) / Math.max(im.width, im.height));
+        const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        res(c.toDataURL("image/jpeg", 0.8));
+      };
+      im.onerror = () => rej(new Error("bad_image"));
+      im.src = ev.target.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+// Plain-text editable block. Uncontrolled while focused so typing never jumps.
+function BpText({ value, onCommit, editable, as, className, style }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (el && document.activeElement !== el && el.innerText !== value) el.innerText = value;
+  }, [value]);
+  return React.createElement(as || "div", {
+    ref, className: "bp-t" + (className ? " " + className : ""), style: { whiteSpace: "pre-line", ...(style || {}) },
+    contentEditable: editable ? "true" : undefined, suppressContentEditableWarning: true, spellCheck: editable ? true : undefined,
+    onBlur: editable ? e => { const v = e.currentTarget.innerText.replace(/\n{3,}/g, "\n\n").trim(); if (v !== value) onCommit(v); } : undefined,
+    onKeyDown: editable ? e => { if (e.key === "Escape") e.currentTarget.blur(); } : undefined,
+  });
+}
+
+// Scale fixed 1280×720 pages to the width available.
+function useBoldScale(ref) {
+  const [s, setS] = React.useState(0.6);
+  React.useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const f = () => setS(Math.min(1, (el.clientWidth || 768) / 1280));
+    f();
+    if (window.ResizeObserver) { const ro = new ResizeObserver(f); ro.observe(el); return () => ro.disconnect(); }
+    window.addEventListener("resize", f); return () => window.removeEventListener("resize", f);
+  }, []);
+  return s;
+}
+
+// d: proposal figures (see StepProposal), or sample figures in the company editor.
+// tpl: company settings. text(k, def): resolved text. setText(k, v). editable.
+// photo(slot): data URL or null. pickPhoto(slot): swap photo (edit mode).
+function BoldProposal({ d, tpl, look, brandColor, text, setText, editable, locked, photo, pickPhoto, hidden, qr, pagesRef }) {
+  const wrapRef = React.useRef(null);
+  const scale = useBoldScale(wrapRef);
+  React.useEffect(() => {
+    if (document.getElementById("bp-fonts")) return;
+    const l = Object.assign(document.createElement("link"), { id: "bp-fonts", rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@700;800;900&family=Poppins:wght@300;400;500;600&display=swap" });
+    document.head.appendChild(l);
+  }, []);
+  const vars = boldPalette(look, brandColor);
+  const onDarkLogo = look === "dark";
+  const T = (k, def, extra) => <BpText value={text(k, def)} onCommit={v => setText(k, v)} editable={editable && !(locked && locked.has(k))} {...(extra || {})} />;
+  const Logo = ({ x, y, on }) => (
+    <div className={"logo" + (on || onDarkLogo ? " on" : "")} style={{ left: x, top: y }}>
+      {d.logo ? <div className="badge"><img src={d.logo} alt={d.company} /></div> : <div className="ini">{d.initials}</div>}
+      {!d.logo && <div className="txt">{d.company}</div>}
+    </div>
+  );
+  const Ph = ({ slot, fallback, style, className }) => {
+    const src = photo(slot) || (fallback ? photo(fallback) : null);
+    return (
+      <div className={"ph" + (src ? "" : " empty") + (className ? " " + className : "")} title={editable && pickPhoto ? "Click to change this photo" : undefined}
+        onClick={editable && pickPhoto ? () => pickPhoto(slot) : undefined}
+        style={{ ...style, ...(src ? { backgroundImage: `url(${src})` } : {}), ...(editable && pickPhoto ? { cursor: "pointer" } : {}) }}>
+        {!src && editable ? <span className="bp-noprint">{pickPhoto ? "Click to add a photo" : ""}</span> : null}
+      </div>
+    );
+  };
+  const Card = ({ x, y, w, slot, icon, tk, td, dt, dd, h }) => {
+    const src = slot ? photo(slot) : null;
+    return (
+      <div className="card" style={{ left: x, top: y, width: w }}>
+        <div className={"thumb" + (icon ? " soft" : "")} style={src ? { backgroundImage: `url(${src})` } : {}}>
+          {icon && <BpIcon k={icon} size={64} color="var(--b1)" />}
+          {editable && slot && pickPhoto && <button type="button" className="swap bp-noprint" style={{ inset: "auto 6px 6px auto", fontSize: 10.5 }} onClick={() => pickPhoto(slot)}>{src ? "Change" : "Upload"}</button>}
+        </div>
+        <div className="panel" style={h ? { minHeight: h } : null}>{T(tk, dt, { as: "b" })}{T(td, dd, { as: "p", style: h ? { marginTop: 14 } : null })}</div>
+      </div>
+    );
+  };
+  const no = {}; let n = 0;
+  const order = BOLD_PAGES.map(p => p[0]).filter(k => !hidden.has(k));
+  order.forEach(k => { no[k] = ++n; });
+  const Pg = ({ k, children }) => <div className="bp-pg" data-page={k} style={vars}>{children}{k !== "cover" && k !== "contact" && <div className="pgno">{no[k]}</div>}</div>;
+  const money = v => "$" + Math.round(v || 0).toLocaleString("en-AU");
+
+  const pages = {
+    cover: () => (
+      <Pg k="cover">
+        <Ph slot="hero" style={{ left: 470, top: 0, width: 810, height: 600, clipPath: "polygon(0 0,100% 0,100% 100%,75% 100%)" }} />
+        <div className="slab s2" style={{ left: 900, top: 70, width: 220, height: 650, clipPath: "polygon(25% 0,100% 0,78% 100%,0 100%)", zIndex: 2 }} />
+        <div className="slab s1" style={{ left: 1030, top: 165, width: 250, height: 555, clipPath: "polygon(0 0,100% 0,100% 100%,40% 100%)" }} />
+        <Logo x={80} y={70} />
+        {T("cover.tagline", d.tagline || "Designed to maximise your savings and long-term performance", { style: { position: "absolute", left: 80, top: 170, width: 360, fontSize: 16, lineHeight: 1.35, color: "var(--muted)" } })}
+        {T("cover.title", "Your solar\nsolution", { className: "h", style: { position: "absolute", left: 80, top: 290, width: 800, fontSize: 92 } })}
+        <div style={{ position: "absolute", left: 86, top: 510, fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 800, fontSize: 34, letterSpacing: ".55em", color: "var(--ink)" }}>PROPOSAL</div>
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 120, background: "var(--b3)", color: "#fff", display: "flex", gap: 90, padding: "28px 80px", zIndex: 3 }}>
+          {[["Prepared for:", d.client], ["Date:", d.date], ["Proposal:", d.quoteNo]].map(([l, v]) => (
+            <div key={l}><span style={{ display: "block", fontSize: 16, opacity: .85, fontWeight: 300 }}>{l}</span><b style={{ fontWeight: 400, fontSize: 23 }}>{v}</b></div>
+          ))}
+        </div>
+      </Pg>
+    ),
+    intro: () => (
+      <Pg k="intro">
+        <div className="slab s1" style={{ left: 470, top: 0, width: 810, height: 30 }} />
+        <Logo x={80} y={70} />
+        {T("intro.title", "Introduction", { className: "h", style: { position: "absolute", left: 520, top: 100, fontSize: 64 } })}
+        {T("intro.body", `A solar${d.battery ? " and battery" : ""} system designed for ${d.client}${d.address ? ", " + d.address : ""}.\n\nTell your client who you are, how long you've been installing and why they can trust your team.`,
+          { style: { position: "absolute", left: 80, top: 290, width: 480, fontSize: 19, lineHeight: 1.45 } })}
+        <Ph slot="team" style={{ left: 620, top: 250, width: 660, height: 470, filter: "drop-shadow(-12px 10px 16px rgba(0,0,0,.25))" }} />
+        <div className="slab s2" style={{ left: 1150, top: 250, width: 130, height: 470, clipPath: "polygon(30% 0,100% 0,100% 100%,0 100%)" }} />
+        <div className="slab s1" style={{ left: 1215, top: 250, width: 65, height: 200 }} />
+      </Pg>
+    ),
+    overview: () => (
+      <Pg k="overview">
+        <div className="slab s2" style={{ left: 0, top: 0, width: 470, height: 210, clipPath: "polygon(0 0,82% 0,100% 100%,0 100%)", zIndex: 2 }} />
+        <div className="ph" style={{ left: 0, top: 190, width: 400, height: 530, zIndex: 1, ...(d.siteImage ? { backgroundImage: `url(${d.siteImage})` } : {}) }}>
+          {!d.siteImage && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.85)", fontSize: 15, textAlign: "center", padding: 30 }}>The client's roof design from System Design appears here</div>}
+        </div>
+        <div className="slab s1" style={{ left: 960, top: 0, width: 320, height: 140, clipPath: "polygon(0 0,100% 0,100% 100%,22% 100%)" }} />
+        <div className="slab s3" style={{ left: 1180, top: 0, width: 100, height: 270, clipPath: "polygon(0 0,100% 0,100% 100%)" }} />
+        <Logo x={80} y={60} on />
+        {T("overview.title", "Project\noverview", { className: "h", style: { position: "absolute", left: 520, top: 100, fontSize: 78 } })}
+        <div className="copy" style={{ position: "absolute", left: 440, top: 330, width: 400 }}>
+          {T("overview.1t", "Rising energy costs", { as: "h4" })}
+          {T("overview.1d", d.billQ ? `Your bills average ${money(d.billQ)} a quarter. Producing your own power protects you from the next price rise.` : "Producing your own power protects you from the next price rise.", { as: "p" })}
+          {T("overview.2t", "Energy independence", { as: "h4" })}
+          {T("overview.2d", d.battery ? "Your battery stores daytime solar for the evening and can back up essential circuits." : "Use your own solar during the day and export the rest to the grid.", { as: "p" })}
+        </div>
+        <div className="copy" style={{ position: "absolute", left: 880, top: 330, width: 360 }}>
+          {T("overview.3t", "Your tailored solution", { as: "h4" })}
+          {T("overview.3d", `A ${d.kw} kW system with ${d.count} panels${d.battery ? " and a " + d.battery + " kWh battery" : ""}, designed for your roof. The layout is on the left.`, { as: "p" })}
+        </div>
+        <div className="slab s2" style={{ left: 880, top: 610, width: 400, height: 110, clipPath: "polygon(12% 0,100% 0,100% 100%,0 100%)" }} />
+      </Pg>
+    ),
+    glance: () => (
+      <Pg k="glance">
+        <div className="slab s2" style={{ left: 430, top: 0, width: 640, height: 22, clipPath: "polygon(0 0,100% 0,98% 100%,2% 100%)" }} />
+        <div className="slab s1" style={{ left: 1060, top: 0, width: 220, height: 330, clipPath: "polygon(0 0,100% 0,100% 100%,62% 48%,8% 0)" }} />
+        <Logo x={80} y={70} />
+        {T("glance.title", "Your system\nat a glance", { className: "h", style: { position: "absolute", left: 0, right: 0, top: 100, textAlign: "center", fontSize: 76 } })}
+        <Card x={88} y={300} w={560} slot="meter" tk="glance.1t" dt={`System size: ${d.kw} kW`} td="glance.1d" dd={d.coverage ? `Sized to cover around ${d.coverage}% of your household's electricity across the year.` : "Sized to your household's electricity use."} />
+        <Card x={690} y={300} w={560} slot="app" tk="glance.2t" dt={`Output: ${Math.round(d.outputYr).toLocaleString("en-AU")} kWh / yr`} td="glance.2d" dd="Modelled for your roof's pitch, orientation and location." />
+        <Card x={88} y={470} w={560} slot="panels" tk="glance.3t" dt={`Panels: ${d.count} × ${d.panelW ? d.panelW + " W" : ""}`} td="glance.3d" dd={d.panelName || "Tier 1 solar panels."} />
+        <Card x={690} y={470} w={560} slot="inverter" tk="glance.4t" dt={d.battery ? `Inverter + ${d.battery} kWh battery` : "Inverter"} td="glance.4d" dd={d.inverter || "Matched to your panels and your home."} />
+        <div className="slab s1" style={{ left: 0, top: 660, width: 150, height: 60, clipPath: "polygon(0 0,80% 0,100% 100%,0 100%)" }} />
+        <div className="slab s2" style={{ left: 1010, top: 660, width: 270, height: 60, clipPath: "polygon(6% 0,100% 0,100% 100%,0 100%)" }} />
+      </Pg>
+    ),
+    benefits: () => (
+      <Pg k="benefits">
+        <div className="slab s2" style={{ left: 430, top: 0, width: 640, height: 22, clipPath: "polygon(0 0,100% 0,98% 100%,2% 100%)" }} />
+        <div className="slab s1" style={{ left: 1060, top: 0, width: 220, height: 330, clipPath: "polygon(0 0,100% 0,100% 100%,62% 48%,8% 0)" }} />
+        <Logo x={80} y={70} />
+        {T("benefits.title", "Benefits of your\nsolar system", { className: "h", style: { position: "absolute", left: 0, right: 0, top: 100, textAlign: "center", fontSize: 72 } })}
+        <Card x={88} y={300} w={560} icon="dollar" tk="benefits.1t" dt="Lower power bills" td="benefits.1d" dd={`Around ${money(d.savingsYr)} a year stays in your pocket, rising as electricity prices do.`} />
+        <Card x={690} y={300} w={560} icon="leaf" tk="benefits.2t" dt="Lower carbon footprint" td="benefits.2d" dd={`About ${d.co2} tonnes of CO₂ avoided every year${d.trees ? ", like planting " + d.trees + " trees" : ""}.`} />
+        <Card x={88} y={470} w={560} icon="plug" tk="benefits.3t" dt="Energy independence" td="benefits.3d" dd={d.battery ? "Your battery keeps essential circuits running during a blackout." : "Use your own power first and rely less on the grid."} />
+        <Card x={690} y={470} w={560} icon="doc" tk="benefits.4t" dt="Government incentives" td="benefits.4d" dd={d.stcValue ? `About ${money(d.stcValue)} in STCs comes off your price.` : "Federal STC incentives reduce your upfront cost."} />
+        <div className="slab s1" style={{ left: 0, top: 660, width: 150, height: 60, clipPath: "polygon(0 0,80% 0,100% 100%,0 100%)" }} />
+        <div className="slab s2" style={{ left: 1010, top: 660, width: 270, height: 60, clipPath: "polygon(6% 0,100% 0,100% 100%,0 100%)" }} />
+      </Pg>
+    ),
+    savings: () => {
+      const gen = d.monthly && d.monthly.length === 12 ? d.monthly : Array(12).fill(0);
+      const use = d.usageMonthly || Array(12).fill(0);
+      const top = Math.max(1, ...gen, ...use);
+      return (
+        <Pg k="savings">
+          <div className="slab s1" style={{ left: 0, top: 0, width: 420, height: 26 }} />
+          <div className="slab s2" style={{ left: 1040, top: 0, width: 240, height: 720, clipPath: "polygon(40% 0,100% 0,100% 100%,0 100%)" }} />
+          <div className="slab s1" style={{ left: 1160, top: 0, width: 120, height: 720, clipPath: "polygon(30% 0,100% 0,100% 100%,0 100%)" }} />
+          <Logo x={80} y={60} />
+          {T("savings.title", "Your savings", { className: "h", style: { position: "absolute", left: 360, top: 84, fontSize: 70 } })}
+          <div style={{ position: "absolute", left: 80, top: 250, width: 300, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="stat"><b>{money(d.savingsYr)}</b><span>saved every year</span></div>
+            <div className="stat"><b>{d.payback ? d.payback.toFixed(1) + " yrs" : "—"}</b><span>until it pays for itself</span></div>
+            <div className="stat"><b>{d.save25 >= 1000 ? "$" + Math.round(d.save25 / 1000) + "k" : money(d.save25)}</b><span>saved over 25 years</span></div>
+          </div>
+          <div style={{ position: "absolute", left: 430, top: 250, width: 560 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, marginBottom: 8, color: "var(--ink)" }}>
+              <b style={{ fontWeight: 600 }}>Generation vs. your usage (kWh)</b>
+              <span style={{ color: "var(--muted)", fontSize: 13 }}><i style={{ display: "inline-block", width: 12, height: 12, background: "var(--b2)", verticalAlign: -1 }} /> Solar &nbsp; <i style={{ display: "inline-block", width: 16, borderTop: "3px solid var(--ink)", verticalAlign: 3 }} /> Your usage</span>
+            </div>
+            <div style={{ display: "flex", gap: 4, height: 270, alignItems: "flex-end", borderBottom: "1px solid var(--muted)" }}>
+              {gen.map((g, i) => (
+                <div key={i} style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", position: "relative" }}>
+                  <div style={{ width: "70%", height: Math.round(g / top * 250), background: "var(--b2)", borderRadius: "4px 4px 0 0" }} />
+                  {use[i] > 0 && <div style={{ position: "absolute", left: "8%", right: "8%", bottom: Math.round(use[i] / top * 250), borderTop: "3px solid var(--ink)" }} />}
+                  <div style={{ position: "absolute", bottom: -22, fontSize: 12, color: "var(--muted)" }}>{"JFMAMJJASOND"[i]}</div>
+                </div>
+              ))}
+            </div>
+            {T("savings.note", "Estimates use your recent bills, current tariffs and a 2.5% yearly price rise. Results vary with usage and weather.", { style: { fontSize: 13, color: "var(--muted)", marginTop: 34, lineHeight: 1.5 } })}
+          </div>
+        </Pg>
+      );
+    },
+    invest: () => {
+      const pay = (tpl.payment && tpl.payment.length) ? tpl.payment : [{ label: "On acceptance", pct: 10 }, { label: "Installation day", pct: 80 }, { label: "Switch-on", pct: 10 }];
+      const war = (tpl.warranties && tpl.warranties.length) ? tpl.warranties : [{ label: "Panels", value: "25 yrs" }, { label: "Inverter", value: "10 yrs" }, { label: "Battery", value: "10 yrs" }, { label: "Workmanship", value: "10 yrs" }];
+      return (
+        <Pg k="invest">
+          <div className="slab s1" style={{ left: 0, top: 0, width: 520, height: 720, clipPath: "polygon(0 0,100% 0,82% 100%,0 100%)" }} />
+          <div className="slab s3" style={{ left: 0, top: 520, width: 300, height: 200, clipPath: "polygon(0 30%,100% 100%,0 100%)" }} />
+          <Logo x={80} y={60} on />
+          <div style={{ position: "absolute", left: 80, top: 210, width: 340, color: "#fff", zIndex: 3 }}>
+            <div style={{ fontSize: 17, opacity: .85 }}>Your investment (inc. GST)</div>
+            <div style={{ fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 900, fontSize: 78, lineHeight: 1 }}>{money(d.total)}</div>
+            <table style={{ marginTop: 30, color: "#fff" }}><tbody>
+              {d.rows.map(([l, v]) => <tr key={l}><td>{l}</td><td className="r">{v}</td></tr>)}
+            </tbody></table>
+          </div>
+          {T("invest.title", "Your\ninvestment", { className: "h", style: { position: "absolute", left: 600, top: 84, fontSize: 70 } })}
+          <div style={{ position: "absolute", left: 600, top: 280, width: 600, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40 }}>
+            <div><div style={{ fontSize: 21, fontWeight: 500, marginBottom: 8 }}>Payment schedule</div>
+              {pay.map(p => <div className="row" key={p.label}><span>{p.label} <span style={{ color: "var(--muted)" }}>· {p.pct}%</span></span><b style={{ fontWeight: 600 }}>{money(d.total * p.pct / 100)}</b></div>)}</div>
+            <div><div style={{ fontSize: 21, fontWeight: 500, marginBottom: 8 }}>Warranties</div>
+              {war.map(w => <div className="row" key={w.label}><span>{w.label}</span><b style={{ fontWeight: 600 }}>{w.value}</b></div>)}</div>
+          </div>
+          <div style={{ position: "absolute", left: 600, top: 540, width: 600, display: "grid", gridTemplateColumns: qr ? "1fr 1fr 96px" : "1fr 1fr", gap: 26, alignItems: "end" }}>
+            <div><div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Accept this proposal</div>
+              {d.sig ? <img src={d.sig} alt="Signature" style={{ height: 44, display: "block" }} /> : <div style={{ height: 44 }} />}
+              <div style={{ borderBottom: "2px solid var(--ink)" }} />
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>{d.sigName ? `${d.sigName} · ${d.sigDate}` : "Customer signature & date"}</div></div>
+            <div><div style={{ borderBottom: "2px solid var(--ink)" }} /><div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>{d.company}</div></div>
+            {qr && <div style={{ textAlign: "center" }}><img src={qr} alt="" style={{ width: 96, height: 96, borderRadius: 6, background: "#fff" }} />{T("invest.qr", "Scan to accept", { style: { fontSize: 11, color: "var(--muted)" } })}</div>}
+          </div>
+          {T("invest.fine", [d.legal, d.abn && "ABN " + d.abn, d.licence && "Licence " + d.licence, "Rebates are estimates. Valid until " + d.validUntil + "."].filter(Boolean).join(" · "), { style: { position: "absolute", left: 600, bottom: 20, width: 600, fontSize: 11, color: "var(--muted)" } })}
+        </Pg>
+      );
+    },
+    timeline: () => (
+      <Pg k="timeline">
+        <div className="slab s1" style={{ left: 0, top: 20, width: 440, height: 190, clipPath: "polygon(0 0,82% 0,100% 100%,0 100%)", zIndex: 2 }} />
+        <Logo x={80} y={62} on />
+        <div className="slab s3" style={{ left: 1180, top: 0, width: 100, height: 720, clipPath: "polygon(0 0,100% 0,100% 100%,40% 100%)" }} />
+        <div className="slab s1" style={{ left: 1080, top: 0, width: 150, height: 440, clipPath: "polygon(0 0,70% 0,100% 100%,40% 100%)" }} />
+        {T("timeline.title", "Installation\ntimeline", { className: "h", style: { position: "absolute", left: 470, top: 84, fontSize: 72 } })}
+        <div style={{ position: "absolute", left: 80, top: 290, width: 480 }}>
+          {[["Week 1", "Design approval & grid application", "We finalise your design and apply to your network."], ["Week 2", "Equipment delivered", "Panels, inverter and battery arrive, checked and ready."], ["Week 3", "Installation day", "Our accredited team, usually done in one day."], ["Week 3", "Testing & handover", "Meter change, app set-up and your handover pack."]].map(([w, t, dd], i) => (
+            <div key={i} style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+              {T(`timeline.${i + 1}w`, w, { style: { flex: "none", width: 76, fontFamily: "'Red Hat Display',Arial,sans-serif", fontWeight: 900, fontSize: 15, color: "var(--b2)", paddingTop: 5, textTransform: "uppercase" } })}
+              <div>{T(`timeline.${i + 1}t`, t, { style: { fontSize: 20, fontWeight: 500 } })}{T(`timeline.${i + 1}d`, dd, { style: { fontSize: 14.5, color: "var(--muted)" } })}</div>
+            </div>
+          ))}
+        </div>
+        <Ph slot="install" style={{ left: 600, top: 290, width: 600, height: 430, filter: "drop-shadow(-10px 10px 16px rgba(0,0,0,.25))" }} />
+      </Pg>
+    ),
+    whyus: () => (
+      <Pg k="whyus">
+        <div className="slab s1" style={{ left: 0, top: 0, width: 450, height: 190, clipPath: "polygon(0 0,84% 0,100% 100%,0 100%)", zIndex: 2 }} />
+        <Logo x={80} y={52} on />
+        <div className="slab s3" style={{ left: 1150, top: 0, width: 130, height: 720, clipPath: "polygon(0 0,100% 0,100% 100%,30% 100%)" }} />
+        {T("whyus.title", "Why homeowners\nchoose us", { className: "h", style: { position: "absolute", left: 480, top: 60, fontSize: 66 } })}
+        <div style={{ position: "absolute", left: 80, top: 260, width: 520, display: "grid", gap: 18 }}>
+          {[["medal", "Clean Energy Council accredited", "Every design and install meets Australian standards."], ["star", "Tier 1 components", "Premium panels, inverters and batteries from established manufacturers."], ["shield", "Workmanship warranty", "On top of manufacturer warranties, with local service when you need it."], ["tools", "Local installers", "Add your number of installs, years in business and review rating."]].map(([ic, t, dd], i) => (
+            <div key={i} style={{ display: "flex", gap: 16 }}>
+              <div style={{ flex: "none", width: 52, height: 52, borderRadius: 10, background: "var(--card)", display: "flex", alignItems: "center", justifyContent: "center" }}><BpIcon k={ic} size={28} color="#fff" /></div>
+              <div>{T(`whyus.${i + 1}t`, t, { style: { fontSize: 19, fontWeight: 500 } })}{T(`whyus.${i + 1}d`, dd, { style: { fontSize: 14.5, color: "var(--muted)" } })}</div>
+            </div>
+          ))}
+        </div>
+        <Ph slot="closeup" fallback="hero" style={{ left: 640, top: 250, width: 560, height: 470, clipPath: "polygon(12% 0,100% 0,100% 100%,0 100%)" }} />
+        <div className="slab s2" style={{ left: 0, top: 680, width: 700, height: 40, clipPath: "polygon(0 0,96% 0,100% 100%,0 100%)" }} />
+      </Pg>
+    ),
+    next: () => (
+      <Pg k="next">
+        <Logo x={60} y={44} />
+        {T("next.title", "What happens\nnext", { className: "h", style: { position: "absolute", left: 400, top: 70, fontSize: 76 } })}
+        <div className="slab s1" style={{ left: 1050, top: 0, width: 230, height: 130, clipPath: "polygon(0 0,100% 0,100% 100%,22% 100%)" }} />
+        <div className="slab s2" style={{ left: 1150, top: 120, width: 130, height: 380, clipPath: "polygon(0 0,100% 0,100% 100%)" }} />
+        <div className="copy" style={{ position: "absolute", left: 60, top: 280, width: 540 }}>
+          {[["1. Approve your quote", "Sign the investment page. We'll answer any final questions first."], ["2. Schedule your install", "Pick a date that suits you. We handle network approval, permits and delivery."], ["3. Installation complete", "We install and test everything, then walk you through your system and handover pack."]].map(([t, dd], i) => (
+            <React.Fragment key={i}>{T(`next.${i + 1}t`, t, { as: "h4" })}{T(`next.${i + 1}d`, dd, { as: "p" })}</React.Fragment>
+          ))}
+        </div>
+        <Ph slot="handover" style={{ left: 665, top: 300, width: 615, height: 420, clipPath: "polygon(0 0,100% 0,100% 100%,18% 100%,0 100%,18% 80%)", filter: "drop-shadow(-10px 10px 16px rgba(0,0,0,.25))" }} />
+        <div className="slab s3" style={{ left: 665, top: 700, width: 615, height: 20 }} />
+      </Pg>
+    ),
+    ready: () => (
+      <Pg k="ready">
+        <Logo x={90} y={36} />
+        {T("ready.title", "Ready to get\nstarted?", { className: "h", style: { position: "absolute", left: 0, right: 0, top: 66, textAlign: "center", fontSize: 76 } })}
+        <div className="slab s2" style={{ left: 1090, top: 0, width: 190, height: 235, clipPath: "polygon(0 0,100% 0,100% 100%,62% 100%)" }} />
+        <div className="slab s1" style={{ left: 1230, top: 0, width: 50, height: 235 }} />
+        <Card x={104} y={320} w={540} h={170} slot="sign" tk="ready.1t" dt="Accept your proposal today" td="ready.1d" dd="Sign the investment page. Your deposit locks in today's pricing and rebates." />
+        <Card x={700} y={320} w={540} h={170} slot="phone" tk="ready.2t" dt="Get in touch now" td="ready.2d" dd={`Call us${d.phone ? " on " + d.phone : ""} or reply to this email. We're happy to walk you through any part of it.`} />
+        <Ph slot="hero" style={{ left: 0, top: 580, width: 1260, height: 140, backgroundPosition: "center 35%" }} />
+        <div className="slab s2" style={{ left: 1150, top: 580, width: 130, height: 140, clipPath: "polygon(0 0,100% 0,100% 100%,15% 100%)" }} />
+      </Pg>
+    ),
+    contact: () => (
+      <Pg k="contact">
+        <Logo x={74} y={64} />
+        {T("contact.title", "Contact us", { className: "h", style: { position: "absolute", left: 84, top: 220, fontSize: 76 } })}
+        <div style={{ position: "absolute", left: 84, top: 340, display: "grid", gap: 14, width: 600 }}>
+          {[["phone", d.phone], ["mail", d.email], ["globe", d.web], ["pin", d.coAddress]].filter(x => x[1]).map(([ic, t]) => (
+            <div key={ic} style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 19 }}>
+              <span style={{ flex: "none", width: 48, height: 48, borderRadius: "50%", border: "2px solid var(--ink)", display: "flex", alignItems: "center", justifyContent: "center" }}><BpIcon k={ic} size={24} color="currentColor" /></span>{t}
+            </div>
+          ))}
+        </div>
+        <Ph slot="sky" style={{ left: 705, top: 300, width: 575, height: 375, clipPath: "polygon(0 0,100% 0,100% 100%,22% 100%)" }} />
+        <div className="slab s3" style={{ left: 0, top: 655, width: 1110, height: 110 }} />
+        <div className="slab s2" style={{ left: 1085, top: 48, width: 200, height: 672, clipPath: "polygon(28% 0,100% 0,96% 100%,0 100%)", zIndex: 3 }} />
+        <div className="slab s1" style={{ left: 1150, top: 250, width: 130, height: 470, zIndex: 2 }} />
+        <div style={{ position: "absolute", left: 84, top: 676, color: "#fff", fontSize: 13, opacity: .9, zIndex: 4 }}>{[d.legal, d.abn && "ABN " + d.abn, d.licence && "Licence " + d.licence].filter(Boolean).join(" · ")}</div>
+      </Pg>
+    ),
+  };
+
+  return (
+    <div ref={wrapRef} style={{ width: "100%" }}>
+      <style>{BOLD_CSS}</style>
+      <div ref={pagesRef}>
+        {order.map(k => (
+          <div key={k} className="bp-frame" style={{ width: 1280 * scale, height: 720 * scale, marginBottom: 18, boxShadow: "0 8px 30px rgba(0,0,0,.22)", overflow: "hidden" }}>
+            <div className="bp-scale" style={{ transform: `scale(${scale})`, transformOrigin: "0 0", width: 1280, height: 720 }}>{pages[k]()}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Standalone HTML of the rendered pages, landscape, one page per sheet.
+// editable: keep the text editable in the saved file (Documents pack), with a
+// small toolbar that never prints.
+function boldDocHtml(container, title, editable) {
+  const pages = [...container.querySelectorAll(".bp-pg")].map(el => {
+    const c = el.cloneNode(true);
+    c.querySelectorAll(".bp-noprint").forEach(n => n.remove());
+    c.querySelectorAll("[contenteditable]").forEach(n => n.removeAttribute("contenteditable"));
+    if (editable) c.querySelectorAll(".bp-t").forEach(n => n.setAttribute("contenteditable", "true"));
+    return c.outerHTML;
+  }).join("");
+  const esc = s => String(s || "").replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${esc(title)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@700;800;900&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>${BOLD_CSS}
+@page{size:1280px 720px;margin:0}
+html,body{margin:0;padding:0;background:#cfd5de}
+body{display:flex;flex-direction:column;align-items:center;gap:18px;padding:18px 0}
+.bp-pg{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+.bp-bar{position:sticky;top:0;z-index:9;width:100%;box-sizing:border-box;display:flex;gap:12px;align-items:center;justify-content:center;padding:10px;background:#0b1b33;color:#fff;font:14px Arial,sans-serif}
+.bp-bar button{font:600 14px Arial,sans-serif;padding:8px 16px;border:0;border-radius:6px;background:#fff;color:#0b1b33;cursor:pointer}
+[contenteditable]:hover{outline:1px dashed rgba(120,140,170,.7)}
+@media print{body{background:none;padding:0;gap:0;display:block}.bp-bar{display:none}[contenteditable]:hover{outline:0}.bp-pg{box-shadow:none;break-after:page;page-break-after:always}.bp-pg:last-child{break-after:auto;page-break-after:auto}}
+</style></head><body>${editable ? '<div class="bp-bar">Click any text to change it, then <button onclick="window.print()">Print / Save as PDF</button></div>' : ""}${pages}</body></html>`;
+}
+
+// Print the pages from their own window so the app's chrome never prints.
+function boldPrint(container, title) {
+  const w = window.open("", "_blank");
+  if (!w) { window.ssToast && window.ssToast("Allow pop-ups to print the proposal, or use Download"); return; }
+  w.document.write(boldDocHtml(container, title)); w.document.close();
+  const go = () => { w.focus(); w.print(); };
+  w.onload = () => { (w.document.fonts && w.document.fonts.ready ? w.document.fonts.ready : Promise.resolve()).then(() => setTimeout(go, 200)); };
+}
+
+// Company template (settings, photos, QR) for the signed-in tenant.
+function useProposalTemplate() {
+  const [st, setSt] = React.useState({ loaded: false, settings: { look: "blue", default_template: "classic", hidden: [], text: {} }, photos: {}, qr: null, pack_active: false });
+  const reload = React.useCallback(async () => {
+    const api = window.ssApi;
+    if (!api || !api.getToken || !api.getToken()) { setSt(s => ({ ...s, loaded: true })); return; }
+    try { const r = await api.get("/proposal-template"); setSt({ loaded: true, ...r }); }
+    catch (e) { setSt(s => ({ ...s, loaded: true })); }
+  }, []);
+  React.useEffect(() => { reload(); }, []);
+  return [st, setSt, reload];
+}
+window.useProposalTemplate = useProposalTemplate;
+
+// Settings → Proposal template. The tenant admin sets the company defaults for
+// the Bold template: look, colour, pages, wording, photos, payment schedule,
+// warranties and an optional QR link. Text is edited right on the sample pages.
+const BOLD_LOCKED = new Set(["glance.1t", "glance.1d", "glance.2t", "glance.3t", "glance.3d", "glance.4t", "glance.4d", "benefits.1d", "benefits.2d", "benefits.4d", "overview.1d", "invest.fine"]);
+// Sample figures for the template editor and the Documents pack. Tokens like
+// {client} are filled on each real proposal; the pack shows [brackets].
+function boldSample(brand, details, company, bracket) {
+  const t = (tok, br) => bracket ? br : tok;
+  return {
+    company, initials: company.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), logo: details.logo || brand.logo_url || "", tagline: brand.tagline || "",
+    legal: details.legalName || company, abn: details.abn || "", licence: details.license || "", phone: details.phone || "", email: details.email || "", web: brand.domain || "", coAddress: details.address || "",
+    client: t("{client}", "[Client name]"), address: t("{address}", "[Client address]"), date: new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" }), quoteNo: t("QT-SAMPLE", "[Quote no.]"), validUntil: "30 days from issue",
+    kw: t("{kw}", "6.6"), count: t("{panels}", "15"), panelW: 440, panelName: "Your panel model", inverter: "Your inverter model", battery: t("{battery}", "13.5"),
+    outputYr: 9840, coverage: 86, savingsYr: 2150, payback: 4.6, save25: 63000, co2: "7.4", trees: 340, stcValue: 1688, billQ: 745,
+    monthly: [880, 790, 800, 700, 600, 540, 580, 680, 780, 860, 900, 920], usageMonthly: [720, 660, 700, 680, 720, 780, 800, 760, 700, 680, 690, 740],
+    siteImage: null, total: 15890, rows: [["Equipment & installation", "$14,445"], ["GST", "$1,445"], ["STC incentive (45 STCs, est.)", "−$1,688"]],
+  };
+}
+
+function ProposalTemplateEditor({ brand }) {
+  brand = brand || window.__SS_ACTIVE_BRAND || {};
+  const [st, setSt] = useProposalTemplate();
+  const [draft, setDraft] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const fileRef = React.useRef(null);
+  const slotRef = React.useRef(null);
+  const pagesRef = React.useRef(null);
+  const user = (window.ssApi && window.ssApi.getUser && window.ssApi.getUser()) || {};
+  const canEdit = user.app_role === "tenant_admin";
+  React.useEffect(() => { if (st.loaded && !draft) setDraft({ payment: [], warranties: [], ...st.settings, text: { ...(st.settings.text || {}) } }); }, [st.loaded]);
+  if (!draft) return <div className="panel panel-pad chrome-top"><span className="pv-spin" /> Loading proposal template…</div>;
+
+  const set = (k, v) => { setDraft(x => ({ ...x, [k]: v })); setDirty(true); };
+  const details = (window.ssBrandDetails && brand.id) ? window.ssBrandDetails(brand.id) : {};
+  const company = brand.name || details.legalName || "Your company";
+  const base = draft.brand_color || (brand.accent && brand.accent[1]) || "#f28a1e";
+  const hidden = new Set(draft.hidden || []);
+  const sample = boldSample(brand, details, company);
+  const pick = slot => { if (!canEdit) return; slotRef.current = slot; fileRef.current && fileRef.current.click(); };
+  const onFile = async e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const url = await boldResize(f, 1600);
+      await window.ssApi.put("/proposal-template/photos/" + slotRef.current, { data: url });
+      setSt(s => ({ ...s, photos: { ...(s.photos || {}), [slotRef.current]: url } }));
+      window.ssToast && window.ssToast("Photo saved", "success");
+    } catch (err) { window.ssToast && window.ssToast(err.message === "image_too_large" ? "That photo is too large — try a smaller one" : "Couldn't save that photo"); }
+  };
+  const removePhoto = async slot => {
+    try { await window.ssApi.del("/proposal-template/photos/" + slot); setSt(s => { const p = { ...(s.photos || {}) }; delete p[slot]; return { ...s, photos: p }; }); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't remove that photo"); }
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await window.ssApi.put("/proposal-template", { settings: draft });
+      setSt(s => ({ ...s, settings: r.settings, qr: r.qr })); setDraft({ payment: [], warranties: [], ...r.settings }); setDirty(false);
+      window.ssToast && window.ssToast("Proposal template saved", "success");
+    } catch (e) { window.ssToast && window.ssToast(e.status === 403 ? "Only a company admin can change the template" : "Save failed — try again"); }
+    setSaving(false);
+  };
+  const rows = (k, blank, cols) => (
+    <div>
+      {(draft[k] || []).map((r, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          {cols.map(([f, ph, w, type]) => (
+            <input key={f} className="field-input" type={type || "text"} value={r[f]} placeholder={ph} style={{ width: w, flex: w ? "none" : 1 }} disabled={!canEdit}
+              onChange={e => set(k, draft[k].map((x, j) => j === i ? { ...x, [f]: type === "number" ? Number(e.target.value) : e.target.value } : x))} />
+          ))}
+          {canEdit && <button className="btn" onClick={() => set(k, draft[k].filter((x, j) => j !== i))}>✕</button>}
+        </div>
+      ))}
+      {canEdit && <button className="btn" onClick={() => set(k, [...(draft[k] || []), blank])}>+ Add</button>}
+    </div>
+  );
+  const payTotal = (draft.payment || []).reduce((a, p) => a + (Number(p.pct) || 0), 0);
+  const lbl = { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7, color: "var(--tx-dim)", margin: "14px 0 8px" };
+
+  return (
+    <div className="fade-in" style={{ display: "flex", gap: "var(--gap)", alignItems: "flex-start" }}>
+      <div className="panel panel-pad chrome-top" style={{ width: 290, flexShrink: 0, position: "sticky", top: 0, maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
+        <div className="card-title">Proposal template</div>
+        <div className="card-sub" style={{ fontSize: 12 }}>Company defaults for the Bold template. Click any text on the pages to change it. Staff can still edit each proposal.</div>
+        {!canEdit && <div className="card-sub" style={{ fontSize: 12, color: "var(--amber)", marginTop: 8 }}>Only a company admin can change these settings.</div>}
+        <div className="card-title" style={lbl}>Default template for new proposals</div>
+        <div style={{ display: "flex", gap: 6 }}>{[["classic", "Classic"], ["bold", "Bold"]].map(([k, l]) => <button key={k} disabled={!canEdit} className={"btn" + (draft.default_template === k ? " btn-primary" : "")} style={{ flex: 1, justifyContent: "center" }} onClick={() => set("default_template", k)}>{l}</button>)}</div>
+        <div className="card-title" style={lbl}>Look</div>
+        <div style={{ display: "flex", gap: 6 }}>{[["blue", "Blue"], ["dark", "Dark"], ["brand", "Brand"]].map(([k, l]) => <button key={k} disabled={!canEdit} className={"btn" + (draft.look === k ? " btn-primary" : "")} style={{ flex: 1, justifyContent: "center" }} onClick={() => set("look", k)}>{l}</button>)}</div>
+        {draft.look === "brand" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <input type="color" value={base} disabled={!canEdit} onChange={e => set("brand_color", e.target.value)} style={{ width: 40, height: 32, border: 0, background: "none" }} />
+            <span className="card-sub" style={{ fontSize: 12 }}>Brand colour</span>
+            {draft.brand_color && canEdit && <span className="card-sub" style={{ fontSize: 11, cursor: "pointer", textDecoration: "underline" }} onClick={() => set("brand_color", "")}>use my branding</span>}
+          </div>
+        )}
+        <div className="card-title" style={lbl}>Pages</div>
+        {BOLD_PAGES.map(([k, l]) => (
+          <label key={k} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7, cursor: "pointer" }}>
+            <input type="checkbox" disabled={!canEdit} checked={!hidden.has(k)} onChange={() => { const h = new Set(hidden); h.has(k) ? h.delete(k) : h.add(k); set("hidden", [...h]); }} />
+            <span style={{ fontSize: 13 }}>{l}</span>
+          </label>
+        ))}
+        <div className="card-title" style={lbl}>Payment schedule {payTotal !== 100 && (draft.payment || []).length > 0 && <span style={{ color: "var(--amber)", textTransform: "none" }}>· adds to {payTotal}%</span>}</div>
+        {(draft.payment || []).length === 0 && <div className="card-sub" style={{ fontSize: 11, marginBottom: 6 }}>Default: 10% on acceptance, 80% installation day, 10% switch-on.</div>}
+        {rows("payment", { label: "", pct: 0 }, [["label", "Stage", null], ["pct", "%", 64, "number"]])}
+        <div className="card-title" style={lbl}>Warranties</div>
+        {(draft.warranties || []).length === 0 && <div className="card-sub" style={{ fontSize: 11, marginBottom: 6 }}>Default: panels 25 yrs, inverter 10, battery 10, workmanship 10.</div>}
+        {rows("warranties", { label: "", value: "" }, [["label", "Item", null], ["value", "Term", 90]])}
+        <div className="card-title" style={lbl}>QR code link (optional)</div>
+        <input className="field-input" disabled={!canEdit} value={draft.qr_url || ""} placeholder="https://… e.g. your booking or payment page" onChange={e => set("qr_url", e.target.value.trim())} />
+        <div className="card-sub" style={{ fontSize: 11, marginTop: 4 }}>Shown on the investment page. Leave blank for no QR code.</div>
+        <div className="card-title" style={lbl}>Photos</div>
+        <div className="card-sub" style={{ fontSize: 11, marginBottom: 8 }}>Use your own photos (you need the rights to use them). Pages show a solid colour panel where there's no photo.</div>
+        {BOLD_PHOTOS.map(([slot, l]) => (
+          <div key={slot} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <div style={{ width: 44, height: 30, borderRadius: 4, flex: "none", background: (st.photos || {})[slot] ? `center/cover url(${st.photos[slot]})` : "var(--bdr)" }} />
+            <span style={{ fontSize: 12, flex: 1 }}>{l}</span>
+            {canEdit && <button className="btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={() => pick(slot)}>{(st.photos || {})[slot] ? "Change" : "Upload"}</button>}
+            {canEdit && (st.photos || {})[slot] && <button className="btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={() => removePhoto(slot)}>✕</button>}
+          </div>
+        ))}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
+        <div className="card-sub" style={{ fontSize: 11, margin: "12px 0 8px" }}>In your wording you can use {"{client}"}, {"{address}"}, {"{kw}"}, {"{panels}"}, {"{battery}"} and {"{company}"} — they're filled in on each proposal. Figures (sizes, savings, prices) come from the quote. Your logo and contact details come from Branding and your letterhead.</div>
+        {canEdit && <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={saving || !dirty} onClick={save}>{saving ? "Saving…" : dirty ? "Save template" : "Saved"}</button>}
+        {canEdit && Object.keys(draft.text || {}).length > 0 && <div className="card-sub" style={{ fontSize: 11, marginTop: 8, textAlign: "center" }}><span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => set("text", {})}>Reset all wording to the original</span></div>}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <BoldProposal d={sample} tpl={draft} look={draft.look} brandColor={base} editable={canEdit} locked={BOLD_LOCKED}
+          text={(k, def) => (draft.text && draft.text[k] != null ? draft.text[k] : def)}
+          setText={(k, v) => set("text", { ...(draft.text || {}), [k]: v })}
+          photo={slot => (st.photos || {})[slot] || null} pickPhoto={canEdit ? pick : null}
+          hidden={hidden} qr={st.qr} pagesRef={pagesRef} />
+      </div>
+    </div>
+  );
+}
+
+// Documents → Proposal Template Pack (in every plan; the Templates plan is
+// $19/month on its own): the same Bold
+// pages as the app, saved as a standalone file with the tenant's logo, colours,
+// photos and wording. Text stays editable in the file; print it to PDF.
+function ProposalPackPanel() {
+  const [st] = useProposalTemplate();
+  const [look, setLook] = React.useState(null);
+  const ref = React.useRef(null);
+  const brand = window.__SS_ACTIVE_BRAND || {};
+  const details = (window.ssBrandDetails && brand.id) ? window.ssBrandDetails(brand.id) : {};
+  const company = brand.name || details.legalName || "Your company";
+  const sample = boldSample(brand, details, company, true);
+  const fill = v => String(v).replace(/\{(client|address|kw|panels|battery|company)\}/g, (m, k) => ({ client: sample.client, address: sample.address, kw: sample.kw, panels: sample.count, battery: sample.battery, company }[k]));
+  React.useEffect(() => {
+    if (!look || !ref.current) return;
+    const html = boldDocHtml(ref.current, company + " — Proposal template", true);
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([html], { type: "text/html" })), download: `Proposal-Template-${look}.html` });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    setLook(null);
+  }, [look]);
+  if (!st.loaded) return null;
+  const s = st.settings || {};
+  const base = s.brand_color || (brand.accent && brand.accent[1]) || "#f28a1e";
+  return (
+    <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <span className="kpi-ico"><Icon d={ICONS.docs} size={22} stroke={1.9} /></span>
+      <div style={{ flex: "1 1 320px" }}>
+        <div className="card-title">Proposal Template Pack</div>
+        <div className="card-sub">The 12-page Bold proposal as a file you keep, with your logo, colours, photos and wording. Open it in any browser, click any text to change it, then print or save as PDF. Included in your plan.</div>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {[["blue", "Blue"], ["dark", "Dark"], ["brand", "Brand colour"]].map(([k, l]) => (
+          <button key={k} className="btn" disabled={!!look} onClick={() => setLook(k)}><Icon d={ICONS.download} size={13} stroke={2} /> {look === k ? "Preparing…" : l}</button>
+        ))}
+      </div>
+      {look && (
+        <div ref={ref} aria-hidden="true" style={{ position: "absolute", left: -20000, top: 0, width: 1280 }}>
+          <BoldProposal d={sample} tpl={s} look={look} brandColor={base} editable={false}
+            text={(k, def) => (s.text && s.text[k] != null && s.text[k] !== "" ? fill(s.text[k]) : def)} setText={() => {}}
+            photo={slot => (st.photos || {})[slot] || null} pickPhoto={null} hidden={new Set(s.hidden || [])} qr={st.qr} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan }) {
   upgrades = upgrades || []; specSheets = specSheets || [];
   sitePlan = sitePlan || { image: null, markers: [] };
@@ -6539,6 +7201,35 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
   const [busy, setBusy] = useQS(false);
   const [sections, setSections] = useQS({ overview: true, about: true, whysolar: true, specs: true, energy: true, invest: true, finance: true, layout: true, monthly: true, simulation: true, enviro: true, tech: true, projection: true, siteplan: true, items: true, upgrades: true, sheets: true, included: true, finoption: false, payment: false, signoff: true });
   const toggleSection = k => setSections(s => ({ ...s, [k]: !s[k] }));
+
+  // Template choice: Classic (above) or Bold (12 landscape pages). Company
+  // defaults come from Settings → Proposal template; changes made here apply
+  // to this proposal only.
+  const [tplSt] = useProposalTemplate();
+  const tset = tplSt.settings || {};
+  const [tmplPick, setTmplPick] = useQS(null);
+  const [lookPick, setLookPick] = useQS(null);
+  const [boldHidden, setBoldHidden] = useQS(null);
+  const [boldText, setBoldText] = useQS({});
+  const [boldPhotos, setBoldPhotos] = useQS({});
+  const boldRef = useRefQS(null);
+  const boldPhotoInput = useRefQS(null);
+  const boldPhotoSlot = useRefQS(null);
+  const template = tmplPick || tset.default_template || "classic";
+  const look = lookPick || tset.look || "blue";
+  const hiddenPages = new Set(boldHidden || tset.hidden || []);
+  const fillTokens = v => String(v).replace(/\{(client|address|company|kw|panels|battery)\}/g, (m, k) => ({
+    client: cust.name || "you", address: spec.address || cust.address || "", company: brand.name || "",
+    kw: spec.sysKw ? spec.sysKw.toFixed(2) : "", panels: spec.count || "", battery: spec.batteryKwh || "",
+  })[k]);
+  const boldTextOf = (k, def) => boldText[k] != null ? boldText[k] : (tset.text && tset.text[k] ? fillTokens(tset.text[k]) : def);
+  const pickBoldPhoto = slot => { boldPhotoSlot.current = slot; boldPhotoInput.current && boldPhotoInput.current.click(); };
+  const onBoldPhoto = async e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try { const url = await boldResize(f, 1600); const slot = boldPhotoSlot.current; setBoldPhotos(p => ({ ...p, [slot]: url })); }
+    catch (err) { window.ssToast && window.ssToast("Choose a photo (JPG or PNG)"); }
+  };
 
   // Client acceptance — signature captured on-screen, stamped into the proposal,
   // and pushed into the client's journey (installation details) automatically.
@@ -6669,8 +7360,48 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
   const proj25 = (() => { let cum = 0; const a = []; for (let i = 0; i < 25; i++) { cum += (spec.savingsYr || 0) * Math.pow(1.025, i); a.push(Math.round(cum)); } return a; })();
   const projMax = proj25[proj25.length - 1] || 1;
 
-  const printDoc = () => { setBusy(true); setTimeout(() => { window.print(); setBusy(false); }, 250); };
+  // Figures for the Bold template.
+  const boldData = (() => {
+    const outputYr = (spec.monthly || []).reduce((a, b) => a + (b || 0), 0);
+    const inv = lines.find(l => l.cat === "Inverter");
+    const panelLn = lines.find(l => l.cat === "Panel");
+    const total = lineTotal > 0 ? lineTotal : netCost;
+    const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return {
+      company, initials, logo: logo || brand.logo_url || "", tagline: brand.tagline || "",
+      legal: details.legalName || company, abn: details.abn || "", licence: details.license || "",
+      phone: details.phone || "", email: details.email || "", web: brand.domain || "", coAddress: details.address || "",
+      client: cust.name || "Valued client", address: spec.address || cust.address || "", date: dateStr, quoteNo, validUntil: expStr,
+      kw: spec.sysKw ? spec.sysKw.toFixed(2) : "0", count: spec.count || 0, panelW: (spec.panel && spec.panel.watts) || 0,
+      panelName: (spec.panel && spec.panel.name) || (panelLn && panelLn.name) || "", inverter: inv ? inv.name : "",
+      battery: (spec.mode === "battery" || spec.mode === "offgrid") ? (spec.batteryKwh || 0) : 0,
+      outputYr, coverage: annualUseKwh > 0 && outputYr > 0 ? Math.min(100, Math.round(outputYr / annualUseKwh * 100)) : 0,
+      savingsYr: spec.savingsYr || 0, payback: total > 0 && spec.savingsYr > 0 ? total / spec.savingsYr : (spec.payback || 0),
+      save25: proj25[proj25.length - 1] || 0, co2: spec.co2 || "0", trees,
+      stcValue: spec.stcValue || 0, billQ,
+      monthly: spec.monthly || [], usageMonthly: billQ > 0 ? DAYS.map(n => dailyUseKwh * n) : null,
+      siteImage: spec.designImage || sitePlan.image || null,
+      total,
+      rows: lineTotal > 0
+        ? [["Equipment & installation", "$" + Math.round(subtotal).toLocaleString("en-AU")], ["GST", "$" + Math.round(lineGst).toLocaleString("en-AU")]].concat(spec.stcValue ? [["STC incentive (" + (spec.stc || 0) + " STCs, est.)", "−$" + Math.round(spec.stcValue).toLocaleString("en-AU")]] : [])
+        : [["System & installation", "$" + Math.round(spec.sysCost || 0).toLocaleString("en-AU")], ["STC incentive (est.)", "−$" + Math.round(spec.stcValue || 0).toLocaleString("en-AU")]],
+      sig: acc ? acc.sig : null, sigName: acc ? acc.sigName : "", sigDate: acc ? acc.date : "",
+    };
+  })();
+
+  const printDoc = () => {
+    if (template === "bold") { if (boldRef.current) boldPrint(boldRef.current, "Proposal — " + (cust.name || "Client")); return; }
+    setBusy(true); setTimeout(() => { window.print(); setBusy(false); }, 250);
+  };
   const downloadDoc = () => {
+    if (template === "bold") {
+      if (!boldRef.current) return;
+      const blob = new Blob([boldDocHtml(boldRef.current, "Proposal — " + (cust.name || "Client"))], { type: "text/html" });
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `Proposal-${(cust.name||"Client").replace(/\s+/g,"-")}-${today.toISOString().slice(0,10)}.html` });
+      a.click(); URL.revokeObjectURL(a.href);
+      window.ssToast && window.ssToast("Proposal downloaded — open it and choose Print → Save as PDF for a PDF", "success");
+      return;
+    }
     const el = previewRef.current;
     if (!el) return;
     const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Proposal — ${cust.name||"Client"}</title>
@@ -6722,8 +7453,37 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
       {/* Sidebar controls */}
       <div style={{ width:220, flexShrink:0 }}>
         <div className="panel panel-pad chrome-top" style={{ position:"sticky", top:0 }}>
-          <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:14 }}>Sections</div>
-          {[
+          <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:8 }}>Template</div>
+          <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+            {[["classic","Classic"],["bold","Bold"]].map(([k, l]) => (
+              <button key={k} className={"btn" + (template === k ? " btn-primary" : "")} style={{ flex:1, justifyContent:"center" }} onClick={() => setTmplPick(k)}>{l}</button>
+            ))}
+          </div>
+          {template === "bold" && (
+            <>
+              <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:8 }}>Look</div>
+              <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+                {[["blue","Blue"],["dark","Dark"],["brand","Brand"]].map(([k, l]) => (
+                  <button key={k} className={"btn" + (look === k ? " btn-primary" : "")} style={{ flex:1, justifyContent:"center", padding:"6px 4px" }} onClick={() => setLookPick(k)}>{l}</button>
+                ))}
+              </div>
+              <div className="card-sub" style={{ fontSize:11, marginBottom:12 }}>Click any text on the pages to change it, or "Upload" on a photo to swap it — for this proposal only. Company defaults live on the Proposal Template page.</div>
+              <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:10 }}>Pages</div>
+              {BOLD_PAGES.map(([k, label]) => (
+                <label key={k} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:9, cursor:"pointer" }}>
+                  <input type="checkbox" checked={!hiddenPages.has(k)} onChange={() => { const h = new Set(hiddenPages); h.has(k) ? h.delete(k) : h.add(k); setBoldHidden([...h]); }}
+                    style={{ accentColor:primary, width:14, height:14, cursor:"pointer" }} />
+                  <span style={{ fontSize:13 }}>{label}</span>
+                </label>
+              ))}
+              {(Object.keys(boldText).length > 0 || Object.keys(boldPhotos).length > 0) && (
+                <div className="card-sub" style={{ fontSize:11, marginTop:4 }}><span style={{ cursor:"pointer", textDecoration:"underline" }} onClick={() => { setBoldText({}); setBoldPhotos({}); }}>Undo my changes to this proposal</span></div>
+              )}
+              <input ref={boldPhotoInput} type="file" accept="image/*" style={{ display:"none" }} onChange={onBoldPhoto} />
+            </>
+          )}
+          {template !== "bold" && <div className="card-title" style={{ fontSize:12, textTransform:"uppercase", letterSpacing:0.7, color:"var(--tx-dim)", marginBottom:14 }}>Sections</div>}
+          {template !== "bold" && [
             ["overview",   "System overview"],
             ["about",      "About us"],
             ["whysolar",   "Why go solar"],
@@ -6835,8 +7595,14 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
       </div>
 
       {/* Proposal document */}
-      <div style={{ flex:1 }}>
-        <div ref={previewRef} style={D.doc}>
+      <div style={{ flex:1, minWidth:0 }}>
+        {template === "bold" && (
+          <BoldProposal d={boldData} tpl={tset} look={look} brandColor={tset.brand_color || (brand.accent && brand.accent[1]) || "#f28a1e"}
+            text={boldTextOf} setText={(k, v) => setBoldText(t => ({ ...t, [k]: v }))} editable
+            photo={slot => boldPhotos[slot] || (tplSt.photos || {})[slot] || null} pickPhoto={pickBoldPhoto}
+            hidden={hiddenPages} qr={tplSt.qr} pagesRef={boldRef} />
+        )}
+        <div ref={previewRef} style={{ ...D.doc, ...(template === "bold" ? { display:"none" } : {}) }}>
 
           {/* COVER PAGE */}
           <div style={D.cover}>
@@ -9629,7 +10395,7 @@ function TenantSubscription() {
           {comp.lifetime ? "Complimentary — no charge, ever" : "Complimentary — no charge until " + fmtD(comp.until)}</div>}
         {!b.configured && !comp && <div className="card-sub">Online payments aren't switched on for this platform yet.</div>}
         {b.founder && <div className="comp-note ok" style={{ display: "inline-block", marginBottom: 8 }}>Founding customer — {b.founder_offer.percent}% off everything{b.founder_until ? " until " + fmtD(b.founder_until) : ""}</div>}
-        {!live && !comp && !b.founder && b.founder_offer.left > 0 && (
+        {!live && !comp && !b.founder && s.plan !== "Templates" && b.founder_offer.left > 0 && (
           <div data-testid="founder-offer" style={{ padding: "10px 14px", borderRadius: 10, marginBottom: 8, background: "rgba(255,201,60,0.10)", border: "1px solid rgba(255,201,60,0.35)", fontSize: 13.5 }}>
             <b>Founding customer offer:</b> {b.founder_offer.percent}% off your plan, seats and add-ons for {b.founder_offer.months} months — only {b.founder_offer.left} of {b.founder_offer.slots} places left. Applied automatically when you start.
           </div>)}
@@ -9657,12 +10423,12 @@ function TenantSubscription() {
       <div className="panel panel-pad chrome-top" style={{ marginBottom: "var(--gap)" }}>
         <div className="card-title" style={{ marginBottom: 10 }}>Plans</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
-          {Object.entries(b.plans).map(([name, p]) => (
+          {Object.entries(b.plans).filter(([name]) => name !== "Templates" || s.plan === "Templates").map(([name, p]) => (
             <div key={name} className={"plan-card" + (name === s.plan ? " pop" : "")}>
               <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>{name}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "var(--blue-light)" }}>${amt(p.price).toLocaleString("en-AU")}<span className="card-sub">{yearly ? "/yr" : "/mo"} + GST</span></div>
               {yearly && <div className="card-sub">≈ ${(amt(p.price) / 12).toFixed(2)}/month</div>}
-              <div className="card-sub">{p.seats == null ? "Unlimited seats" : p.seats + " seats included"}</div>
+              <div className="card-sub">{p.seats == null ? "Unlimited seats" : p.seats + (p.seats === 1 ? " seat" : " seats") + " included"}</div>
               {isAdmin && !comp && name !== s.plan && (
                 <button className="btn" style={{ marginTop: 8 }} disabled={!!busy} onClick={() => {
                   if (!window.confirm("Switch to " + name + " ($" + amt(p.price).toLocaleString("en-AU") + per + " + GST)?" + (live ? " The difference is charged or credited pro-rata now." : ""))) return;
@@ -9673,7 +10439,7 @@ function TenantSubscription() {
         </div>
       </div>
 
-      <div className="panel panel-pad chrome-top">
+      {s.plan !== "Templates" && <div className="panel panel-pad chrome-top">
         <div className="card-title" style={{ marginBottom: 10 }}>Add-ons</div>
         {b.addons.filter(a => Number(a.price) > 0).map(a => (
           <div key={a.key} className="comp-row" style={{ padding: "10px 4px" }}>
@@ -9691,7 +10457,7 @@ function TenantSubscription() {
             {!isAdmin && <span className="card-sub" style={{ marginLeft: "auto" }}>{a.active ? "On" : "Off"}</span>}
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -11719,8 +12485,9 @@ const R_ACTIVITY = [
 const PLANS = [
   { name:"Solo",    price:79,  feats:["1 portal","2 seats","Email support"] },
   { name:"Starter", price:199, feats:["1 portal","5 seats","Email support"] },
-  { name:"Growth",  price:499, feats:["White-label","25 seats","Client portal","Priority support"] },
+  { name:"Growth",  price:599, feats:["White-label","25 seats","Client portal","Priority support"] },
   { name:"Scale",   price:899, feats:["Full white-label","Unlimited seats","Financials & payroll","Dedicated CSM"], pop:true },
+  { name:"Templates", price:19, feats:["Proposal templates only","12-page Bold proposal","Their logo, colours & photos","1 seat"] },
 ];
 
 const TICKETS_INIT = [].concat([
@@ -12733,6 +13500,7 @@ function ResellerTenants() {
               <option value="starter">Starter</option>
               <option value="growth">Growth</option>
               <option value="scale">Scale</option>
+              <option value="templates">Templates</option>
             </select>
             <button className="btn btn-primary" onClick={()=>setProvision(true)}>
               <Icon d={ICONS.plus} size={16} stroke={2.4} /> Provision New
@@ -12755,7 +13523,7 @@ function ResellerTenants() {
 const RESELLER_INVOICES = [].concat([
   { id:"INV-3041", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3040", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
-  { id:"INV-3039", tenant:"voltaic", plan:"Growth", amount:499, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
+  { id:"INV-3039", tenant:"voltaic", plan:"Growth", amount:599, status:"Paid",    date:"Jun 1, 2025",  due:"Jun 1, 2025",  period:"Jun 2025" },
   { id:"INV-3022", tenant:"azure",   plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
   { id:"INV-3021", tenant:"helios",  plan:"Scale",  amount:899, status:"Paid",    date:"May 1, 2025",  due:"May 1, 2025",  period:"May 2025" },
 ]).filter(x => (window.__SS_DEMO || !["voltaic", "azure"].includes(x.tenant)));
@@ -13702,9 +14470,9 @@ const RDOC_INITIAL = [
   { id: "pkg-starter", category: "packages", price: "$199 / mo", title: "Starter Plan — Sales Sheet",
     desc: "One-page overview of the Starter plan for prospective tenants.",
     body: `<h1>SolarSync Starter Plan</h1><p><strong>$199 per month &bull; No lock-in contract</strong></p><hr><h2>Your complete solar business portal — from day one</h2><p>The Starter plan gives small solar businesses everything they need to run a professional, branded operation. Manage jobs, clients, and compliance in one place — with your logo on every page.</p><h2>What's Included</h2><ul><li><strong>1 white-labeled portal</strong> — your branding, your colours, your domain</li><li><strong>5 contractor seats</strong> — manage your install team with role-based access</li><li><strong>Client login portal</strong> — clients can view their system, documents, and job status</li><li><strong>Job pipeline</strong> — enquiry to handover in one visual workflow</li><li><strong>AS/NZS compliance checklists</strong> — grid-connect, off-grid, battery, replacement</li><li><strong>Photo documentation</strong> — upload and tag install photos per job</li><li><strong>Onsite report forms with digital sign-off</strong></li><li><strong>Email support</strong> — 2 business day response</li></ul><h2>Best For</h2><p>Solar businesses completing 1–15 installs per month that want to look professional, stay compliant, and centralise job management without a large tech overhead.</p><h2>Pricing</h2><table><tr><th>Plan</th><th>Monthly Price</th><th>Contractors</th><th>Portals</th></tr><tr><td>Starter</td><td>$199 / month</td><td>5 seats</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel or upgrade anytime.</em></p>` },
-  { id: "pkg-growth", category: "packages", price: "$499 / mo", title: "Growth Plan — Sales Sheet",
+  { id: "pkg-growth", category: "packages", price: "$599 / mo", title: "Growth Plan — Sales Sheet",
     desc: "Full white-label with 25 seats, client portal, and priority support.",
-    body: `<h1>SolarSync Growth Plan</h1><p><strong>$499 per month &bull; No lock-in contract</strong></p><hr><h2>Scale your solar business with full white-label capability</h2><p>The Growth plan is built for solar businesses expanding their operations. Full white-label branding, a larger install team, the financials module, and the quoting system with PV-AI designer.</p><h2>Everything in Starter, plus:</h2><ul><li><strong>Full white-label branding</strong> — custom domain, logo, and colour scheme on all portals</li><li><strong>25 contractor seats</strong> — support a growing install and service team</li><li><strong>Priority support</strong> — response within 4 business hours</li><li><strong>Financials module</strong> — invoicing, revenue tracking, and financial reports</li><li><strong>Advanced client portal</strong> — system performance, service history, and document access</li><li><strong>Quoting system + PV-AI designer</strong> — generate professional solar proposals in minutes</li><li><strong>Product catalog and inventory</strong> — manage panel and inverter stock levels</li></ul><h2>Best For</h2><p>Solar businesses completing 15–60 installs per month. Designed for teams growing fast and needing scalable, professional tools to match their ambitions.</p><h2>Pricing</h2><table><tr><th>Plan</th><th>Monthly Price</th><th>Contractors</th><th>Portals</th></tr><tr><td>Growth</td><td>$499 / month</td><td>25 seats</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel or upgrade anytime.</em></p>` },
+    body: `<h1>SolarSync Growth Plan</h1><p><strong>$599 per month &bull; No lock-in contract</strong></p><hr><h2>Scale your solar business with full white-label capability</h2><p>The Growth plan is built for solar businesses expanding their operations. Full white-label branding, a larger install team, the financials module, and the quoting system with PV-AI designer.</p><h2>Everything in Starter, plus:</h2><ul><li><strong>Full white-label branding</strong> — custom domain, logo, and colour scheme on all portals</li><li><strong>25 contractor seats</strong> — support a growing install and service team</li><li><strong>Priority support</strong> — response within 4 business hours</li><li><strong>Financials module</strong> — invoicing, revenue tracking, and financial reports</li><li><strong>Advanced client portal</strong> — system performance, service history, and document access</li><li><strong>Quoting system + PV-AI designer</strong> — generate professional solar proposals in minutes</li><li><strong>Product catalog and inventory</strong> — manage panel and inverter stock levels</li></ul><h2>Best For</h2><p>Solar businesses completing 15–60 installs per month. Designed for teams growing fast and needing scalable, professional tools to match their ambitions.</p><h2>Pricing</h2><table><tr><th>Plan</th><th>Monthly Price</th><th>Contractors</th><th>Portals</th></tr><tr><td>Growth</td><td>$599 / month</td><td>25 seats</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel or upgrade anytime.</em></p>` },
   { id: "pkg-scale", category: "packages", price: "$899 / mo", title: "Scale Plan — Sales Sheet",
     desc: "Unlimited seats, payroll, dedicated CSM — for high-volume operators.",
     body: `<h1>SolarSync Scale Plan</h1><p><strong>$899 per month &bull; Recommended for high-volume operators</strong></p><hr><h2>The flagship plan for serious solar operators</h2><p>The Scale plan is SolarSync's most powerful offering. Unlimited contractor seats, integrated payroll, a dedicated Customer Success Manager, and API access to integrate with your existing business systems.</p><h2>Everything in Growth, plus:</h2><ul><li><strong>Unlimited contractor and team seats</strong></li><li><strong>Payroll and timesheets module</strong> — manage wages, hours, and payslips in-portal</li><li><strong>Dedicated Customer Success Manager</strong> — quarterly reviews, priority escalation path</li><li><strong>API access</strong> — integrate with Xero, MYOB, or your ERP</li><li><strong>Advanced analytics</strong> — revenue forecasting, installer performance, STC tracking</li><li><strong>Custom onboarding</strong> — white-glove setup and team training included</li></ul><h2>Best For</h2><p>Solar businesses completing 60+ installs per month, or operators managing multiple install teams across regions. Designed for businesses where the portal is central to daily operations.</p><h2>Pricing</h2><table><tr><th>Plan</th><th>Monthly Price</th><th>Contractors</th><th>Portals</th></tr><tr><td>Scale</td><td>$899 / month</td><td>Unlimited</td><td>1</td></tr></table><p><em>All prices ex-GST. Billed monthly. Cancel anytime.</em></p>` },
@@ -19062,7 +19830,13 @@ async function uploadDoc(path, method, formData) {
   return data;
 }
 
+// Documents screen: the paid Proposal Template Pack sits above the Document Library.
 function TenantDocuments() {
+  // Templates plan: the pack only — the document library is a separate add-on.
+  if (window.__ssFeatures && window.__ssFeatures.templates_only) return <ProposalPackPanel />;
+  return <><ProposalPackPanel /><TenantDocumentLibrary /></>;
+}
+function TenantDocumentLibrary() {
   const [hbSel, setHbSel] = useEX(null);
   const [ent, setEnt] = useEX(null);          // { unlocked, configured } | null
   const [docs, setDocs] = useEX([]);
@@ -19678,7 +20452,7 @@ function ResellerAnalytics() {
         { l: "Logo Churn (90d)", v: "0%", d: "0 cancellations", i: "check" },
       ];
   // Plan distribution from the live tenant set (demo includes the showcase).
-  const planRows = [["Scale", "var(--blue-mid)"], ["Growth", "var(--blue-light)"], ["Starter", "var(--silver)"], ["Solo", "var(--tx-dim)"]]
+  const planRows = [["Scale", "var(--blue-mid)"], ["Growth", "var(--blue-light)"], ["Starter", "var(--silver)"], ["Solo", "var(--tx-dim)"], ["Templates", "var(--teal)"]]
     .map(([name, col]) => [name, agg.count ? Math.round(agg.ids.filter(id => (BRANDS[id] || {}).plan === name).length / agg.count * 100) : 0, col]);
   const topTenants = [...agg.ids].sort((a, b) => ((BRANDS[b] || {}).mrr || 0) - ((BRANDS[a] || {}).mrr || 0)).slice(0, 5);
   return (
@@ -20909,6 +21683,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "documents":     return <TenantDocuments />;
       case "forms":         return <TenantForms brand={brand} />;
       case "branding":      return <BrandingEditor brand={brand} />;
+      case "proposaltpl":   return <ProposalTemplateEditor brand={brand} />;
       case "reports":       return <TenantReports />;
       case "subscription":  return <TenantSubscription />;
       case "settings":      return <Settings portal={portal} brand={brand} user={user} />;
@@ -21265,12 +22040,19 @@ function App() {
   // (buttons, charts, accents) — not just the brand-prefixed tokens.
   const themed = portal === "reseller" && !(ownResellerBrand && brandOverride.accent) ? {} : (window.themeVarsPreview ? window.themeVarsPreview(brand) : themeVars(brand));
 
+  React.useEffect(() => {
+    if (templatesOnly && !TEMPLATES_PLAN_SCREENS.includes(screen) && screen !== "settings")
+      setScreens(sc => ({ ...sc, tenant: "proposaltpl" }));
+  }, [templatesOnly, screen]);
   const titleEntry = TITLES[portal]?.[screen] || [screen, ""];
   const [title, sub] = titleEntry;
 
   // Accounting/ERP is a paid upgrade: hide the tab when the tenant hasn't bought it.
+  // Templates plan ($19/month): only the proposal template screens.
+  const templatesOnly = portal === "tenant" && !!(features && features.templates_only);
   const nav = (PORTAL_NAV[portal] || []).filter(n =>
-    !(portal === "tenant" && n.id === "accounting" && features && features.erp_enabled === false));
+    !(portal === "tenant" && n.id === "accounting" && features && features.erp_enabled === false)
+    && (!templatesOnly || TEMPLATES_PLAN_SCREENS.includes(n.id)));
   // Show the logged-in person's real name when they're viewing their OWN portal;
   // fall back to the demo identities for the reseller's "viewing as" impersonation.
   const ownPortal = authUser ? (authUser.is_tester ? "tenant" : ROLE_TO_PORTAL[authUser.app_role]) : null;

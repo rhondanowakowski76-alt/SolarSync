@@ -1,7 +1,7 @@
 // SolarSync — tenant subscriptions through Stripe.
 //
 //   Plans (AUD per month, ex-GST; GST is added at checkout):
-//     Solo $79 · 2 seats   Starter $199 · 5 seats   Growth $499 · 25 seats   Scale $899 · unlimited
+//     Solo $79 · 2 seats   Starter $199 · 5 seats   Growth $599 · 25 seats   Scale $899 · unlimited
 //   Extra seat: $15/month each. Add-ons from the `addons` table (AI assistant $19).
 //
 //   - A seat is any active tenant login: tenant admins, staff and contractors.
@@ -19,8 +19,11 @@ const A = require("./auth");
 const PLANS = {
   Solo: { price: 79, seats: 2 },
   Starter: { price: 199, seats: 5 },
-  Growth: { price: 499, seats: 25 },
+  Growth: { price: 599, seats: 25 },
   Scale: { price: 899, seats: null },   // unlimited
+  // Proposal templates only (Documents, Proposal Template, Branding) — for
+  // companies that don't use the CRM. Full plans include the templates.
+  Templates: { price: 19, seats: 1 },
 };
 const SEAT_PRICE = 15;
 const TRIAL_DAYS = 14;
@@ -32,7 +35,7 @@ const INTERVALS = ["month", "year"];
 // Founding customers: the first FOUNDER_SLOTS tenants to start a subscription get
 // FOUNDER_PERCENT off everything for FOUNDER_MONTHS. A place is taken only when the
 // subscription actually starts, not when someone opens the checkout page.
-const FOUNDER_SLOTS = 15;
+const FOUNDER_SLOTS = 20;
 const FOUNDER_PERCENT = 30;
 const FOUNDER_MONTHS = 12;
 const AI_MONTHLY_CAP = 300;             // assistant replies per tenant per month
@@ -260,7 +263,7 @@ function register(app, { h, ok }) {
     const line_items = [{ price: await planPrice(plan, interval), quantity: 1, tax_rates: tax }];
     // Carry over seats/add-ons already in use (e.g. switched on before billing started).
     if (t.extra_seats > 0) line_items.push({ price: await seatPrice(interval), quantity: t.extra_seats, tax_rates: tax });
-    const founder = !t.founder && (await foundersTaken()) < FOUNDER_SLOTS;
+    const founder = !t.founder && t.plan !== "Templates" && (await foundersTaken()) < FOUNDER_SLOTS;
     const session = await stripe().checkout.sessions.create({
       mode: "subscription", customer, line_items,
       payment_method_collection: "always",
@@ -309,6 +312,7 @@ function register(app, { h, ok }) {
     if (!need(res)) return;
     const t = await tenantRow(req);
     if (!liveSub(t)) return res.status(409).json({ error: "no_subscription" });
+    if (t.plan === "Templates") return res.status(409).json({ error: "templates_plan" });
     const price = await addonPrice(req.params.key, intervalOf(t));
     if (!price) return res.status(404).json({ error: "addon_not_found" });
     const on = !(req.body && req.body.active === false);
