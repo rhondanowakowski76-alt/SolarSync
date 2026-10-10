@@ -12010,7 +12010,7 @@ function JobExtras({ ev }) {
         {invoiceId
           ? <div className="card-sub" style={{ marginTop: 6 }}>{inv ? <><b>{inv.number}</b> · ${Number(inv.amount).toFixed(2)} · {inv.status}</> : "Invoice linked"}</div>
           : invForm
-            ? <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+            ? <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8, marginTop: 6 }}>
                 <label className="field"><span className="field-label">Service / labour amount (inc GST)</span>
                   <input className="field-input" type="number" min="0" step="0.01" value={invForm.amount} onChange={e => setInvForm({ ...invForm, amount: e.target.value })} /></label>
                 <label className="field"><span className="field-label">Description</span>
@@ -12034,7 +12034,7 @@ function JobExtras({ ev }) {
                 </div>
                 <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>Total ${invTotal.toFixed(2)} inc GST</div>
                 <label className="field"><span className="field-label">Customer</span>
-                  <select className="field-input" value={invForm.client_id} onChange={e => setInvForm({ ...invForm, client_id: e.target.value })}>
+                  <select className="field-input" style={{ width: "100%", minWidth: 0 }} value={invForm.client_id} onChange={e => setInvForm({ ...invForm, client_id: e.target.value })}>
                     <option value="">Not linked{ev.client ? " — " + ev.client : ""}</option>
                     {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select></label>
@@ -12060,7 +12060,7 @@ function CalEventModal({ ev, onSave, onDelete, onClose, canEdit, canDelete, isRe
   return (
     <div className="drawer-scrim" onClick={onClose}>
       <div onClick={e => e.stopPropagation()}
-        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(500px,94vw)", background: "var(--glass)", border: "1px solid var(--line-strong)", borderRadius: 18, maxHeight: "92vh", overflowY: "auto", zIndex: 300 }}>
+        style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(500px,94vw)", background: "var(--glass)", border: "1px solid var(--line-strong)", borderRadius: 18, maxHeight: "92vh", overflowY: "auto", overflowX: "hidden", zIndex: 300 }}>
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", gap: 10, alignItems: "center" }}>
           <span style={{ width: 10, height: 10, borderRadius: 3, background: calColor(form.type), flexShrink: 0 }} />
           <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 15, color: "var(--tx-hi)" }}>
