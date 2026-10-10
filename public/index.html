@@ -9267,6 +9267,8 @@ function TenantAccounting() {
   const [tab, setTab] = useTE("overview");
   const money2 = n => "$" + Number(n || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const authed = !!api.getToken();
+  // A company's books stay private: support sessions can't open them (the server refuses too).
+  const inSupport = !!((api.getUser && api.getUser()) || {}).support;
 
   // ---- shared report state ----
   const [from, setFrom] = useTE("");
@@ -9280,7 +9282,7 @@ function TenantAccounting() {
   const [err, setErr] = useTE(null);
 
   const loadReports = () => {
-    if (!authed) return;
+    if (!authed || inSupport) return;
     setErr(null);
     Promise.all([
       api.get("/finance/profit-loss" + q()), api.get("/finance/bas" + q()),
@@ -9301,6 +9303,7 @@ function TenantAccounting() {
   };
 
   if (!authed) return <div className="panel panel-pad chrome-top"><div className="card-title">Accounting</div><div className="card-sub" style={{ marginTop: 8 }}>Sign in to a connected tenant to use the live accounting system — every invoice, payment, stock movement and pay run posts to a real double-entry ledger.</div></div>;
+  if (inSupport) return <div className="panel panel-pad chrome-top" data-testid="books-private"><div className="card-title">Accounting</div><div className="card-sub" style={{ marginTop: 8 }}>The company's books are private, so they aren't shown in support view. The company can see them in their own login.</div></div>;
 
   const TABS = [["overview","Overview"],["reports","Reports"],["customers","Customers"],["invoices","Invoices"],["suppliers","Suppliers"],["journals","Journals"],["purchasing","Purchasing"],["payroll","Payroll"],["bank","Bank Rec"],["stock","Stock"]];
   return (
