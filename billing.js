@@ -33,7 +33,7 @@ const TRIAL_DAYS = 14;
 const ANNUAL_MONTHS = 10;
 const INTERVALS = ["month", "year"];
 // Founding customers: the first FOUNDER_SLOTS tenants to start a subscription get
-// FOUNDER_PERCENT off everything for FOUNDER_MONTHS. A place is taken only when the
+// FOUNDER_PERCENT off their plan (not seats or add-ons) for FOUNDER_MONTHS. A place is taken only when the
 // subscription actually starts, not when someone opens the checkout page.
 const FOUNDER_SLOTS = 20;
 const FOUNDER_PERCENT = 30;
@@ -68,25 +68,39 @@ async function gstRate() {
 // An AUD price (monthly, or yearly at ANNUAL_MONTHS × the monthly amount), created
 // the first time it's needed. The key includes the amount, so changing a price here
 // creates a new Stripe price automatically.
+// One Stripe product per plan, so the founder coupon can be limited to plans.
+async function planProduct(key, name) {
+  const k = `stripe_product:${key}`;
+  let id = await setting(k);
+  if (id) return id;
+  const p = await stripe().products.create({ name: "SolarSync " + name, metadata: { ss_key: key } });
+  await setSetting(k, p.id);
+  return p.id;
+}
 async function priceFor(key, name, monthlyDollars, interval = "month") {
   const yearly = interval === "year";
   const cents = Math.round(monthlyDollars * (yearly ? ANNUAL_MONTHS : 1) * 100);
-  const k = `stripe_price:${key}:${cents}` + (yearly ? ":year" : "");
+  const plan = key.startsWith("plan-");
+  const k = `stripe_price:${key}:${cents}` + (yearly ? ":year" : "") + (plan ? ":prod" : "");
   let id = await setting(k);
   if (id) return id;
   const p = await stripe().prices.create({
     currency: "aud", unit_amount: cents, recurring: { interval: yearly ? "year" : "month" },
-    product_data: { name: "SolarSync " + name + (yearly ? " (annual)" : "") }, metadata: { ss_key: key },
+    ...(plan ? { product: await planProduct(key, name) } : { product_data: { name: "SolarSync " + name + (yearly ? " (annual)" : "") } }),
+    metadata: { ss_key: key },
   });
   await setSetting(k, p.id);
   return p.id;
 }
 async function founderCoupon() {
-  const k = `stripe_coupon:founder:${FOUNDER_PERCENT}:${FOUNDER_MONTHS}`;
+  const k = `stripe_coupon:founder:${FOUNDER_PERCENT}:${FOUNDER_MONTHS}:plans`;
   let id = await setting(k);
   if (id) return id;
-  const c = await stripe().coupons.create({ name: "Founding customer", percent_off: FOUNDER_PERCENT,
-    duration: "repeating", duration_in_months: FOUNDER_MONTHS });
+  // Plans only — seats and add-ons are charged in full.
+  const products = [];
+  for (const plan of Object.keys(PLANS)) if (plan !== "Templates") products.push(await planProduct("plan-" + plan.toLowerCase(), plan + " plan"));
+  const c = await stripe().coupons.create({ name: "Founding customer (plan only)", percent_off: FOUNDER_PERCENT,
+    duration: "repeating", duration_in_months: FOUNDER_MONTHS, applies_to: { products } });
   await setSetting(k, c.id);
   return c.id;
 }
