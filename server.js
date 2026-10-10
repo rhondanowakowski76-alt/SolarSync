@@ -743,6 +743,8 @@ app.get("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "c
 app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const q = await one(`select ${QUOTE_COLS} from quotes where id=$1`, [req.params.id]);
   if (!q || q.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  // Costs and margins are for the office only — crew get the quote without them.
+  if (req.user.app_role === "contractor" && Array.isArray(q.lines)) q.lines = q.lines.map(({ cost, ...l }) => l);
   ok(res, q);
 }));
 
@@ -783,6 +785,49 @@ app.delete("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "sta
   await run("delete from quotes where id=$1", [cur.id]);
   await audit(req.user.sub, "delete_quote", cur.id, cur.tenant_id);
   ok(res, { ok: true });
+}));
+
+// Quick quotes: send a quote to the customer's portal. Only the customer-safe view
+// (description, qty, price, total) ever reaches the customer — never cost or margin.
+app.post("/api/quotes/:id/send", A.authRequired, A.requireRole("tenant_admin", "staff"), h(async (req, res) => {
+  const cur = await one("select * from quotes where id=$1", [req.params.id]);
+  if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
+  if (!cur.client_id) return res.status(400).json({ error: "no_customer" });
+  if (await foreignClient(req, cur.client_id)) return res.status(404).json({ error: "client_not_found" });
+  const spec = Object.assign({}, cur.spec || {}, { shared: true, shared_at: new Date().toISOString() });
+  await run("update quotes set spec=$1, status=(CASE WHEN status='Draft' THEN 'Sent' ELSE status END), updated_at=now() where id=$2",
+    [JSON.stringify(spec), cur.id]);
+  await audit(req.user.sub, "send_quote", cur.id, cur.tenant_id);
+  ok(res, await one(`select ${QUOTE_COLS} from quotes where id=$1`, [cur.id]));
+}));
+
+function customerQuoteView(q) {
+  const lines = (Array.isArray(q.lines) ? q.lines : []).map(l => ({
+    d: String(l.d || l.name || "").slice(0, 300), q: Number(l.q) || 0, u: Number(l.u) || 0,
+    amt: Math.round((Number(l.q) || 0) * (Number(l.u) || 0) * 100) / 100,
+  }));
+  const spec = q.spec || {};
+  return { id: q.id, number: q.number, enq: q.enq, title: String(spec.title || "").slice(0, 200), status: q.status,
+    validity: q.validity, notes: q.notes, lines, total: Number(q.total) || 0,
+    sent_at: spec.shared_at || null, created_at: q.created_at };
+}
+
+app.get("/api/client/quotes", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const c = await clientRowOf(req);
+  if (!c) return ok(res, []);
+  const r = await rows("select * from quotes where tenant_id=$1 and client_id=$2 and (spec->>'shared')='true' order by updated_at desc", [c.tenant_id, c.id]);
+  ok(res, r.map(customerQuoteView));
+}));
+
+app.post("/api/client/quotes/:id/accept", A.authRequired, A.requireRole("client"), h(async (req, res) => {
+  const c = await clientRowOf(req);
+  const q = c && await one("select * from quotes where id=$1", [req.params.id]);
+  if (!q || q.tenant_id !== c.tenant_id || q.client_id !== c.id || !(q.spec && q.spec.shared)) return res.status(404).json({ error: "not_found" });
+  if (q.status !== "Sent") return res.status(409).json({ error: "not_open" });
+  const spec = Object.assign({}, q.spec, { accepted_at: new Date().toISOString(), accepted_by: c.name });
+  await run("update quotes set status='Accepted', spec=$1, updated_at=now() where id=$2", [JSON.stringify(spec), q.id]);
+  await audit(req.user.sub, "client_accept_quote", q.id, q.tenant_id);
+  ok(res, customerQuoteView(await one("select * from quotes where id=$1", [q.id])));
 }));
 
 // Allocate a quote's stock against the customer order (ERP draw-down, MYOB/Xero style).

@@ -3769,6 +3769,7 @@ const PORTAL_NAV = {
     { id: "schedule", label: "Schedule", icon: "cal" },
     { id: "journey", label: "Client Journey", icon: "route" },
     { id: "quotes", label: "Quotes & PV-AI", icon: "sparkle" },
+    { id: "quickquotes", label: "Quick Quotes", icon: "dollar" },
     { id: "stc", label: "STC Calculator", icon: "sun" },
     { id: "catalog", label: "Product Catalog", icon: "panel" },
     { id: "inventory", label: "Inventory", icon: "battery" },
@@ -3807,6 +3808,7 @@ const PORTAL_NAV = {
     { id: "documents", label: "Documents", icon: "docs" },
     { id: "messages", label: "Messages", icon: "mail", badge: "1" },
     { id: "billing", label: "Billing", icon: "dollar" },
+    { id: "cquotes", label: "Quotes", icon: "docs" },
     { id: "book", label: "Book a Service", icon: "clean" },
   ],
 };
@@ -6248,6 +6250,7 @@ const ENQ_TYPES_QS = {
   replacement: { label: "Panel Replacement",   icon: "panel" },
   commercial:  { label: "Commercial",          icon: "building" },
   monitoring:  { label: "Monitoring & Maint.", icon: "pulse" },
+  quick:       { label: "Quick Quote",         icon: "docs" },
 };
 
 /* ── Quotes persistence ───────────────────────────────────────────
@@ -12938,6 +12941,240 @@ function ClientCalendar({ tenantId, clientName }) {
   );
 }
 window.ClientCalendar = ClientCalendar;
+
+/* ══════════════════════════════════════════════════════════════════
+   Quick Quotes — single-item / service quotes for a customer
+   (inverter replacement, pigeon proofing, battery, retail products…).
+   Office-only costing sheet and a no-price packing slip for site.
+   ══════════════════════════════════════════════════════════════════ */
+const QQ_TYPES = ["Inverter Replacement", "Pigeon Proofing", "Panel Cleaning", "Battery", "Retail Products",
+  "Fault Finding", "Inverter Check", "Inverter Warranty Claim", "Site Call-out", "Site Inspection",
+  "Operational Testing", "Miscellaneous"];
+const qqMoney = n => "$" + (Number(n) || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const qqEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function qqTotals(lines) {
+  const sell = lines.reduce((a, l) => a + (Number(l.q) || 0) * (Number(l.u) || 0), 0);
+  const cost = lines.reduce((a, l) => a + (Number(l.q) || 0) * (Number(l.cost) || 0), 0);
+  const ex = sell / 1.1, margin = ex - cost;
+  return { sell, ex, gst: sell - ex, cost, margin, pct: ex > 0 ? (margin / ex) * 100 : 0 };
+}
+function qqPrint(title, body) {
+  const w = window.open("", "_blank");
+  if (!w) { window.ssToast && window.ssToast("Allow pop-ups to print", "error"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${qqEsc(title)}</title><style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:32px;font-size:13px}
+    h1{font-size:22px;margin:0 0 4px} .sub{color:#555;margin-bottom:18px}
+    table{width:100%;border-collapse:collapse;margin:12px 0} th,td{border:1px solid #bbb;padding:7px 8px;text-align:left;vertical-align:top}
+    th{background:#f1f3f6} td.n,th.n{text-align:right} .tot td{font-weight:bold} .box{width:16px;height:16px;border:1.5px solid #333;display:inline-block}
+    .meta td{border:none;padding:3px 8px 3px 0} .sig{margin-top:28px;display:flex;gap:40px} .sig div{flex:1;border-top:1px solid #333;padding-top:4px}
+    .warn{font-size:11px;color:#a00;margin-top:6px}</style></head><body>${body}</body></html>`);
+  w.document.close(); setTimeout(() => { w.focus(); w.print(); }, 400);
+}
+
+function QuickQuotes() {
+  const api = window.ssApi;
+  const me = calMe();
+  const isSupport = !!me.support || !['tenant_admin', 'staff'].includes(me.app_role);
+  const [list, setList] = React.useState([]);
+  const [clients, setClients] = React.useState([]);
+  const [products, setProducts] = React.useState([]);
+  const [q, setQ] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [pick, setPick] = React.useState("");
+  const [pickQty, setPickQty] = React.useState(1);
+
+  const load = async () => {
+    try { const r = await api.get("/quotes"); setList((Array.isArray(r) ? r : []).filter(x => x.enq === "quick")); } catch (e) {}
+  };
+  React.useEffect(() => {
+    load();
+    api.get("/clients").then(r => setClients(Array.isArray(r) ? r : [])).catch(() => {});
+    api.get("/products").then(r => setProducts((Array.isArray(r) ? r : []).filter(p => p.active !== false))).catch(() => {});
+  }, []);
+
+  const blank = () => setQ({ id: null, client_id: "", title: QQ_TYPES[0], notes: "", validity: "30", status: "Draft", lines: [], spec: {} });
+  const open = async (id) => {
+    try {
+      const r = await api.get("/quotes/" + id);
+      setQ({ id: r.id, number: r.number, client_id: r.client_id || "", title: (r.spec && r.spec.title) || "", notes: r.notes || "",
+        validity: r.validity || "30", status: r.status, lines: Array.isArray(r.lines) ? r.lines : [], spec: r.spec || {} });
+    } catch (e) { window.ssToast && window.ssToast("Could not open quote", "error"); }
+  };
+  const setF = patch => setQ(x => ({ ...x, ...patch }));
+  const setLine = (i, patch) => setQ(x => ({ ...x, lines: x.lines.map((l, j) => j === i ? { ...l, ...patch } : l) }));
+  const delLine = i => setQ(x => ({ ...x, lines: x.lines.filter((_, j) => j !== i) }));
+  const addProduct = () => {
+    const p = products.find(p => p.id === pick); if (!p) return;
+    setQ(x => ({ ...x, lines: [...x.lines, { kind: "product", product_id: p.id, d: p.name + (p.spec ? " — " + p.spec : ""), q: Math.max(1, Number(pickQty) || 1), u: Number(p.price) || 0, cost: Number(p.cost) || 0 }] }));
+    setPick(""); setPickQty(1);
+  };
+  const addService = () => setQ(x => ({ ...x, lines: [...x.lines, { kind: "service", d: x.title || "Service", q: 1, u: 0, cost: 0 }] }));
+
+  const client = q && clients.find(c => c.id === q.client_id);
+  const T = q ? qqTotals(q.lines) : null;
+
+  const save = async () => {
+    if (!q.lines.length) { window.ssToast && window.ssToast("Add at least one item"); return null; }
+    setBusy(true);
+    const payload = { client_id: q.client_id || null, enq: "quick", status: q.status || "Draft", validity: q.validity, notes: q.notes,
+      customer: client ? { name: client.name, address: client.site_address || "" } : {},
+      lines: q.lines.map(l => ({ kind: l.kind, product_id: l.product_id || null, d: String(l.d || "").slice(0, 300), q: Number(l.q) || 0, u: Number(l.u) || 0, cost: Number(l.cost) || 0 })),
+      spec: { ...(q.spec || {}), quick: true, title: q.title }, total: Math.round(T.sell * 100) / 100 };
+    try {
+      const r = q.id ? await api.put("/quotes/" + q.id, payload) : await api.post("/quotes", payload);
+      setQ(x => ({ ...x, id: r.id, number: r.number, status: r.status, spec: r.spec || x.spec }));
+      window.ssToast && window.ssToast("Quote " + r.number + " saved"); load(); return r;
+    } catch (e) { window.ssToast && window.ssToast("Could not save quote", "error"); return null; }
+    finally { setBusy(false); }
+  };
+  const send = async () => {
+    if (!q.client_id) { window.ssToast && window.ssToast("Choose the customer first"); return; }
+    const r = await save(); if (!r) return;
+    try { const s = await api.post("/quotes/" + r.id + "/send", {}); setQ(x => ({ ...x, status: s.status, spec: s.spec }));
+      window.ssToast && window.ssToast("Sent to " + (client ? client.name : "customer") + "'s portal"); load();
+    } catch (e) { window.ssToast && window.ssToast("Could not send quote", "error"); }
+  };
+
+  const head = () => `<table class="meta"><tr><td><b>Quote</b></td><td>${qqEsc(q.number || "(unsaved)")}</td><td><b>Type</b></td><td>${qqEsc(q.title)}</td></tr>
+    <tr><td><b>Customer</b></td><td>${qqEsc(client ? client.name : "—")}</td><td><b>Site</b></td><td>${qqEsc(client ? client.site_address || "" : "")}</td></tr>
+    <tr><td><b>Date</b></td><td>${qqEsc(new Date().toLocaleDateString("en-AU"))}</td><td></td><td></td></tr></table>`;
+  const printCosting = () => {
+    const rows = q.lines.map(l => { const sell = l.q * l.u, ex = sell / 1.1, cost = l.q * (l.cost || 0), m = ex - cost;
+      return `<tr><td>${qqEsc(l.d)}</td><td class="n">${qqEsc(l.q)}</td><td class="n">${qqMoney(l.cost)}</td><td class="n">${qqMoney(cost)}</td><td class="n">${qqMoney(l.u)}</td><td class="n">${qqMoney(sell)}</td><td class="n">${qqMoney(m)}</td><td class="n">${ex > 0 ? (m / ex * 100).toFixed(1) + "%" : "—"}</td></tr>`; }).join("");
+    qqPrint("Costing sheet " + (q.number || ""), `<h1>Costing Sheet</h1><div class="sub">INTERNAL — office use only. Do not give to the customer or send to site.</div>${head()}
+      <table><tr><th>Item</th><th class="n">Qty</th><th class="n">Unit cost (ex GST)</th><th class="n">Line cost</th><th class="n">Unit sell (inc GST)</th><th class="n">Line sell</th><th class="n">Margin (ex GST)</th><th class="n">Margin %</th></tr>${rows}
+      <tr class="tot"><td>Totals</td><td></td><td></td><td class="n">${qqMoney(T.cost)}</td><td></td><td class="n">${qqMoney(T.sell)}</td><td class="n">${qqMoney(T.margin)}</td><td class="n">${T.pct.toFixed(1)}%</td></tr></table>
+      <table class="meta"><tr><td>Sell ex GST</td><td>${qqMoney(T.ex)}</td></tr><tr><td>GST</td><td>${qqMoney(T.gst)}</td></tr><tr><td>Sell inc GST</td><td>${qqMoney(T.sell)}</td></tr></table>
+      <div class="warn">Sell prices are treated as GST-inclusive and costs as GST-exclusive.</div>`);
+  };
+  const printPacking = () => {
+    const prod = q.lines.filter(l => l.kind !== "service"), svc = q.lines.filter(l => l.kind === "service");
+    qqPrint("Packing slip " + (q.number || ""), `<h1>Packing Slip</h1><div class="sub">For site — no prices.</div>${head()}
+      <h3>Items to pack</h3><table><tr><th>Packed</th><th class="n">Qty</th><th>Item</th><th>Checked on site</th></tr>
+      ${prod.length ? prod.map(l => `<tr><td><span class="box"></span></td><td class="n">${qqEsc(l.q)}</td><td>${qqEsc(l.d)}</td><td><span class="box"></span></td></tr>`).join("") : `<tr><td colspan="4">No products on this job</td></tr>`}</table>
+      ${svc.length ? `<h3>Work to do</h3><table><tr><th>Done</th><th>Task</th></tr>${svc.map(l => `<tr><td><span class="box"></span></td><td>${qqEsc(l.d)}</td></tr>`).join("")}</table>` : ""}
+      ${q.notes ? `<h3>Notes</h3><p>${qqEsc(q.notes)}</p>` : ""}
+      <div class="sig"><div>Packed by / date</div><div>Received on site by / date</div></div>`);
+  };
+
+  const inp = { className: "field-input", style: { width: "100%" } };
+  if (!q) return (
+    <div className="fade-in">
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div className="card-title">Quick Quotes</div>
+          <div className="card-sub">Single jobs or items — inverter replacement, pigeon proofing, panel cleaning, retail products or a battery. Separate to proposals.</div>
+        </div>
+        {!isSupport && <button className="btn btn-primary" data-testid="qq-new" onClick={blank}><Icon d={ICONS.plus} size={14} stroke={2.2} /> New quick quote</button>}
+      </div>
+      <div className="panel panel-pad chrome-top" data-testid="qq-list">
+        {list.length === 0 ? <div className="card-sub">No quick quotes yet.</div> : list.map(x => (
+          <button key={x.id} onClick={() => open(x.id)} style={{ display: "flex", width: "100%", gap: 12, alignItems: "center", padding: "10px 4px", background: "none", border: "none", borderBottom: "1px solid var(--line)", cursor: "pointer", textAlign: "left", color: "inherit" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "var(--font-head)", fontWeight: 600, color: "var(--tx-hi)" }}>{x.number} · {(x.customer && x.customer.name) || "No customer"}</div>
+              <div className="card-sub">{x.status}</div>
+            </div>
+            <div style={{ fontFamily: "var(--font-head)", fontWeight: 700 }}>{qqMoney(x.total)}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fade-in" data-testid="qq-editor">
+      <div className="panel panel-pad chrome-top" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn" onClick={() => { setQ(null); load(); }}>← All quick quotes</button>
+        <div style={{ flex: 1, fontFamily: "var(--font-head)", fontWeight: 700, color: "var(--tx-hi)" }}>{q.number || "New quick quote"} <span className="card-sub" style={{ fontWeight: 400 }}>· {q.status}{q.spec && q.spec.shared ? " · in customer portal" : ""}</span></div>
+        <button className="btn" data-testid="qq-costing" onClick={printCosting} disabled={!q.lines.length}>Costing sheet</button>
+        <button className="btn" data-testid="qq-packing" onClick={printPacking} disabled={!q.lines.length}>Packing slip</button>
+        {!isSupport && <button className="btn" disabled={busy} onClick={save}>Save</button>}
+        {!isSupport && <button className="btn btn-primary" data-testid="qq-send" disabled={busy} onClick={send}>Send to customer</button>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 16 }}>
+        <div className="panel panel-pad chrome-top" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <label className="field"><span className="field-label">Customer</span>
+            <select {...inp} data-testid="qq-client" value={q.client_id} onChange={e => setF({ client_id: e.target.value })}>
+              <option value="">— choose —</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></label>
+          <label className="field"><span className="field-label">Quote for</span>
+            <select {...inp} data-testid="qq-type" value={q.title} onChange={e => setF({ title: e.target.value })}>
+              {QQ_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select></label>
+          <label className="field"><span className="field-label">Valid for (days)</span>
+            <input {...inp} type="number" min="1" value={q.validity} onChange={e => setF({ validity: e.target.value })} /></label>
+          <label className="field"><span className="field-label">Notes for the customer</span>
+            <textarea {...inp} rows={3} value={q.notes} onChange={e => setF({ notes: e.target.value })} /></label>
+        </div>
+        <div className="panel panel-pad chrome-top" style={{ minWidth: 0 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>Items</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            <select className="field-input" data-testid="qq-product" style={{ flex: "1 1 180px", minWidth: 0 }} value={pick} onChange={e => setPick(e.target.value)}>
+              <option value="">Add a product from your catalog…</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name} — {qqMoney(p.price)}{p.stock != null ? " · " + p.stock + " in stock" : ""}</option>)}
+            </select>
+            <input className="field-input" type="number" min="1" style={{ width: 70 }} value={pickQty} onChange={e => setPickQty(e.target.value)} />
+            <button className="btn" data-testid="qq-add-product" onClick={addProduct} disabled={!pick}>Add</button>
+            <button className="btn" data-testid="qq-add-service" onClick={addService}>+ Service / labour line</button>
+          </div>
+          {q.lines.map((l, i) => (
+            <div key={i} data-testid="qq-line" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 60px 90px 90px 28px", gap: 6, alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+              <input className="field-input" value={l.d} onChange={e => setLine(i, { d: e.target.value })} title={l.kind === "service" ? "Service / labour" : "Product"} />
+              <input className="field-input" type="number" min="0" value={l.q} onChange={e => setLine(i, { q: e.target.value })} title="Qty" />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.u} onChange={e => setLine(i, { u: e.target.value })} title="Sell price each (inc GST)" />
+              <input className="field-input" type="number" min="0" step="0.01" value={l.cost} onChange={e => setLine(i, { cost: e.target.value })} title="Your cost each (ex GST) — never shown to the customer" />
+              <button className="btn" style={{ padding: "4px 6px" }} onClick={() => delLine(i)} aria-label="Remove">×</button>
+            </div>
+          ))}
+          {q.lines.length > 0 && <div className="card-sub" style={{ fontSize: 11, marginTop: 4 }}>Columns: description · qty · sell each (inc GST) · your cost each (ex GST, office only)</div>}
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 4, fontSize: 13 }} data-testid="qq-totals">
+            <span>Customer total (inc GST)</span><b>{qqMoney(T.sell)}</b>
+            <span className="card-sub">Your cost (ex GST)</span><span>{qqMoney(T.cost)}</span>
+            <span className="card-sub">Margin (ex GST)</span><span style={{ color: T.margin < 0 ? "var(--danger, #E5484D)" : "inherit" }}>{qqMoney(T.margin)} · {T.pct.toFixed(1)}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+window.QuickQuotes = QuickQuotes;
+
+/* Customer portal — quotes the provider has sent. No costs ever reach here. */
+function ClientQuotes() {
+  const api = window.ssApi;
+  const [list, setList] = React.useState(null);
+  const load = () => api.get("/client/quotes").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const accept = async (id) => {
+    try { await api.post("/client/quotes/" + id + "/accept", {}); window.ssToast && window.ssToast("Quote accepted — your provider will be in touch to book it in"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Could not accept this quote", "error"); }
+  };
+  if (!list) return <div className="card-sub">Loading…</div>;
+  return (
+    <div className="fade-in" data-testid="client-quotes">
+      {list.length === 0 && <div className="panel panel-pad chrome-top"><div className="card-title">Quotes</div><div className="card-sub">No quotes yet. Use Book a Service → Request a Quote to ask for one.</div></div>}
+      {list.map(q => (
+        <div key={q.id} className="panel panel-pad chrome-top" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className="card-title">{q.title || "Quote"} · {q.number}</div>
+              <div className="card-sub">{q.status === "Accepted" ? "Accepted — thank you" : "Valid for " + q.validity + " days"}</div>
+            </div>
+            {q.status === "Sent" && <button className="btn btn-primary" onClick={() => accept(q.id)}>Accept quote</button>}
+          </div>
+          {q.lines.map((l, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{l.d}</span><span>{l.q} × {qqMoney(l.u)}</span><b style={{ minWidth: 90, textAlign: "right" }}>{qqMoney(l.amt)}</b>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 10, fontFamily: "var(--font-head)", fontWeight: 700 }}>Total (inc GST) <span>{qqMoney(q.total)}</span></div>
+          {q.notes && <div className="card-sub" style={{ marginTop: 8 }}>{q.notes}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+window.ClientQuotes = ClientQuotes;
 
 </script>
 
@@ -22170,6 +22407,7 @@ const TITLES = {
     schedule:     ["Schedule", "Jobs, installs and appointments calendar"],
     journey:      ["Client Journey", "Each customer from enquiry to handover"],
     quotes:       ["Quotes & PV-AI", "Build quotes · design the array · send to client"],
+    quickquotes:  ["Quick Quotes", "Single jobs & items · costing sheet · packing slip"],
     stc:          ["STC Calculator", "Small-scale technology certificates for solar & batteries"],
     catalog:      ["Product Catalog", "Your priced products & services"],
     inventory:    ["Inventory", "Stock levels & over-the-counter sales"],
@@ -22208,6 +22446,7 @@ const TITLES = {
     documents:  ["Documents", "Quotes, certificates, warranties"],
     messages:   ["Messages", "Chat with your crew"],
     billing:    ["Billing", "Invoices & payments"],
+    cquotes:    ["Quotes", "Quotes from your provider"],
     book:       ["Book a Service", "Request an appointment — confirmed by your provider"],
     settings:   ["Settings", "Account"],
   },
@@ -22264,6 +22503,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "schedule":      return <TenantCalendar key={tenant} tenantId={tenant} />;
       case "journey":       return <ClientJourney />;
       case "quotes":        return <QuoteSystem />;
+      case "quickquotes":   return <QuickQuotes />;
       case "stc":           return <StcCalculator />;
       case "catalog":       return <TenantCatalog />;
       case "inventory":     return <TenantInventory />;
@@ -22310,6 +22550,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "documents": return <ClientDocs />;
       case "messages":  return <ClientMessages />;
       case "billing":   return <ClientBilling />;
+      case "cquotes":   return <ClientQuotes />;
       case "book":      return <ClientCalendar key={tenant} tenantId={tenant} clientName={user.name} />;
       case "settings":  return <Settings portal={portal} brand={brand} user={user} />;
       default:          return <Placeholder id={screen} portal={portal} />;
