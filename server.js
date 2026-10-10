@@ -23,6 +23,9 @@ app.use(require("compression")());
 // One proxy hop in front in production (DigitalOcean App Platform), so client IPs
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
+// Browser security headers (CSP, no framing, HSTS on live…) — see security-headers.js.
+app.use(require("./security-headers").securityHeaders({ devCompile: !fs.existsSync(path.join(__dirname, "dist", "index.html")) }));
 // Measure /api traffic, response times and errors for the reseller's Platform Health screen.
 app.use(platformHealth.track);
 // The Stripe webhook needs the raw body to verify its signature, so it's skipped
@@ -216,6 +219,7 @@ app.post("/api/admin/reset-user", A.authRequired, A.requireRole("reseller", "ten
   if (!target) return res.status(404).json({ error: "not_found" });
   if (!isReseller(req) && target.tenant_id !== tenantOf(req)) return res.status(403).json({ error: "forbidden" });
   await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id]);
+  await run("delete from passkeys where user_id=$1", [user_id]);   // a reset removes every sign-in method
   await audit(req.user.sub, "admin_reset", user_id, target.tenant_id);
   ok(res, { ok: true });
 }));
@@ -368,19 +372,19 @@ app.post("/api/reports/:id/publish", A.authRequired, A.requireRole("tenant_admin
 app.get("/api/client/reports", A.authRequired, A.requireRole("client"), h(async (req, res) => {
   const client = await one("select * from clients where user_id=$1", [req.user.sub]);
   if (!client) return ok(res, { paid: false, reports: [] });
-  const paid = !!(await one("select 1 from invoices where client_id=$1 and status='paid' limit 1", [client.id]));
+  const paid = !!(await one("select 1 from invoices where client_id=$1 and tenant_id=$2 and status='paid' limit 1", [client.id, client.tenant_id]));
   if (!paid) {
-    const c = await one("select count(*)::int as c from report_publications where client_id=$1", [client.id]);
+    const c = await one("select count(*)::int as c from report_publications where client_id=$1 and tenant_id=$2", [client.id, client.tenant_id]);
     return ok(res, { paid: false, count: c ? c.c : 0, reports: [] });
   }
-  const reports = await rows("select id, title, body_html, published_at from report_publications where client_id=$1 order by published_at desc", [client.id]);
+  const reports = await rows("select id, title, body_html, published_at from report_publications where client_id=$1 and tenant_id=$2 order by published_at desc", [client.id, client.tenant_id]);
   ok(res, { paid: true, reports });
 }));
 
 // Tenant's own client list — used by the "Send to customer" / "Fill for customer" pickers.
 // Includes system_spec so the front-end can autofill system fields into a form.
 app.get("/api/clients", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
-  ok(res, await rows("select id, name, site_address, install_status, system_spec from clients where tenant_id=$1 order by name", [tenantOf(req)]));
+  ok(res, await rows("select id, name, site_address, install_status, system_spec from clients where tenant_id=$1 and coalesce(active, true) order by name", [tenantOf(req)]));
 }));
 
 // ============================================================
@@ -398,6 +402,7 @@ app.get("/api/deals", A.authRequired, A.requireRole("tenant_admin", "staff", "co
 app.post("/api/deals", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor"), h(async (req, res) => {
   const d = req.body || {};
   if (!d.client) return res.status(400).json({ error: "client_required" });
+  if (await foreignClient(req, d.client_id)) return res.status(404).json({ error: "client_not_found" });
   const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "SS-" + rid().slice(0, 8);
   await run(`insert into deals (id, tenant_id, client_id, client, type, job_type, stage, system, value, installer, suburb, due, notes, created_by)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
@@ -411,6 +416,7 @@ app.put("/api/deals/:id", A.authRequired, A.requireRole("tenant_admin", "staff",
   const cur = await one("select * from deals where id=$1", [req.params.id]);
   if (!cur || (!isReseller(req) && cur.tenant_id !== tenantOf(req))) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
+  if (d.client_id && !(await one("select 1 from clients where id=$1 and tenant_id=$2", [d.client_id, cur.tenant_id]))) return res.status(404).json({ error: "client_not_found" });
   await run(`update deals set client=$1, type=$2, job_type=$3, stage=$4, system=$5, value=$6, installer=$7, suburb=$8, due=$9, notes=$10, client_id=$11, updated_at=now() where id=$12`,
     [d.client ?? cur.client, d.type ?? cur.type, d.job_type ?? cur.job_type, d.stage ?? cur.stage, d.system ?? cur.system,
      d.value != null ? Number(d.value) : cur.value, d.installer ?? cur.installer, d.suburb ?? cur.suburb, d.due ?? cur.due,
@@ -523,13 +529,19 @@ const BOOK_COLS = "id, tenant_id, client_id, client, type, title, date, time, en
 async function clientRowOf(req) {
   return await one("select * from clients where user_id=$1", [req.user.sub]);
 }
+// True when a request names a customer that isn't in the caller's own book — such a
+// record must never be linked (it would show up in another company's customer portal).
+async function foreignClient(req, clientId) {
+  if (!clientId) return false;
+  return !(await one("select 1 from clients where id=$1 and tenant_id=$2", [clientId, tenantOf(req)]));
+}
 
 // List bookings. Tenants/contractors see their tenant's; a client sees only their own.
 app.get("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "client"), h(async (req, res) => {
   if (req.user.app_role === "client") {
     const c = await clientRowOf(req);
     if (!c) return ok(res, []);
-    return ok(res, await rows(`select ${BOOK_COLS} from bookings where client_id=$1 order by date, created_at`, [c.id]));
+    return ok(res, await rows(`select ${BOOK_COLS} from bookings where client_id=$1 and tenant_id=$2 order by date, created_at`, [c.id, c.tenant_id]));
   }
   const r = isReseller(req)
     ? await rows(`select ${BOOK_COLS} from bookings order by date, created_at`)
@@ -548,6 +560,7 @@ app.post("/api/bookings", A.authRequired, A.requireRole("tenant_admin", "staff",
     tenant_id = c.tenant_id; client_id = c.id; client = c.name; source = "client"; status = "pending";
   } else {
     tenant_id = tenantOf(req);
+    if (await foreignClient(req, client_id)) return res.status(404).json({ error: "client_not_found" });
     const clashes = d.force ? [] : await fieldWork.crewClashes(tenant_id, d.installer, d.date);
     if (clashes.length) return res.status(409).json({ error: "crew_unavailable", clashes });
   }
@@ -566,7 +579,7 @@ app.put("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "staf
   if (!cur) return res.status(404).json({ error: "not_found" });
   if (req.user.app_role === "client") {
     const c = await clientRowOf(req);
-    if (!c || cur.client_id !== c.id) return res.status(403).json({ error: "forbidden" });
+    if (!c || cur.client_id !== c.id || cur.tenant_id !== c.tenant_id) return res.status(403).json({ error: "forbidden" });
   } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
     return res.status(404).json({ error: "not_found" });
   }
@@ -590,7 +603,7 @@ app.delete("/api/bookings/:id", A.authRequired, A.requireRole("tenant_admin", "s
   if (!cur) return res.status(404).json({ error: "not_found" });
   if (req.user.app_role === "client") {
     const c = await clientRowOf(req);
-    if (!c || cur.client_id !== c.id) return res.status(403).json({ error: "forbidden" });
+    if (!c || cur.client_id !== c.id || cur.tenant_id !== c.tenant_id) return res.status(403).json({ error: "forbidden" });
   } else if (!isReseller(req) && cur.tenant_id !== tenantOf(req)) {
     return res.status(404).json({ error: "not_found" });
   }
@@ -618,6 +631,7 @@ app.get("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff"
 
 app.post("/api/quotes", A.authRequired, A.requireRole("tenant_admin", "staff", "contractor", "reseller"), h(async (req, res) => {
   const d = req.body || {};
+  if (await foreignClient(req, d.client_id)) return res.status(404).json({ error: "client_not_found" });
   const id = d.id && /^[\w-]+$/.test(d.id) ? d.id : "qt-" + rid().slice(0, 8);
   // Sequential-ish human number; fine for display (not a uniqueness guarantee).
   const cnt = await one("select count(*)::int as c from quotes where tenant_id=$1", [tenantOf(req)]);
@@ -635,6 +649,7 @@ app.put("/api/quotes/:id", A.authRequired, A.requireRole("tenant_admin", "staff"
   const cur = await one("select * from quotes where id=$1", [req.params.id]);
   if (!cur || cur.tenant_id !== tenantOf(req)) return res.status(404).json({ error: "not_found" });
   const d = req.body || {};
+  if (await foreignClient(req, d.client_id)) return res.status(404).json({ error: "client_not_found" });
   await run(`update quotes set number=$1, client_id=$2, deal_id=$3, customer=$4, enq=$5, status=$6, validity=$7, notes=$8, lines=$9, spec=$10, total=$11, updated_at=now() where id=$12`,
     [d.number ?? cur.number, d.client_id ?? cur.client_id, d.deal_id ?? cur.deal_id,
      d.customer != null ? JSON.stringify(d.customer) : cur.customer, d.enq ?? cur.enq, d.status ?? cur.status,
@@ -1158,8 +1173,8 @@ app.get("/api/client/documents", A.authRequired, A.requireRole("client"), h(asyn
   const docs = await rows(
     `select id, title, filename, mime_type, size_bytes, published_at,
             (body_html is not null) as has_html
-     from document_publications where client_id=$1 order by published_at desc`,
-    [client.id]
+     from document_publications where client_id=$1 and tenant_id=$2 order by published_at desc`,
+    [client.id, client.tenant_id]
   );
   ok(res, docs);
 }));
@@ -1194,7 +1209,7 @@ app.get("/api/client/documents/:pubId/download", A.authRequired, A.requireRole("
 app.get("/api/invoices", A.authRequired, h(async (req, res) => {
   if (req.user.app_role === "client") {
     const c = await one("select * from clients where user_id=$1", [req.user.sub]);
-    return ok(res, c ? await rows("select * from invoices where client_id=$1 order by created_at desc", [c.id]) : []);
+    return ok(res, c ? await rows("select * from invoices where client_id=$1 and tenant_id=$2 order by created_at desc", [c.id, c.tenant_id]) : []);
   }
   ok(res, await rows("select * from invoices where tenant_id=$1 order by created_at desc", [tenantOf(req)]));
 }));
@@ -1203,6 +1218,9 @@ app.get("/api/invoices", A.authRequired, h(async (req, res) => {
 app.post("/api/invoices", A.authRequired, A.requireRole("tenant_admin", "staff", "reseller"), h(async (req, res) => {
   const d = req.body || {};
   if (!d.amount || Number(d.amount) <= 0) return res.status(400).json({ error: "amount_required" });
+  // The customer must be one of this book's own customers.
+  if (d.client_id && !(await one("select 1 from clients where id=$1 and tenant_id=$2", [d.client_id, tenantOf(req)])))
+    return res.status(404).json({ error: "client_not_found" });
   const id = "inv-" + rid().slice(0, 8);
   const cnt = await one("select count(*)::int as c from invoices where tenant_id=$1", [tenantOf(req)]);
   const number = d.number || ("INV-" + (2100 + ((cnt && cnt.c) || 0)));
@@ -1673,6 +1691,7 @@ app.get("/api/roof-image", (req, res) => {
 // ============================================================
 erp.register(app, { h, ok, tenantOf });
 myob.register(app, { h, ok, erp });
+require("./passkeys").register(app, { h, ok, loginBlocked });
 
 // ============================================================
 // Staff & contractor seat management (staff-seats.js)

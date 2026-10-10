@@ -2297,6 +2297,8 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
     totp: (user_id, code, ticket) => call("/auth/totp", { method: "POST", body: { user_id, code, ticket } }),
     backup: (user_id, code) => call("/auth/backup", { method: "POST", body: { user_id, code } }),
     regenBackup: () => call("/auth/backup/regenerate", { method: "POST" }),
+    passkeyOptions: () => call("/auth/passkey/options", { method: "POST", body: {} }),
+    passkeyVerify: (state, response) => call("/auth/passkey/verify", { method: "POST", body: { state, response } }),
     get: (p) => call(p),
     post: (p, body) => call(p, { method: "POST", body }),
     put: (p, body) => call(p, { method: "PUT", body }),
@@ -3182,6 +3184,25 @@ function LoginScreen({ onLogin }) {
     if (next.length === 6) setTimeout(() => submitPin(next), 180);
   };
 
+  // Sign in with a passkey — no name, PIN or code: the device proves who it is.
+  const submitPasskey = async () => {
+    setBusy(true); setError("");
+    try {
+      const { options, state } = await window.ssApi.passkeyOptions();
+      const response = await window.ssPasskey.get(options);
+      const r = await window.ssApi.passkeyVerify(state, response);
+      window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
+      setTimeout(() => onLogin(r.user), 350);
+    } catch (e) {
+      const err = e && e.data && e.data.error;
+      setError(e && e.name === "NotAllowedError" ? "Passkey sign-in was cancelled."
+        : err === "unknown_passkey" ? "That passkey isn't set up for SolarSync — sign in with your code and PIN, then add it in Settings."
+        : err === "locked" ? "Too many attempts. Locked for a few minutes."
+        : err === "disabled" || err === "suspended" ? "This account can't sign in — contact your administrator."
+        : "Passkey sign-in didn't work — try again or use your code and PIN.");
+    } finally { setBusy(false); }
+  };
+
   // Sign in with a single-use recovery code when the authenticator app isn't available.
   const submitBackup = async () => {
     setBusy(true); setError("");
@@ -3337,6 +3358,9 @@ function LoginScreen({ onLogin }) {
           {error && <div style={{ color: "var(--amber)", fontSize: 12.5, textAlign: "center", marginTop: 8, fontFamily: "var(--font-head)" }}>{error}</div>}
 
           <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:14 }}>
+            {window.ssPasskey && window.ssPasskey.supported() && !backupMode && (
+              <button className="btn" disabled={busy} onClick={submitPasskey} data-testid="passkey-login"
+                style={{ width:"100%", justifyContent:"center" }}>Sign in with a passkey (Face ID / fingerprint)</button>)}
             <button className="login-demo-hint" onClick={() => { setBackupMode(m => !m); setError(""); setBackupCode(""); setTotp(""); }}
               style={{ width:"100%", cursor:"pointer", textAlign:"center", background:"rgba(58,125,255,0.06)", border:"1px solid rgba(58,125,255,0.16)", color:"var(--tx-dim)" }}>
               {backupMode ? <>← Use my <strong style={{ color:"var(--blue-light)" }}>authenticator app</strong> instead</> : <>No authenticator? <strong style={{ color:"var(--blue-light)" }}>Use a recovery code →</strong></>}
@@ -9257,7 +9281,7 @@ function TenantAccounting() {
 
   if (!authed) return <div className="panel panel-pad chrome-top"><div className="card-title">Accounting</div><div className="card-sub" style={{ marginTop: 8 }}>Sign in to a connected tenant to use the live accounting system — every invoice, payment, stock movement and pay run posts to a real double-entry ledger.</div></div>;
 
-  const TABS = [["overview","Overview"],["reports","Reports"],["invoices","Invoices"],["journals","Journals"],["purchasing","Purchasing"],["payroll","Payroll"],["bank","Bank Rec"],["stock","Stock"]];
+  const TABS = [["overview","Overview"],["reports","Reports"],["customers","Customers"],["invoices","Invoices"],["suppliers","Suppliers"],["journals","Journals"],["purchasing","Purchasing"],["payroll","Payroll"],["bank","Bank Rec"],["stock","Stock"]];
   return (
     <div className="fade-in">
       <div style={{ display:"flex", gap:8, marginBottom:"var(--gap)", flexWrap:"wrap" }}>
@@ -9273,12 +9297,172 @@ function TenantAccounting() {
       {err && <div className="panel panel-pad" style={{ marginBottom:12, color:"var(--danger)" }}>Couldn't load the books: {err}</div>}
       {tab === "overview" && <AcctOverview pl={pl} bas={bas} bs={bs} aging={aging} money2={money2} dl={dl} api={api} toast={toast} />}
       {tab === "reports" && <AcctReports bs={bs} tb={tb} money2={money2} />}
+      {tab === "customers" && <AcctCustomers api={api} money2={money2} />}
+      {tab === "suppliers" && <AcctSuppliers api={api} money2={money2} />}
       {tab === "invoices" && <AcctInvoices api={api} money2={money2} toast={toast} onPosted={loadReports} />}
       {tab === "journals" && <AcctJournals api={api} money2={money2} toast={toast} onPosted={loadReports} />}
       {tab === "purchasing" && <AcctPurchasing api={api} money2={money2} toast={toast} />}
       {tab === "payroll" && <AcctPayroll api={api} money2={money2} toast={toast} dl={dl} />}
       {tab === "bank" && <AcctBank api={api} money2={money2} toast={toast} />}
       {tab === "stock" && <AcctStock api={api} money2={money2} />}
+    </div>
+  );
+}
+
+/* ── Accounting → Customers ─────────────────────────────────── */
+// Everyone this book invoices: contact details, what they've been invoiced and
+// what they still owe. Same customer records the jobs and documents screens use.
+function CustomerModal({ customer, onClose, onSaved }) {
+  const api = window.ssApi;
+  const editing = !!(customer && customer.id);
+  const [f, setF] = React.useState(() => ({
+    name: (customer && customer.name) || "", email: (customer && customer.email) || "",
+    phone: (customer && customer.phone) || "", abn: (customer && customer.abn) || "",
+    site_address: (customer && customer.site_address) || "", notes: (customer && customer.notes) || "",
+  }));
+  const [detail, setDetail] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+  const money2 = n => "$" + Number(n || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  React.useEffect(() => { if (editing) api.get("/customers/" + customer.id).then(setDetail).catch(() => {}); }, []);
+  const save = async () => {
+    if (!f.name.trim()) return window.ssToast && window.ssToast("Enter the customer's name", "error");
+    setBusy(true);
+    try {
+      if (editing) await api.put("/customers/" + customer.id, f); else await api.post("/customers", f);
+      window.ssToast && window.ssToast(editing ? "Customer saved" : "Customer added");
+      onSaved();
+    } catch (e) { window.ssToast && window.ssToast("Couldn't save the customer — try again", "error"); }
+    finally { setBusy(false); }
+  };
+  const archive = async () => {
+    if (!window.confirm("Archive " + customer.name + "? Their invoices and history are kept.")) return;
+    try { await api.del("/customers/" + customer.id); window.ssToast && window.ssToast("Customer archived"); onSaved(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't archive the customer", "error"); }
+  };
+  const field = (k, label, props) => (
+    <label className="field" style={{ marginBottom: 10 }}><span className="field-label">{label}</span>
+      <input className="field-input" value={f[k]} onChange={e => set(k, e.target.value)} {...(props || {})} /></label>);
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()} data-testid="customer-modal">
+        <div className="card-head" style={{ marginBottom: 14 }}>
+          <div className="card-title">{editing ? customer.name : "New customer"}</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        {field("name", "Name or business name", { autoFocus: true })}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {field("email", "Email", { type: "email" })}
+          {field("phone", "Phone", { type: "tel" })}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
+          {field("abn", "ABN (if a business)")}
+          {field("site_address", "Address")}
+        </div>
+        <label className="field" style={{ marginBottom: 10 }}><span className="field-label">Notes</span>
+          <textarea className="field-input" rows={2} value={f.notes} onChange={e => set("notes", e.target.value)} /></label>
+        {detail && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="card-sub" style={{ marginBottom: 6 }}>Invoices</div>
+            {detail.invoices.length === 0 ? <div className="card-sub">No invoices yet.</div> : (
+              <table className="tbl"><tbody>
+                {detail.invoices.map(i => (
+                  <tr key={i.id}><td>{i.number}</td><td className="card-sub">{new Date(i.created_at).toLocaleDateString("en-AU")}</td>
+                    <td>{money2(i.amount)}</td><td className="card-sub">{i.status === "paid" ? "Paid" : "Owing"}</td></tr>))}
+              </tbody></table>)}
+          </div>)}
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+          {editing ? <button className="btn" style={{ color: "var(--amber)" }} onClick={archive}>Archive</button> : <span />}
+          <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "Saving…" : editing ? "Save" : "Add customer"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AcctCustomers({ api, money2 }) {
+  const [list, setList] = useTE(null);
+  const [q, setQ] = useTE("");
+  const [modal, setModal] = useTE(null);   // null=closed, {}=add, customer=edit
+  const load = () => api.get("/customers").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const shown = (list || []).filter(c => !q || (c.name + " " + (c.email || "") + " " + (c.phone || "") + " " + (c.site_address || "")).toLowerCase().includes(q.toLowerCase()));
+  const owing = (list || []).reduce((n, c) => n + Number(c.owing || 0), 0);
+  return (
+    <div className="panel panel-pad chrome-top" data-testid="acct-customers">
+      <div className="card-head" style={{ marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+        <div><div className="card-title">Customers</div>
+          <div className="card-sub">{list ? list.length + " customer" + (list.length === 1 ? "" : "s") + " · " + money2(owing) + " owing in total" : "Loading…"}</div></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="field-input" placeholder="Search customers" value={q} onChange={e => setQ(e.target.value)} style={{ width: 200 }} />
+          <button className="btn btn-primary" onClick={() => setModal({})} data-testid="add-customer">+ Add customer</button>
+        </div>
+      </div>
+      {list && list.length === 0 ? <div className="card-sub">No customers yet — add your first one.</div> : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="tbl">
+            <thead><tr><th>Name</th><th>Contact</th><th>Address</th><th>Invoiced</th><th>Owing</th></tr></thead>
+            <tbody>
+              {shown.map(c => (
+                <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => setModal(c)}>
+                  <td style={{ fontWeight: 600 }}>{c.name}{c.abn ? <div className="card-sub">ABN {c.abn}</div> : null}</td>
+                  <td className="card-sub">{c.email || "—"}{c.phone ? <div>{c.phone}</div> : null}</td>
+                  <td className="card-sub">{c.site_address || "—"}</td>
+                  <td>{money2(c.invoiced)}<div className="card-sub">{c.invoice_count} invoice{c.invoice_count === 1 ? "" : "s"}</div></td>
+                  <td style={{ color: Number(c.owing) > 0 ? "var(--amber)" : undefined, fontWeight: 600 }}>{money2(c.owing)}</td>
+                </tr>))}
+            </tbody>
+          </table>
+        </div>)}
+      {modal && <CustomerModal customer={modal.id ? modal : null} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
+    </div>
+  );
+}
+
+/* ── Accounting → Suppliers ─────────────────────────────────── */
+function AcctSuppliers({ api, money2 }) {
+  const [list, setList] = useTE(null);
+  const [q, setQ] = useTE("");
+  const [modal, setModal] = useTE(null);
+  const load = () => api.get("/suppliers").then(r => setList(Array.isArray(r) ? r : [])).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const shown = (list || []).filter(s => !q || (s.name + " " + (s.email || "") + " " + (s.abn || "")).toLowerCase().includes(q.toLowerCase()));
+  const owing = (list || []).reduce((n, s) => n + Number(s.owing || 0), 0);
+  const archive = async (s) => {
+    if (!window.confirm("Archive " + s.name + "? Their bills and orders are kept.")) return;
+    try { await api.del("/suppliers/" + s.id); window.ssToast && window.ssToast("Supplier archived"); load(); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't archive the supplier", "error"); }
+  };
+  return (
+    <div className="panel panel-pad chrome-top" data-testid="acct-suppliers">
+      <div className="card-head" style={{ marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+        <div><div className="card-title">Suppliers</div>
+          <div className="card-sub">{list ? list.length + " supplier" + (list.length === 1 ? "" : "s") + " · " + money2(owing) + " you owe in total" : "Loading…"}</div></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="field-input" placeholder="Search suppliers" value={q} onChange={e => setQ(e.target.value)} style={{ width: 200 }} />
+          <button className="btn btn-primary" onClick={() => setModal({})} data-testid="add-supplier">+ Add supplier</button>
+        </div>
+      </div>
+      {list && list.length === 0 ? <div className="card-sub">No suppliers yet — add your first stockist or wholesaler.</div> : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="tbl">
+            <thead><tr><th>Name</th><th>Contact</th><th>Terms</th><th>Billed</th><th>You owe</th><th>Open orders</th><th /></tr></thead>
+            <tbody>
+              {shown.map(s => (
+                <tr key={s.id}>
+                  <td style={{ fontWeight: 600, cursor: "pointer" }} onClick={() => setModal(s)}>{s.name}{s.abn ? <div className="card-sub">ABN {s.abn}</div> : null}</td>
+                  <td className="card-sub">{s.email || "—"}{s.phone ? <div>{s.phone}</div> : null}</td>
+                  <td className="card-sub">{s.terms || "—"}</td>
+                  <td>{money2(s.billed)}</td>
+                  <td style={{ color: Number(s.owing) > 0 ? "var(--amber)" : undefined, fontWeight: 600 }}>{money2(s.owing)}</td>
+                  <td className="card-sub">{s.open_pos || 0}</td>
+                  <td style={{ whiteSpace: "nowrap" }}><button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setModal(s)}>Edit</button>{" "}
+                    <button className="btn" style={{ padding: "4px 10px", fontSize: 12, color: "var(--amber)" }} onClick={() => archive(s)}>Archive</button></td>
+                </tr>))}
+            </tbody>
+          </table>
+        </div>)}
+      {modal && <SupplierModal supplier={modal.id ? modal : null} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
     </div>
   );
 }
@@ -20468,6 +20652,7 @@ function Settings({ portal, brand, user }) {
   const canManage = (isReseller && me.app_role === "reseller") || (portal === "tenant" && me.app_role === "tenant_admin");
   const [pinOpen, setPinOpen] = useEX(false);
   const [recovOpen, setRecovOpen] = useEX(false);
+  const [pkOpen, setPkOpen] = useEX(false);
   const [invOpen, setInvOpen] = useEX(false);
   const [members, setMembers] = useEX(null);
   const ROLE_LABEL = { reseller: "Platform", tenant_admin: "Admin", staff: "Staff", contractor: "Contractor", client: "Customer" };
@@ -20571,6 +20756,8 @@ function Settings({ portal, brand, user }) {
             </div>
             <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={()=>setPinOpen(true)}><Icon d={ICONS.settings} size={15} stroke={2} /> Change PIN</button>
             <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={()=>setRecovOpen(true)}><Icon d={ICONS.compliance} size={15} stroke={2} /> Recovery codes</button>
+            {window.ssPasskey && window.ssPasskey.supported() && !(me && me.support) &&
+              <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={()=>setPkOpen(true)} data-testid="passkeys-open"><Icon d={ICONS.lock || ICONS.compliance} size={15} stroke={2} /> Passkeys (Face ID / fingerprint)</button>}
           </div>
 
           {(isReseller || portal === "tenant") && (
@@ -20598,6 +20785,7 @@ function Settings({ portal, brand, user }) {
       </div>
       {pinOpen && <ChangePinModal onClose={()=>setPinOpen(false)} />}
       {recovOpen && <RecoveryCodesModal onClose={()=>setRecovOpen(false)} />}
+      {pkOpen && <PasskeysModal onClose={()=>setPkOpen(false)} />}
       {invOpen && <InviteMemberModal portal={portal} brand={brand} onClose={()=>setInvOpen(false)} />}
     </div>
   );
@@ -20660,6 +20848,83 @@ function ChangePinModal({ onClose }) {
           <button className="btn btn-primary" disabled={busy} onClick={save}><Icon d={ICONS.check} size={15} stroke={2.4} /> {busy ? "Saving…" : "Change PIN"}</button>
         </div>
         </>}
+      </div>
+    </div>
+  );
+}
+
+/* Passkeys: sign in with Face ID, fingerprint, the device PIN or a security key. */
+window.ssPasskey = (function () {
+  const toBuf = (s) => { s = String(s).replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; const b = atob(s); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+  const toB64u = (buf) => { const u = new Uint8Array(buf); let b = ""; for (let i = 0; i < u.length; i++) b += String.fromCharCode(u[i]); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+  const supported = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+  async function create(opts) {
+    const pk = { ...opts, challenge: toBuf(opts.challenge), user: { ...opts.user, id: toBuf(opts.user.id) },
+      excludeCredentials: (opts.excludeCredentials || []).map(c => ({ ...c, id: toBuf(c.id) })) };
+    const c = await navigator.credentials.create({ publicKey: pk });
+    const r = c.response;
+    return { id: c.id, rawId: toB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {},
+      authenticatorAttachment: c.authenticatorAttachment || undefined,
+      response: { clientDataJSON: toB64u(r.clientDataJSON), attestationObject: toB64u(r.attestationObject),
+        transports: r.getTransports ? r.getTransports() : [] } };
+  }
+  async function get(opts) {
+    const pk = { ...opts, challenge: toBuf(opts.challenge), allowCredentials: (opts.allowCredentials || []).map(c => ({ ...c, id: toBuf(c.id) })) };
+    const c = await navigator.credentials.get({ publicKey: pk });
+    const r = c.response;
+    return { id: c.id, rawId: toB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {},
+      authenticatorAttachment: c.authenticatorAttachment || undefined,
+      response: { clientDataJSON: toB64u(r.clientDataJSON), authenticatorData: toB64u(r.authenticatorData),
+        signature: toB64u(r.signature), userHandle: r.userHandle ? toB64u(r.userHandle) : undefined } };
+  }
+  return { supported, create, get };
+})();
+
+function PasskeysModal({ onClose }) {
+  const api = window.ssApi;
+  const [list, setList] = useEX(null);
+  const [busy, setBusy] = useEX(false);
+  const toast = (m, k) => window.ssToast && window.ssToast(m, k);
+  const load = () => api.get("/auth/passkeys").then(setList).catch(() => setList([]));
+  React.useEffect(() => { load(); }, []);
+  const add = async () => {
+    setBusy(true);
+    try {
+      const { options, state } = await api.post("/auth/passkeys/options", {});
+      const response = await window.ssPasskey.create(options);
+      const ua = navigator.userAgent;
+      const name = /iPhone|iPad/.test(ua) ? "iPhone / iPad" : /Android/.test(ua) ? "Android phone" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows PC" : "This device";
+      await api.post("/auth/passkeys", { state, response, name });
+      toast("Passkey added — next time, tap “Sign in with a passkey”");
+      load();
+    } catch (e) {
+      const err = e && e.data && e.data.error;
+      toast(e && e.name === "NotAllowedError" ? "Passkey setup was cancelled" : err === "already_registered" ? "This device already has a passkey" : "Couldn't add the passkey — try again", "error");
+    } finally { setBusy(false); }
+  };
+  const remove = async (p) => {
+    if (!window.confirm("Remove the passkey “" + p.name + "”? You can still sign in with your PIN and authenticator code.")) return;
+    try { await api.del("/auth/passkeys/" + p.id); toast("Passkey removed"); load(); } catch (e) { toast("Couldn't remove it — try again", "error"); }
+  };
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 460 }} onClick={e=>e.stopPropagation()} data-testid="passkeys-modal">
+        <div className="card-head">
+          <div><div className="card-title">Passkeys</div><div className="card-sub">Sign in with Face ID, your fingerprint or a security key — nothing to type, and it can't be phished</div></div>
+          <button className="icon-btn" onClick={onClose} style={{ width:32,height:32 }}><Icon d="M18 6L6 18M6 6l12 12" size={16} stroke={2.2} /></button>
+        </div>
+        {!list ? <div className="card-sub">Loading…</div> : list.length === 0
+          ? <div className="card-sub" style={{ marginBottom: 12 }}>No passkeys yet. Add one on each phone or computer you use.</div>
+          : <div style={{ marginBottom: 12 }}>{list.map(p => (
+              <div key={p.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid var(--line)" }}>
+                <div><div style={{ fontWeight: 600, color: "var(--tx-hi)" }}>{p.name}</div>
+                  <div className="card-sub">Added {new Date(p.created_at).toLocaleDateString("en-AU")}{p.last_used_at ? " · last used " + new Date(p.last_used_at).toLocaleDateString("en-AU") : ""}</div></div>
+                <button className="btn" style={{ padding:"4px 10px", fontSize:12, color:"var(--amber)" }} onClick={() => remove(p)}>Remove</button>
+              </div>))}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" disabled={busy} onClick={add} data-testid="passkey-add">{busy ? "Waiting for your device…" : "Add a passkey on this device"}</button>
+        </div>
       </div>
     </div>
   );

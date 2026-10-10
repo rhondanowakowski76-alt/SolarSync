@@ -356,6 +356,18 @@ async function migrate() {
     `create index if not exists stc_pc_idx on stc_postcode_zones (pc_from, pc_to)`,
     `alter table tenants add column if not exists stc_settings jsonb default '{}'`,
     `alter table users add column if not exists token_version int default 0`,
+    // Passkey sign-in (passkeys.js)
+    `create table if not exists passkeys ( id text primary key, user_id text not null, credential_id text not null unique,
+      public_key text not null, counter bigint default 0, transports text, name text,
+      created_at timestamptz default now(), last_used_at timestamptz)`,
+    `create index if not exists passkeys_user_idx on passkeys (user_id)`,
+    // Customers screen (Accounting → Customers): contact details on the clients table.
+    `alter table clients add column if not exists email text`,
+    `alter table clients add column if not exists phone text`,
+    `alter table clients add column if not exists abn text`,
+    `alter table clients add column if not exists notes text`,
+    `alter table clients add column if not exists active boolean default true`,
+    `alter table clients add column if not exists updated_at timestamptz default now()`,
     // MYOB connection (myob.js): which company file, settings, and what's been pushed.
     `alter table accounting_connections add column if not exists business_id text`,
     `alter table accounting_connections add column if not exists business_name text`,
