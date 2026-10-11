@@ -70,3 +70,20 @@ The latest code is already on `main`.
 - Saving publishes the filled HTML to the customer
   (`document_publications.body_html`); they View it in their portal.
   It is a snapshot — the customer keeps exactly what was sent.
+
+## Encrypted backups
+
+`node backup-data.js` saves every table to `data-backups/solarsync-backup-<time>.json.enc`,
+compressed and encrypted (AES-256-GCM). Restore with `node backup-data.js --restore <file>`.
+
+- Set **`BACKUP_KEY`** as an encrypted (secret) environment variable on the server: a long
+  random passphrase, at least 16 characters. Never put it in code, chat or a commit.
+- Keep a copy of `BACKUP_KEY` somewhere safe and separate from the backups (for example a
+  password manager). **A backup cannot be restored without it.**
+- Without `BACKUP_KEY` the backup refuses to run. `--unencrypted` exists only for a local
+  test database and is refused when `DATABASE_URL` is set.
+- A wrong key or a changed file fails to open rather than restoring bad data.
+- Older plain `.json` backups can still be restored, but they are not encrypted: delete
+  them once you have an encrypted backup.
+- Copy backup files off the server to separate, private storage. The folder is never
+  committed to git.
