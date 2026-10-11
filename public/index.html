@@ -3764,6 +3764,7 @@ const PORTAL_NAV = {
     { id: "support", label: "Support", icon: "support" },
     { id: "addons", label: "Add-on Modules", icon: "sparkle" },
     { id: "testers", label: "Tester Access", icon: "user" },
+    { id: "backups", label: "Backups", icon: "shield" },
     { id: "schedule", label: "Schedule", icon: "cal" },
     { id: "documents", label: "Documents", icon: "docs" },
   ],
@@ -22257,6 +22258,63 @@ window.TenantInventory = TenantInventory;
    beta_testers table.
    ============================================================ */
 
+/* Reseller · Backups — "Create encrypted backup" downloads every table as one file,
+   encrypted on the server with BACKUP_KEY before it is sent. Owner only; the owner
+   re-enters their authenticator code each time, and every backup is audit-logged. */
+function OwnerBackups() {
+  const api = window.ssApi;
+  const [info, setInfo] = React.useState(null);
+  const [code, setCode] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+  const load = () => api.get("/owner/backups").then(setInfo).catch(() => setInfo({ key_set: false, recent: [], err: true }));
+  React.useEffect(() => { load(); }, []);
+  const create = async () => {
+    if (!/^\d{6}$/.test(code)) { setMsg({ bad: true, t: "Enter the 6-digit code from your authenticator app." }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/owner/backups", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + api.getToken() }, body: JSON.stringify({ code }) });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        const t = { bad_code: "That code didn't match — try the current one from your authenticator app.", locked: "Too many wrong codes — wait 5 minutes and try again.",
+          backup_key_missing: "BACKUP_KEY isn't set on the server yet, so a backup can't be encrypted. Add it in your hosting's secret settings first.", rate_limited: "Too many tries — wait a minute." }[e.error] || "The backup couldn't be made. Try again.";
+        setMsg({ bad: true, t }); return;
+      }
+      const blob = await r.blob();
+      const name = ((r.headers.get("content-disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "solarsync-backup.json.enc";
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      setMsg({ t: "Encrypted backup downloaded: " + name + ". Keep it somewhere private, away from your BACKUP_KEY copy." });
+      setCode(""); load();
+    } catch (e) { setMsg({ bad: true, t: "The backup couldn't be made — check your connection." }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "var(--gap)" }}>
+      <div className="panel panel-pad chrome-top" data-testid="owner-backups">
+        <div className="card-title">Create encrypted backup</div>
+        <div className="card-sub" style={{ marginTop: 6 }}>Downloads every company's data as one file, locked with AES-256 encryption using your BACKUP_KEY. It can only be opened with that key, so keep a copy of the key somewhere safe and separate.</div>
+        {info && !info.key_set && <div className="card-sub" data-testid="backup-key-missing" style={{ marginTop: 12, color: "var(--warn, #FA913D)" }}>BACKUP_KEY isn't set on the server (or is under 16 characters). Add it in your hosting's secret settings, then come back here.</div>}
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 16 }}>
+          <label className="field" style={{ minWidth: 220 }}><span className="field-label">Authenticator code</span>
+            <input className="field-input" data-testid="backup-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" /></label>
+          <button className="btn btn-primary" data-testid="backup-create" disabled={busy || (info && !info.key_set)} onClick={create}>{busy ? "Encrypting…" : "Create encrypted backup"}</button>
+        </div>
+        {msg && <div className="card-sub" data-testid="backup-msg" style={{ marginTop: 12, color: msg.bad ? "var(--danger)" : "var(--ok, #1FA971)" }}>{msg.t}</div>}
+      </div>
+      <div className="panel panel-pad chrome-top">
+        <div className="card-title">Backup history</div>
+        {!(info && info.recent && info.recent.length) ? <div className="card-sub" style={{ marginTop: 8 }}>No backups downloaded yet.</div> : (
+          <table style={{ width: "100%", marginTop: 10, borderCollapse: "collapse", fontSize: 13 }} data-testid="backup-history">
+            <thead><tr style={{ textAlign: "left", color: "var(--tx-lo)" }}><th style={{ padding: "6px 4px" }}>When</th><th>By</th><th>Rows</th><th>Size</th></tr></thead>
+            <tbody>{info.recent.map((b, i) => { const m = b.meta || {}; return (
+              <tr key={i} style={{ borderTop: "1px solid var(--line)" }}><td style={{ padding: "6px 4px" }}>{new Date(b.created_at).toLocaleString("en-AU")}</td><td>{b.by_name || "Owner"}</td><td>{m.rows != null ? m.rows : "—"}</td><td>{m.bytes ? (m.bytes / 1024).toFixed(0) + " KB" : "—"}</td></tr>); })}</tbody>
+          </table>)}
+      </div>
+    </div>
+  );
+}
+
 function ResellerTesters() {
   const [list, setList]     = useEX([]);
   const [loading, setLoading] = useEX(true);
@@ -22590,6 +22648,7 @@ const TITLES = {
     support:    ["Support", "Tenant tickets"],
     addons:     ["Add-on Modules", "Premium features per tenant"],
     testers:    ["Tester Access", "Free Scale-plan invites for beta testers"],
+    backups:    ["Backups", "Encrypted copies of all platform data"],
     schedule:   ["Schedule", "Platform-wide jobs and appointments"],
     documents:  ["Documents", "Sales sheets, agreements & templates"],
     settings:   ["Settings", "Account & platform"],
@@ -22683,6 +22742,7 @@ function renderScreen({ portal, screen, brand, user, tenant }) {
       case "support":   return <ResellerSupport />;
       case "addons":    return <ResellerAddons />;
       case "testers":   return <ResellerTesters />;
+      case "backups":   return <OwnerBackups />;
       case "schedule":  return <ResellerCalendar />;
       case "documents": return <ResellerDocuments />;
       case "settings":  return <Settings portal={portal} brand={brand} user={user} />;
