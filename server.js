@@ -1875,6 +1875,42 @@ app.get("/api/roof-image", (req, res) => {
 });
 
 // ============================================================
+// OWNER BACKUPS — "Create encrypted backup" in the owner portal.
+// Owner (reseller) only, never a support or tester session, and the owner re-enters
+// their authenticator code each time. The file is sealed with BACKUP_KEY before it
+// leaves the server (AES-256-GCM, see backup-data.js), so only ciphertext is sent.
+// Every backup is recorded in the audit log.
+// ============================================================
+const backupTool = require("./backup-data");
+const ownerOnly = (req, res, next) => (req.user.app_role === "reseller" && !req.user.support) ? next() : res.status(403).json({ error: "forbidden" });
+
+app.get("/api/owner/backups", A.authRequired, ownerOnly, h(async (req, res) => {
+  let keySet = false;
+  try { keySet = !!backupTool.backupKey(false); } catch (e) { keySet = false; }   // too short counts as not set
+  const recent = await rows(`select a.created_at, a.meta, u.display_name as by_name from audit_log a
+    left join users u on u.id = a.actor_id where a.action='backup_download' order by a.created_at desc limit 20`);
+  ok(res, { key_set: keySet, recent });
+}));
+
+app.post("/api/owner/backups", supportAccess.limits.strict, A.authRequired, ownerOnly, h(async (req, res) => {
+  const u = await one("select * from users where id=$1", [req.user.sub]);
+  if (!u || !u.totp_secret || !u.totp_enrolled) return res.status(403).json({ error: "forbidden" });
+  if (A.lockedOut(u)) return res.status(429).json({ error: "locked", until: u.locked_until });
+  if (!A.verifyTotp(u.totp_secret, String((req.body && req.body.code) || ""))) { await bumpFail(u); return res.status(401).json({ error: "bad_code" }); }
+  await clearFail(u.id);
+  let key;
+  try { key = backupTool.backupKey(true); } catch (e) { return res.status(409).json({ error: "backup_key_missing" }); }
+  const { out, total } = await backupTool.collect();
+  const sealed = backupTool.seal(JSON.stringify(out), key);
+  const name = "solarsync-backup-" + out.created_at.replace(/[:.]/g, "-") + ".json.enc";
+  await audit(u.id, "backup_download", name, null, { rows: total, tables: Object.keys(out.tables).length, bytes: sealed.length });
+  res.set("Content-Type", "application/octet-stream");
+  res.set("Content-Disposition", `attachment; filename="${name}"`);
+  res.set("Cache-Control", "no-store");
+  res.send(sealed);
+}));
+
+// ============================================================
 // ERP — accounting, purchasing, stock valuation, payroll,
 // financial reports, BAS, bank rec, Xero/MYOB export (erp.js)
 // ============================================================

@@ -63,17 +63,24 @@ async function tables() {
   return r.map(t => t.table_name);
 }
 
-async function backup() {
-  const unencrypted = process.argv.includes("--unencrypted");
-  if (unencrypted && process.env.DATABASE_URL) throw new Error("--unencrypted is only for a local test database, never production.");
-  const passphrase = unencrypted ? null : backupKey(true);
+// Every table as one object (used by the command line here and the owner portal's
+// "Create encrypted backup" button).
+async function collect(log) {
   const out = { created_at: new Date().toISOString(), source: describeTarget(), tables: {} };
   let total = 0;
   for (const t of await tables()) {
     out.tables[t] = await rows(`select * from app."${t}"`);
     total += out.tables[t].length;
-    console.log(`  ${t.padEnd(24)} ${out.tables[t].length} rows`);
+    if (log) log(`  ${t.padEnd(24)} ${out.tables[t].length} rows`);
   }
+  return { out, total };
+}
+
+async function backup() {
+  const unencrypted = process.argv.includes("--unencrypted");
+  if (unencrypted && process.env.DATABASE_URL) throw new Error("--unencrypted is only for a local test database, never production.");
+  const passphrase = unencrypted ? null : backupKey(true);
+  const { out, total } = await collect(console.log);
   const dir = path.join(__dirname, "data-backups");
   fs.mkdirSync(dir, { recursive: true });
   const base = path.join(dir, "solarsync-backup-" + out.created_at.replace(/[:.]/g, "-") + ".json");
@@ -107,7 +114,9 @@ async function restore(file) {
   console.log(`\nRestored ${added} rows into ${describeTarget()} (existing rows left unchanged)`);
 }
 
-(async () => {
+module.exports = { collect, seal, backupKey };
+
+if (require.main === module) (async () => {
   await init();
   console.log("Database: " + describeTarget() + "\n");
   const i = process.argv.indexOf("--restore");
