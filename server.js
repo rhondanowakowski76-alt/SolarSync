@@ -1882,14 +1882,15 @@ app.get("/api/roof-image", (req, res) => {
 // Every backup is recorded in the audit log.
 // ============================================================
 const backupTool = require("./backup-data");
+// Say at start-up whether backups can run (the state only, never the key).
+console.log("Encrypted backups: BACKUP_KEY " + ({ ok: "is set", missing: "is NOT set (check it is App-Level with Run Time scope)", short: "is set but under 16 characters" })[backupTool.backupKeyState()]);
 const ownerOnly = (req, res, next) => (req.user.app_role === "reseller" && !req.user.support) ? next() : res.status(403).json({ error: "forbidden" });
 
 app.get("/api/owner/backups", A.authRequired, ownerOnly, h(async (req, res) => {
-  let keySet = false;
-  try { keySet = !!backupTool.backupKey(false); } catch (e) { keySet = false; }   // too short counts as not set
+  const keyState = backupTool.backupKeyState();
   const recent = await rows(`select a.created_at, a.meta, u.display_name as by_name from audit_log a
     left join users u on u.id = a.actor_id where a.action='backup_download' order by a.created_at desc limit 20`);
-  ok(res, { key_set: keySet, recent });
+  ok(res, { key_set: keyState === "ok", key_state: keyState, recent });
 }));
 
 app.post("/api/owner/backups", supportAccess.limits.strict, A.authRequired, ownerOnly, h(async (req, res) => {
