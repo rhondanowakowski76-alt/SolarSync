@@ -23,8 +23,14 @@ const zlib = require("zlib");
 const FORMAT = "solarsync-backup-enc-v1";
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
+// "ok", "missing" or "short" — never the key itself.
+function backupKeyState() {
+  const k = (process.env.BACKUP_KEY || "").trim();
+  return !k ? "missing" : k.length < 16 ? "short" : "ok";
+}
+
 function backupKey(required) {
-  const k = process.env.BACKUP_KEY || "";
+  const k = (process.env.BACKUP_KEY || "").trim();   // stray spaces from copy and paste don't count
   if (!k) { if (required) throw new Error("BACKUP_KEY is not set. Set it in the server's secret settings (at least 16 characters)."); return null; }
   if (k.length < 16) throw new Error("BACKUP_KEY is too short — use at least 16 characters.");
   return k;
@@ -114,7 +120,7 @@ async function restore(file) {
   console.log(`\nRestored ${added} rows into ${describeTarget()} (existing rows left unchanged)`);
 }
 
-module.exports = { collect, seal, backupKey };
+module.exports = { collect, seal, backupKey, backupKeyState };
 
 if (require.main === module) (async () => {
   await init();

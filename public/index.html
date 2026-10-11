@@ -22294,7 +22294,9 @@ function OwnerBackups() {
       <div className="panel panel-pad chrome-top" data-testid="owner-backups">
         <div className="card-title">Create encrypted backup</div>
         <div className="card-sub" style={{ marginTop: 6 }}>Downloads every company's data as one file, locked with AES-256 encryption using your BACKUP_KEY. It can only be opened with that key, so keep a copy of the key somewhere safe and separate.</div>
-        {info && !info.key_set && <div className="card-sub" data-testid="backup-key-missing" style={{ marginTop: 12, color: "var(--warn, #FA913D)" }}>BACKUP_KEY isn't set on the server (or is under 16 characters). Add it in your hosting's secret settings, then come back here.</div>}
+        {info && !info.key_set && <div className="card-sub" data-testid="backup-key-missing" style={{ marginTop: 12, color: "var(--warn, #FA913D)" }}>{info.key_state === "short"
+          ? "BACKUP_KEY is set, but it's under 16 characters. Use a longer key (32+ is best), save, and redeploy."
+          : "The server can't see BACKUP_KEY. In DigitalOcean check it is an App-Level variable, its scope includes Run Time, the name is exactly BACKUP_KEY, then save and wait for the redeploy to finish."}</div>}
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 16 }}>
           <label className="field" style={{ minWidth: 220 }}><span className="field-label">Authenticator code</span>
             <input className="field-input" data-testid="backup-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" /></label>
