@@ -15288,7 +15288,7 @@ function ResellerAddons() {
         <div className="stack">
           <div className="panel panel-pad chrome-top" style={{ background:"rgba(58,125,255,0.06)" }}>
             <div className="card-head">
-              <div><div className="card-title">Module Catalog</div><div className="card-sub">Click a module to enable it for <strong style={{ color:"var(--blue-light)" }}>{BRANDS[selTenant].name}</strong> · or use the per-tenant panel</div></div>
+              <div><div className="card-title">Module Catalog</div><div className="card-sub">Click a module to enable it for <strong style={{ color:"var(--blue-light)" }}>{(BRANDS[selTenant] && BRANDS[selTenant].name) || "the selected company"}</strong> · or use the per-tenant panel</div></div>
             </div>
             {ADDONS.map(a=>{
               const on = enabled[selTenant+":"+a.id];
