@@ -7242,7 +7242,7 @@ function ProposalPackPanel() {
   );
 }
 
-function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan, setDesignImage }) {
+function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrades, specSheets, setSpecSheets, sitePlan, setSitePlan, setDesignImage, captureFromDesign, capturing }) {
   upgrades = upgrades || []; specSheets = specSheets || [];
   sitePlan = sitePlan || { image: null, markers: [] };
   const brand   = window.__SS_ACTIVE_BRAND || {};
@@ -7587,6 +7587,11 @@ function StepProposal({ spec, cust, lines, validity, notes, upgrades, setUpgrade
             <div className="card-sub" style={{ fontSize:11, marginTop:10, color:"var(--warn, #FA913D)" }}>
               No rooftop image yet — press "Capture for quote" in System Design, or add a photo or screenshot of the design here.
             </div>
+          )}
+          {captureFromDesign && spec.count > 0 && (
+            <button className="btn" data-testid="pv-capture-proposal" style={{ width:"100%", justifyContent:"center", marginTop:10 }} disabled={capturing} onClick={captureFromDesign}>
+              {capturing ? <span className="pv-spin" /> : <Icon d={ICONS.camera || ICONS.photo} size={14} stroke={2} />} {capturing ? "Capturing…" : (spec.designImage ? "Recapture rooftop from design" : "Capture rooftop from design")}
+            </button>
           )}
           {/* Only when there is no rooftop capture yet: an added picture never replaces or
               removes the satellite rooftop image. */}
@@ -8577,6 +8582,17 @@ function QuoteSystem() {
   // The picture shown in the proposal's System & Panel Layout section.
   const setDesignImage = img => { specRef.current = { ...specRef.current, designImage: img || undefined }; setSpec(s => ({ ...s, designImage: img || undefined })); };
   // "Capture for quote": snapshot the design now and say whether it worked.
+  // "Capture rooftop from design" on the Proposal step: show the design for a moment,
+  // take the same satellite rooftop picture as above, and come straight back.
+  const captureFromProposal = async () => {
+    if (capturing) return;
+    const firstVisit = !reached.current[2];
+    setCapturing(true); setStep(2);
+    await new Promise(r => setTimeout(r, firstVisit ? 2000 : 900));   // let the map lay out
+    const ok = await captureRoof();
+    setStep(3); setCapturing(false);
+    window.ssToast && window.ssToast(ok ? "Rooftop captured — it's in the proposal" : "Couldn't capture the satellite view. Use \"Add picture to quote\" instead.", ok ? undefined : "error");
+  };
   const captureNow = async () => {
     if (capturing) return;
     setCapturing(true); const ok = await captureRoof(); setCapturing(false);
@@ -8643,7 +8659,8 @@ function QuoteSystem() {
         <div style={{ display: step === 3 ? "block" : "none" }}>
           <StepProposal spec={spec} cust={cust} lines={lines} validity={validity} notes={notes}
             upgrades={upgrades} setUpgrades={setUpgrades} specSheets={specSheets} setSpecSheets={setSpecSheets}
-            sitePlan={sitePlan} setSitePlan={setSitePlan} setDesignImage={setDesignImage} />
+            sitePlan={sitePlan} setSitePlan={setSitePlan} setDesignImage={setDesignImage}
+            captureFromDesign={captureFromProposal} capturing={capturing} />
         </div>
       )}
     </div>
@@ -15288,7 +15305,7 @@ function ResellerAddons() {
         <div className="stack">
           <div className="panel panel-pad chrome-top" style={{ background:"rgba(58,125,255,0.06)" }}>
             <div className="card-head">
-              <div><div className="card-title">Module Catalog</div><div className="card-sub">Click a module to enable it for <strong style={{ color:"var(--blue-light)" }}>{BRANDS[selTenant].name}</strong> · or use the per-tenant panel</div></div>
+              <div><div className="card-title">Module Catalog</div><div className="card-sub">Click a module to enable it for <strong style={{ color:"var(--blue-light)" }}>{(BRANDS[selTenant] && BRANDS[selTenant].name) || "the selected company"}</strong> · or use the per-tenant panel</div></div>
             </div>
             {ADDONS.map(a=>{
               const on = enabled[selTenant+":"+a.id];
