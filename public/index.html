@@ -21519,6 +21519,13 @@ function Settings({ portal, brand, user }) {
   const [pkOpen, setPkOpen] = useEX(false);
   const [invOpen, setInvOpen] = useEX(false);
   const [members, setMembers] = useEX(null);
+  const [resetFor, setResetFor] = useEX(null);   // { n, pin } after a reset — the new one-time PIN, shown once
+  // Lost phone AND recovery codes: wipe their sign-in methods and give a new one-time PIN.
+  const resetSignIn = async (m) => {
+    if (!window.confirm("Reset " + m.n + "'s sign-in?\n\nThis signs them out everywhere (within 15 minutes) and removes their authenticator, passkeys and recovery codes. You'll get a new one-time PIN to give them, and they set up again with \"First time signing in?\".")) return;
+    try { const r = await window.ssApi.post("/admin/reset-user", { user_id: m.id }); setResetFor({ n: m.n, pin: r.pin }); window.dispatchEvent(new Event("ss:users-changed")); }
+    catch (e) { window.ssToast && window.ssToast("Couldn't reset that sign-in — try again", "error"); }
+  };
   const ROLE_LABEL = { reseller: "Platform", tenant_admin: "Admin", staff: "Staff", contractor: "Contractor", client: "Customer" };
   React.useEffect(() => {
     if (!canManage) return;
@@ -21526,7 +21533,7 @@ function Settings({ portal, brand, user }) {
     const load = () => window.ssApi.get("/users").then(us => {
       if (!live || !Array.isArray(us)) return;
       const mine = us.filter(u => u.status === "active" && (isReseller ? u.app_role === "reseller" : true));
-      if (mine.length) setMembers(mine.map(u => ({ n: u.display_name, r: ROLE_LABEL[u.app_role] || u.app_role, you: u.id === me.id })));
+      if (mine.length) setMembers(mine.map(u => ({ id: u.id, n: u.display_name, r: ROLE_LABEL[u.app_role] || u.app_role, you: u.id === me.id, ready: !!u.totp_enrolled })));
     }).catch(() => {});
     load();
     window.addEventListener("ss:users-changed", load);
@@ -21627,14 +21634,21 @@ function Settings({ portal, brand, user }) {
           {(isReseller || portal === "tenant") && (
             <div className="panel panel-pad chrome-top">
               <div className="card-head"><div className="card-title">Workspace members</div></div>
-              {(members || (isReseller
-                ? [{ n: user.name, r: "Owner", you: true }, { n: "Jordan Lee", r: "Admin" }, { n: "Priya Shah", r: "Analyst" }]
-                : [{ n: user.name, r: "Owner", you: true }, { n: "Kira Park", r: "Operations" }, { n: "Tom Lewis", r: "Finance" }]
-              )).map((m, i) => (
+              {resetFor && (
+                <div data-testid="reset-pin" style={{ margin: "6px 0 10px", padding: 12, borderRadius: 10, border: "1px solid rgba(58,125,255,0.35)", background: "rgba(58,125,255,0.08)" }}>
+                  <div className="comp-label">{resetFor.n} has been reset</div>
+                  <div className="card-sub" style={{ marginTop: 4 }}>Give them this one-time PIN. It won't be shown again. They choose "First time signing in?" on the sign-in screen.</div>
+                  <div style={{ fontFamily: "var(--font-head)", fontSize: 26, fontWeight: 800, letterSpacing: "0.2em", marginTop: 8 }}>{resetFor.pin}</div>
+                  <button className="btn" style={{ marginTop: 8 }} onClick={() => setResetFor(null)}>Done</button>
+                </div>
+              )}
+              {(members || [{ n: user.name, r: isReseller ? "Owner" : "Admin", you: true }]).map((m, i) => (
                 <div key={i} className="comp-row" style={{ padding: "11px 4px" }}>
                   <span className="mini-avatar" style={{ width: 28, height: 28, borderRadius: 9, fontSize: 11 }}>{m.n.split(" ").map(w=>w[0]).join("")}</span>
                   <div style={{ minWidth: 0, flex: 1 }}><div className="comp-label">{m.n}{m.you && <span className="chip" style={{ marginLeft: 8, color: "var(--blue-light)", borderColor: "rgba(58,125,255,0.3)" }}>You</span>}</div></div>
+                  {m.id && !m.ready && <span className="chip" style={{ marginRight: 6, fontSize: 11 }} title="Hasn't finished first-time setup yet">Not set up</span>}
                   <span className="plan-tag growth">{m.r}</span>
+                  {m.id && !m.you && canManage && <button className="btn" data-testid="reset-signin" style={{ marginLeft: 8, padding: "4px 10px", fontSize: 12 }} onClick={() => resetSignIn(m)}>Reset sign-in</button>}
                 </div>
               ))}
               <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={()=>setInvOpen(true)}><Icon d={ICONS.plus} size={15} stroke={2.2} /> Create a sign-in</button>

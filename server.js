@@ -218,10 +218,17 @@ app.post("/api/admin/reset-user", A.authRequired, A.requireRole("reseller", "ten
   const target = await one("select * from users where id=$1", [user_id]);
   if (!target) return res.status(404).json({ error: "not_found" });
   if (!isReseller(req) && target.tenant_id !== tenantOf(req)) return res.status(403).json({ error: "forbidden" });
-  await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id]);
+  if (target.id === req.user.sub) return res.status(400).json({ error: "not_self" });   // never lock yourself out
+  if (!isReseller(req) && target.app_role === "reseller") return res.status(403).json({ error: "forbidden" });
+  // A reset wipes every sign-in method (authenticator, passkeys, recovery codes) and
+  // signs them out everywhere, then gives a new one-time PIN (shown once) so the
+  // person can set up again with "First time signing in?".
+  const pin = String(require("crypto").randomInt(100000, 1000000));
+  await run("update users set pin_hash=$2, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id, A.bcrypt.hashSync(pin, 10)]);
+  await run("delete from backup_codes where user_id=$1", [user_id]);
   await run("delete from passkeys where user_id=$1", [user_id]);   // a reset removes every sign-in method
   await audit(req.user.sub, "admin_reset", user_id, target.tenant_id);
-  ok(res, { ok: true });
+  ok(res, { ok: true, pin, display_name: target.display_name });
 }));
 
 // ============================================================
