@@ -2018,7 +2018,7 @@ app.get("/manifest.webmanifest", (req, res) => {
 });
 app.get("*", (req, res) => {
   if (fs.existsSync(BUNDLE)) return res.sendFile(BUNDLE);
-  res.status(200).send("SolarSync API running. Front-end goes at backend/public/index.html");
+  res.status(200).send("SolarSync API running. Front-end goes at public/index.html");
 });
 
 const PORT = process.env.PORT || 3000;
