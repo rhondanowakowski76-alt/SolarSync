@@ -129,7 +129,9 @@ app.post("/api/auth/totp", h(async (req, res) => {
   await audit(u.id, "login", u.id, u.tenant_id);
   ok(res, {
     access_token: A.mintAccess(u), refresh_token: A.mintRefresh(u),
-    user: { id: u.id, display_name: u.display_name, app_role: u.app_role, tenant_id: u.tenant_id },
+    // must_reset: still on the one-time PIN their administrator gave them — the app
+    // asks them to choose their own PIN (and hands out recovery codes) next.
+    user: { id: u.id, display_name: u.display_name, app_role: u.app_role, tenant_id: u.tenant_id, must_reset: !!u.must_reset },
   });
 }));
 
@@ -218,10 +220,17 @@ app.post("/api/admin/reset-user", A.authRequired, A.requireRole("reseller", "ten
   const target = await one("select * from users where id=$1", [user_id]);
   if (!target) return res.status(404).json({ error: "not_found" });
   if (!isReseller(req) && target.tenant_id !== tenantOf(req)) return res.status(403).json({ error: "forbidden" });
-  await run("update users set pin_hash=null, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id]);
+  if (target.id === req.user.sub) return res.status(400).json({ error: "not_self" });   // never lock yourself out
+  if (!isReseller(req) && target.app_role === "reseller") return res.status(403).json({ error: "forbidden" });
+  // A reset wipes every sign-in method (authenticator, passkeys, recovery codes) and
+  // signs them out everywhere, then gives a new one-time PIN (shown once) so the
+  // person can set up again with "First time signing in?".
+  const pin = String(require("crypto").randomInt(100000, 1000000));
+  await run("update users set pin_hash=$2, totp_secret=null, totp_enrolled=false, must_reset=true, failed_attempts=0, locked_until=null, token_version=coalesce(token_version,0)+1 where id=$1", [user_id, A.bcrypt.hashSync(pin, 10)]);
+  await run("delete from backup_codes where user_id=$1", [user_id]);
   await run("delete from passkeys where user_id=$1", [user_id]);   // a reset removes every sign-in method
   await audit(req.user.sub, "admin_reset", user_id, target.tenant_id);
-  ok(res, { ok: true });
+  ok(res, { ok: true, pin, display_name: target.display_name });
 }));
 
 // ============================================================
@@ -1209,7 +1218,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
     [id, "reseller-solarsync", name, domain, plan, region, JSON.stringify(branding)]);
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
-  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,'tenant_admin',$3,$4)",
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash, must_reset) values ($1,$2,'tenant_admin',$3,$4,true)",
     [uid, id, adminName, A.bcrypt.hashSync(pin, 10)]);
   await audit(req.user.sub, "provision_tenant", id, id);
   // the PIN is returned exactly once — hand it to the tenant admin, then they
@@ -1294,7 +1303,7 @@ app.post("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin")
   }
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
-  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,$3,$4,$5)",
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash, must_reset) values ($1,$2,$3,$4,$5,true)",
     [uid, tenantId, role, displayName, A.bcrypt.hashSync(pin, 10)]);
   await audit(req.user.sub, "create_user", uid, tenantId);
   ok(res, { id: uid, display_name: displayName, app_role: role, tenant_id: tenantId, pin });
@@ -1909,6 +1918,49 @@ app.post("/api/owner/backups", supportAccess.limits.strict, A.authRequired, owne
   res.set("Content-Disposition", `attachment; filename="${name}"`);
   res.set("Cache-Control", "no-store");
   res.send(sealed);
+}));
+
+// Address lookup for the satellite roof map (OpenStreetMap Nominatim). Going through
+// the server lets us remember answers, so the same address is never looked up twice,
+// and keep to Nominatim's usage policy: one request at a time, at most about one a
+// second, with an identifying User-Agent. Signed-in users only.
+const geoCache = new Map();          // normalised address -> { at, result }
+const GEO_TTL = 30 * 24 * 3600e3, GEO_MISS_TTL = 24 * 3600e3, GEO_MAX = 5000;
+let geoChain = Promise.resolve(), geoLast = 0;
+function nominatim(q) {
+  const run = async () => {
+    const wait = 1100 - (Date.now() - geoLast);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    geoLast = Date.now();
+    return new Promise((resolve, reject) => {
+      const req = https.get("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q),
+        { headers: { "User-Agent": "SolarSync/1.0 (solar quoting; roof location)", "Accept": "application/json", "Accept-Language": "en-AU" } }, r => {
+          let body = ""; r.setEncoding("utf8");
+          r.on("data", c => { body += c; if (body.length > 200000) req.destroy(); });
+          r.on("end", () => { if (r.statusCode !== 200) return reject(new Error("upstream_" + r.statusCode)); try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+        });
+      req.on("error", reject);
+      req.setTimeout(10000, () => req.destroy(new Error("timeout")));
+    });
+  };
+  const p = geoChain.then(run, run);
+  geoChain = p.catch(() => {});
+  return p;
+}
+app.get("/api/geocode", A.authRequired, h(async (req, res) => {
+  const q = String(req.query.q || "").trim().slice(0, 200);
+  if (q.length < 3) return res.status(400).json({ error: "bad_address" });
+  const key = q.toLowerCase().replace(/\s+/g, " ");
+  const hit = geoCache.get(key);
+  if (hit && Date.now() - hit.at < (hit.result ? GEO_TTL : GEO_MISS_TTL)) {
+    return hit.result ? ok(res, hit.result) : res.status(404).json({ error: "not_found" });
+  }
+  let j;
+  try { j = await nominatim(q); } catch (e) { return res.status(502).json({ error: "lookup_failed" }); }
+  const result = Array.isArray(j) && j.length && Number.isFinite(+j[0].lat) ? { lat: +j[0].lat, lng: +j[0].lon } : null;
+  if (geoCache.size >= GEO_MAX) geoCache.delete(geoCache.keys().next().value);
+  geoCache.set(key, { at: Date.now(), result });
+  return result ? ok(res, result) : res.status(404).json({ error: "not_found" });
 }));
 
 // ============================================================
