@@ -1,0 +1,13 @@
+# Weekly checks for outdated packages. Dependabot opens a pull request for each
+# update so it can be reviewed and tested by CI before merging.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
