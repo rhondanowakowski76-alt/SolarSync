@@ -3104,6 +3104,29 @@ function LoginScreen({ onLogin }) {
   const [backupCode, setBackupCode] = useState("");
   const [otPin, setOtPin] = useState("");                // one-time PIN from the administrator (first time only)
   const [newCodes, setNewCodes] = useState(null);        // freshly issued recovery codes to show once
+  const [firstUser, setFirstUser] = useState(null);      // signed in on the one-time PIN — must choose their own PIN next
+  const [ownPin1, setOwnPin1] = useState(""), [ownPin2, setOwnPin2] = useState(""), [ownCode, setOwnCode] = useState("");
+  // After any sign-in: people still on their administrator's one-time PIN choose their own first.
+  const afterSignIn = (u, delay) => {
+    if (u && u.must_reset) { setFirstUser(u); setStep(6); setError(""); return; }
+    setTimeout(() => onLogin(u), delay);
+  };
+  const saveOwnPin = async () => {
+    setError("");
+    if (!/^\d{6}$/.test(ownPin1)) { setError("Your new PIN must be 6 digits."); return; }
+    if (ownPin1 !== ownPin2) { setError("The two PINs don't match — try again."); return; }
+    if (!/^\d{6}$/.test(ownCode)) { setError("Enter the current 6-digit code from your authenticator app."); return; }
+    setBusy(true);
+    try {
+      const rr = await window.ssApi.setPin(firstUser.id, ownPin1, ownCode);
+      setOwnPin1(""); setOwnPin2(""); setOwnCode("");
+      if (rr && rr.backup_codes && rr.backup_codes.length) { setNewCodes(rr.backup_codes); setStep(5); }
+      else onLogin({ ...firstUser, must_reset: false });
+    } catch (e) {
+      const err = e.data && e.data.error;
+      setError(err === "bad_code" ? "That authenticator code is wrong or expired — use the current one." : err === "locked" ? "Too many attempts. Locked for a few minutes." : "Couldn't save your PIN — try again.");
+    } finally { setBusy(false); }
+  };
 
   React.useEffect(() => {
     // Names remembered on this device (saved after each successful sign-in) —
@@ -3182,7 +3205,7 @@ function LoginScreen({ onLogin }) {
     try {
       const r = await window.ssApi.totp(uid, totp, ticket); // 2) authenticator code from step 1
       window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
-      setTimeout(() => onLogin(r.user), 420);
+      afterSignIn(r.user, 420);
     } catch (e) {
       setPin("");
       setError("That authenticator code was wrong or expired — tap Back and enter a fresh 6-digit code.");
@@ -3266,7 +3289,7 @@ function LoginScreen({ onLogin }) {
     try {
       const r = await window.ssApi.totp(userId, digits, pinTicketRef.current);
       window.ssApi.setSession(r); remember(r.user); setTotpOk(true);
-      setTimeout(() => onLogin(r.user), 420);
+      afterSignIn(r.user, 420);
     } catch (e) { setError("Incorrect code — check your authenticator app."); setTotp(""); }
     finally { setBusy(false); }
   };
@@ -3519,6 +3542,25 @@ function LoginScreen({ onLogin }) {
             onClick={() => { setStep(1); setEnrolling(false); setOtPin(""); setTotp(""); setError(""); }}>← Back</button>
         </>}
 
+        {step === 6 && <>
+          <div className="login-title">Choose your own PIN</div>
+          <div className="login-sub">The PIN your administrator gave you was for setting up only. Pick a new 6-digit PIN that only you know.</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, color: "var(--tx-dim)", margin: "2px 0 6px", fontFamily: "var(--font-head)", fontWeight: 600 }}>NEW PIN</div>
+              <input data-testid="own-pin1" type="password" inputMode="numeric" maxLength={6} placeholder="••••••" value={ownPin1} onChange={e => setOwnPin1(e.target.value.replace(/\D/g, "").slice(0, 6))} style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1px solid var(--line-strong)", background: "rgba(255,255,255,0.05)", color: "var(--tx-hi)", fontSize: 16, letterSpacing: "0.3em", textAlign: "center" }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, color: "var(--tx-dim)", margin: "2px 0 6px", fontFamily: "var(--font-head)", fontWeight: 600 }}>CONFIRM PIN</div>
+              <input data-testid="own-pin2" type="password" inputMode="numeric" maxLength={6} placeholder="••••••" value={ownPin2} onChange={e => setOwnPin2(e.target.value.replace(/\D/g, "").slice(0, 6))} style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1px solid var(--line-strong)", background: "rgba(255,255,255,0.05)", color: "var(--tx-hi)", fontSize: 16, letterSpacing: "0.3em", textAlign: "center" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--tx-dim)", margin: "14px 0 6px", fontFamily: "var(--font-head)", fontWeight: 600 }}>AUTHENTICATOR CODE</div>
+          <input data-testid="own-code" inputMode="numeric" maxLength={6} placeholder="000000" value={ownCode} onChange={e => setOwnCode(e.target.value.replace(/\D/g, "").slice(0, 6))} style={{ width: "100%", padding: "11px 13px", borderRadius: 11, border: "1px solid var(--line-strong)", background: "rgba(255,255,255,0.05)", color: "var(--tx-hi)", fontSize: 16, letterSpacing: "0.3em", textAlign: "center" }} />
+          {error && <div style={{ color: "var(--amber)", fontSize: 12.5, textAlign: "center", marginTop: 10, fontFamily: "var(--font-head)" }}>{error}</div>}
+          <button className="btn btn-primary" data-testid="own-save" disabled={busy} style={{ width: "100%", marginTop: 14, justifyContent: "center" }} onClick={saveOwnPin}>{busy ? "Saving…" : "Save my PIN"}</button>
+        </>}
+
         {step === 5 && <>
           <div className="login-title">Save your recovery codes</div>
           <div className="login-sub">Keep these somewhere safe. Each code works <strong>once</strong> to sign in if you ever can't use your authenticator app.</div>
@@ -3532,7 +3574,7 @@ function LoginScreen({ onLogin }) {
             <Icon d={ICONS.docs} size={14} stroke={2} /> Copy all codes
           </button>
           <button className="btn btn-primary" style={{ width:"100%", marginTop:8, justifyContent:"center" }}
-            onClick={() => { setNewCodes(null); setStep(1); window.ssToast && window.ssToast("All set — sign in with your authenticator code, then your new PIN"); }}>
+            onClick={() => { setNewCodes(null); if (firstUser) { const u = { ...firstUser, must_reset: false }; setFirstUser(null); onLogin(u); return; } setStep(1); window.ssToast && window.ssToast("All set — sign in with your authenticator code, then your new PIN"); }}>
             I've saved them — continue
           </button>
         </>}

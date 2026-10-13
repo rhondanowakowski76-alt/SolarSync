@@ -129,7 +129,9 @@ app.post("/api/auth/totp", h(async (req, res) => {
   await audit(u.id, "login", u.id, u.tenant_id);
   ok(res, {
     access_token: A.mintAccess(u), refresh_token: A.mintRefresh(u),
-    user: { id: u.id, display_name: u.display_name, app_role: u.app_role, tenant_id: u.tenant_id },
+    // must_reset: still on the one-time PIN their administrator gave them — the app
+    // asks them to choose their own PIN (and hands out recovery codes) next.
+    user: { id: u.id, display_name: u.display_name, app_role: u.app_role, tenant_id: u.tenant_id, must_reset: !!u.must_reset },
   });
 }));
 
@@ -1216,7 +1218,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
     [id, "reseller-solarsync", name, domain, plan, region, JSON.stringify(branding)]);
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
-  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,'tenant_admin',$3,$4)",
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash, must_reset) values ($1,$2,'tenant_admin',$3,$4,true)",
     [uid, id, adminName, A.bcrypt.hashSync(pin, 10)]);
   await audit(req.user.sub, "provision_tenant", id, id);
   // the PIN is returned exactly once — hand it to the tenant admin, then they
@@ -1301,7 +1303,7 @@ app.post("/api/users", A.authRequired, A.requireRole("reseller", "tenant_admin")
   }
   const pin = String(require("crypto").randomInt(100000, 1000000));
   const uid = "u-" + rid();
-  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash) values ($1,$2,$3,$4,$5)",
+  await run("insert into users (id, tenant_id, app_role, display_name, pin_hash, must_reset) values ($1,$2,$3,$4,$5,true)",
     [uid, tenantId, role, displayName, A.bcrypt.hashSync(pin, 10)]);
   await audit(req.user.sub, "create_user", uid, tenantId);
   ok(res, { id: uid, display_name: displayName, app_role: role, tenant_id: tenantId, pin });
