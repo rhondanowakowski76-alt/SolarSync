@@ -24,6 +24,9 @@ app.use(require("compression")());
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+// Outer per-client cap on every request (pages, app bundle, sw.js, /api…) so no route
+// can be hammered to tie up the server. /api also has its own tighter cap below.
+app.use(require("express-rate-limit")({ windowMs: 60 * 1000, limit: 1000, standardHeaders: true, legacyHeaders: false }));
 // Browser security headers (CSP, no framing, HSTS on live…) — see security-headers.js.
 app.use(require("./security-headers").securityHeaders({ devCompile: !fs.existsSync(path.join(__dirname, "dist", "index.html")) }));
 // Measure /api traffic, response times and errors for the reseller's Platform Health screen.
