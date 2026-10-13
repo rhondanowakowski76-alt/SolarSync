@@ -1205,7 +1205,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) return res.status(400).json({ error: "name_required" });
   if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
-  const id = "tenant-" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || rid());
+  const id = "tenant-" + (name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join("-").slice(0, 30) || rid());
   if (await one("select id from tenants where id=$1 or (domain<>'' and domain=$2)", [id, domain]))
     return res.status(409).json({ error: "tenant_exists" });
   // sign-in is by exact full name, so names must stay unambiguous platform-wide
