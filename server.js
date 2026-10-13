@@ -24,6 +24,9 @@ app.use(require("compression")());
 // come from X-Forwarded-For — needed for per-client rate limits.
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+// Outer per-client cap on every request (pages, app bundle, sw.js, /api…) so no route
+// can be hammered to tie up the server. /api also has its own tighter cap below.
+app.use(require("express-rate-limit")({ windowMs: 60 * 1000, limit: 1000, standardHeaders: true, legacyHeaders: false }));
 // Browser security headers (CSP, no framing, HSTS on live…) — see security-headers.js.
 app.use(require("./security-headers").securityHeaders({ devCompile: !fs.existsSync(path.join(__dirname, "dist", "index.html")) }));
 // Measure /api traffic, response times and errors for the reseller's Platform Health screen.
@@ -1202,7 +1205,7 @@ app.post("/api/tenants", A.authRequired, A.requireRole("reseller"), h(async (req
   const adminName = String(b.admin_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) return res.status(400).json({ error: "name_required" });
   if (adminName.length < 3 || !adminName.includes(" ")) return res.status(400).json({ error: "admin_name_required" });
-  const id = "tenant-" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || rid());
+  const id = "tenant-" + (name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join("-").slice(0, 30) || rid());
   if (await one("select id from tenants where id=$1 or (domain<>'' and domain=$2)", [id, domain]))
     return res.status(409).json({ error: "tenant_exists" });
   // sign-in is by exact full name, so names must stay unambiguous platform-wide
@@ -2015,7 +2018,7 @@ app.get("/manifest.webmanifest", (req, res) => {
 });
 app.get("*", (req, res) => {
   if (fs.existsSync(BUNDLE)) return res.sendFile(BUNDLE);
-  res.status(200).send("SolarSync API running. Front-end goes at backend/public/index.html");
+  res.status(200).send("SolarSync API running. Front-end goes at public/index.html");
 });
 
 const PORT = process.env.PORT || 3000;
