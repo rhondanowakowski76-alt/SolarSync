@@ -19594,20 +19594,21 @@ textarea.il:focus{border-color:#1a56db;outline:none;}
 
 function wrapForm(brand, title, standard, refPrefix, body, client) {
   const today = new Date().toLocaleDateString("en-AU", { day: "2-digit", month: "long", year: "numeric" });
-  const init = brand.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const acc = (brand.accent && brand.accent[1]) || "#1a56db";
+  const E = window.ssEsc; // customer and company details are typed by people: never insert them as raw HTML
+  const init = E(brand.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase());
+  const acc = /^#[0-9a-fA-F]{3,8}$/.test((brand.accent && brand.accent[1]) || "") ? brand.accent[1] : "#1a56db";
   const ref = `${refPrefix}-${String(Math.floor(Math.random() * 9000 + 1000))}`;
   const clientBox = (client && client.name) ? `
 <div style="display:flex;justify-content:space-between;gap:16px;background:#f4f7fc;border:1px solid #e4e8ef;border-radius:9px;padding:12px 16px;margin-bottom:16px;flex-wrap:wrap;">
   <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8a9ab5;font-weight:700;">Prepared for</div>
-    <div style="font-weight:700;color:#1a2230;font-size:14px;margin-top:2px;">${client.name}${client.contact ? ` <span style="font-weight:500;color:#5a6678;">· ${client.contact}</span>` : ""}</div>
-    <div style="color:#5a6678;font-size:12.5px;">${client.address || ""}</div></div>
-  <div style="text-align:right;color:#5a6678;font-size:12.5px;">${client.phone ? `<div>${client.phone}</div>` : ""}${client.email ? `<div>${client.email}</div>` : ""}${client.system ? `<div style="color:#8a9ab5;">${client.system}</div>` : ""}</div>
+    <div style="font-weight:700;color:#1a2230;font-size:14px;margin-top:2px;">${E(client.name)}${client.contact ? ` <span style="font-weight:500;color:#5a6678;">· ${E(client.contact)}</span>` : ""}</div>
+    <div style="color:#5a6678;font-size:12.5px;">${E(client.address)}</div></div>
+  <div style="text-align:right;color:#5a6678;font-size:12.5px;">${client.phone ? `<div>${E(client.phone)}</div>` : ""}${client.email ? `<div>${E(client.email)}</div>` : ""}${client.system ? `<div style="color:#8a9ab5;">${E(client.system)}</div>` : ""}</div>
 </div>` : "";
   const autofill = (client && client.name) ? `
 <scr${""}ipt>(function(){var C=${JSON.stringify(client).replace(/</g, "\\u003c")};function f(){document.querySelectorAll('label').forEach(function(l){var t=(l.textContent||'').toLowerCase();var p=l.parentElement;var i=p&&p.querySelector('input.il,input,textarea');if(!i||i.value)return;var v='';if(/electrician|installer|designer|witness|inspector|accreditation|licence|license/.test(t))return;if(/client|property owner|customer|^owner|prepared for/.test(t))v=C.contact?(C.name+' — '+C.contact):C.name;else if(/site|installation address|property address|^address|premises/.test(t))v=C.address||'';else if(/phone|mobile|contact number|contact phone/.test(t))v=C.phone||'';else if(/email/.test(t))v=C.email||'';if(v){i.value=v;i.setAttribute('value',v);}});}if(document.readyState!=='loading')f();else document.addEventListener('DOMContentLoaded',f);})();<\/scr${""}ipt>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>${title} — ${brand.name}</title>
+<title>${E(title)} — ${E(brand.name)}</title>
 <style>:root{--acc:${acc};}${FORM_CSS}</style>
 </head><body>
 <button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
@@ -19615,8 +19616,8 @@ function wrapForm(brand, title, standard, refPrefix, body, client) {
   <div class="hd-left">
     <div class="logo-box" style="background:#0a3d6e">${init}</div>
     <div>
-      <div class="company">${brand.name}</div>
-      <div class="company-sub">${brand.domain || "Solar Installation Specialist"} &nbsp;·&nbsp; SAA Accredited Installer</div>
+      <div class="company">${E(brand.name)}</div>
+      <div class="company-sub">${E(brand.domain || "Solar Installation Specialist")} &nbsp;·&nbsp; SAA Accredited Installer</div>
     </div>
   </div>
   <div class="hd-right">
