@@ -793,7 +793,7 @@ select.field-input option { background: #161E27; color: #e0e8f0; }
 .pv-geobusy { position: absolute; left: 12px; top: 12px; z-index: 6; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 9px; background: rgba(8,14,22,0.8); color: #eaf4ff; font-size: 12.5px; font-family: var(--font-head); border: 1px solid rgba(58,125,255,0.35); backdrop-filter: blur(6px); }
 .pv-spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(58,125,255,0.3); border-top-color: var(--blue-light); animation: pv-spin 0.7s linear infinite; }
 @keyframes pv-spin { to { transform: rotate(360deg); } }
-.pv-geomsg { position: absolute; left: 12px; bottom: 40px; right: 120px; z-index: 6; padding: 7px 12px; border-radius: 9px; background: rgba(255,255,255,0.82); color: #ffe1ad; font-size: 12px; border: 1px solid rgba(58,125,255,0.35); backdrop-filter: blur(6px); }
+.pv-geomsg { position: absolute; left: 12px; bottom: 40px; right: 120px; z-index: 6; padding: 8px 12px; border-radius: 9px; background: rgba(120,20,20,0.92); color: #fff; font-size: 12.5px; font-weight: 600; border: 1px solid rgba(255,120,120,0.6); }
 .pv-stage-veil { position: absolute; inset: 0; pointer-events: none; background: rgba(0,0,0,0.5); }
 .pv-stage-attrib { position: absolute; left: 12px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-head); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255,255,255,0.82); background: rgba(6,14,22,0.62); border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; padding: 4px 9px; backdrop-filter: blur(4px); pointer-events: none; }
 
@@ -5753,7 +5753,30 @@ const SYSTEMS = [
   { id: "s20", rows: 4, cols: 5 },
 ];
 
-function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredPanelId }) {
+// Find an address's position for the satellite map. Looks up through our own server
+// (which remembers results and keeps within the lookup service's limits), and
+// remembers answers for this visit. Returns { lat, lng } or null when not found.
+const SS_GEO_CACHE = new Map();
+async function ssGeocode(address) {
+  const key = String(address || "").trim().toLowerCase();
+  if (key.length < 3) return null;
+  if (SS_GEO_CACHE.has(key)) return SS_GEO_CACHE.get(key);
+  const api = window.ssApi;
+  let out = null;
+  if (api && api.getToken && api.getToken()) {
+    try { const r = await api.get("/geocode?q=" + encodeURIComponent(address)); out = r && Number.isFinite(+r.lat) ? { lat: +r.lat, lng: +r.lng } : null; }
+    catch (e) { if (e && e.message !== "not_found") throw e; out = null; }
+  } else {
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address), { headers: { "Accept": "application/json" } });
+    const j = await r.json();
+    out = j && j.length ? { lat: +j[0].lat, lng: +j[0].lon } : null;
+  }
+  SS_GEO_CACHE.set(key, out);
+  return out;
+}
+const SS_GEO_NOT_FOUND = "Couldn't find this address, so the map is NOT showing the customer's roof. Check the address and press locate, or drag the map to the right roof.";
+
+function PVDesigner({ embedded, onSpec, initialAddress, initialGeo, panelOptions, preferredPanelId }) {
   // Panels come from the tenant's live catalog when the quote builder passes it in,
   // so the design uses the products actually being quoted (seed list otherwise).
   const PANEL_LIST = (panelOptions && panelOptions.length) ? panelOptions : PANELS;
@@ -5779,7 +5802,10 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   const [hoverPt, setHoverPt] = usePV(null);
   const [aiCmd, setAiCmd] = usePV("Fill the main north-facing facet");
   // live satellite view (geocoded from the address) — default: a detached residential rooftop with high-res Esri coverage
-  const [geo, setGeo] = usePV({ lat: -33.89149, lng: 151.17456, zoom: 21 });
+  // A quote remembers where its roof is, so coming back never jumps to another site.
+  const savedGeo = initialGeo && initialGeo.addr === initialAddress && Number.isFinite(+initialGeo.lat) && Number.isFinite(+initialGeo.lng) ? initialGeo : null;
+  const [geo, setGeo] = usePV(savedGeo ? { lat: +savedGeo.lat, lng: +savedGeo.lng, zoom: +savedGeo.zoom || 21 } : { lat: -33.89149, lng: 151.17456, zoom: 21 });
+  const [located, setLocated] = usePV(!!savedGeo);   // true once the map is on this site's roof
   const [override, setOverride] = usePV(null);   // optional uploaded photo on top of live tiles
   const [geoBusy, setGeoBusy] = usePV(false);
   const [geoMsg, setGeoMsg] = usePV("");
@@ -5800,12 +5826,12 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   }, [rows, cols]);
 
   useEffPV(() => {
+    if (savedGeo) return;   // already on this quote's roof
     if (initialAddress && initialAddress !== "27 Edgeware Rd, Enmore NSW 2042") {
-      setGeoBusy(true);
-      fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(initialAddress), { headers: { "Accept": "application/json" } })
-        .then(r => r.json())
-        .then(j => { if (j && j.length) setGeo(g => ({ ...g, lat: +j[0].lat, lng: +j[0].lon })); })
-        .catch(() => {})
+      setGeoBusy(true); setGeoMsg("");
+      ssGeocode(initialAddress)
+        .then(p => { if (p) { setGeo(g => ({ ...g, lat: p.lat, lng: p.lng })); setLocated(true); } else setGeoMsg(SS_GEO_NOT_FOUND); })
+        .catch(() => setGeoMsg("Couldn't look up this address right now, so the map may NOT be the customer's roof. Press locate to try again."))
         .finally(() => setGeoBusy(false));
     }
   }, [initialAddress]);
@@ -5816,15 +5842,23 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   const locate = async () => {
     setGeoBusy(true); setGeoMsg(""); setOverride(null);
     try {
-      const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address), { headers: { "Accept": "application/json" } });
-      const j = await res.json();
-      if (j && j.length) { setGeo(g => ({ ...g, lat: +j[0].lat, lng: +j[0].lon })); }
-      else setGeoMsg("No match for that address — refine it and locate again.");
+      const p = await ssGeocode(address);
+      if (p) { setGeo(g => ({ ...g, lat: p.lat, lng: p.lng })); setLocated(true); }
+      else setGeoMsg(SS_GEO_NOT_FOUND);
     } catch (e) {
       setGeoMsg("Live geocoding blocked in this preview — showing last satellite view. Works on a live server.");
     }
     setGeoBusy(false);
     runScan(() => setOn(smartFill(rows, cols, slope)));
+  };
+  // On the customer's premises: put the satellite map on this device's location.
+  const useMyLocation = () => {
+    if (!navigator.geolocation) { setGeoMsg("This device can't share its location — search the address instead."); return; }
+    setGeoBusy(true); setGeoMsg("");
+    navigator.geolocation.getCurrentPosition(
+      pos => { setGeo(g => ({ ...g, lat: pos.coords.latitude, lng: pos.coords.longitude })); setLocated(true); setGeoBusy(false); },
+      () => { setGeoBusy(false); setGeoMsg("Location wasn't shared. Allow location for this site in the browser, or search the address."); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   };
   const runAi = () => runScan(() => setOn(smartFill(rows, cols, slope)));
   const clearAll = () => setOn(new Set());
@@ -5869,6 +5903,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
       const dLng = -(dx * mpp) / (111320 * Math.cos(lat0 * Math.PI / 180));
       const dLat = (dy * mpp) / 110540;
       setGeo(g => ({ ...g, lat: lat0 + dLat, lng: lng0 + dLng }));
+      setLocated(true); setGeoMsg("");   // the installer has put the map on the roof by hand
     };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
@@ -5973,8 +6008,9 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
   useEffPV(() => {
     if (!onSpec) return;
     const layout = [...placed.map(a => ({ rows: a.rows, cols: a.cols, on: a.on, orient: a.orient, rot: a.rot || 0 })), { rows, cols, on: [...on], orient, rot }];
-    onSpec({ count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, monthly, mode, panel, batteryKwh, address, slope, azimuth, aspectLabel: aspectLabel(azimuth), backupHrs, autonomy, avgLoadKw, layout });
-  }, [count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, mode, batteryKwh, address, slope, azimuth, panel, backupHrs, autonomy, on, placed, rows, cols, orient, rot]);
+    onSpec({ count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, monthly, mode, panel, batteryKwh, address, slope, azimuth, aspectLabel: aspectLabel(azimuth), backupHrs, autonomy, avgLoadKw, layout,
+      geo: located ? { lat: geo.lat, lng: geo.lng, zoom: geo.zoom, addr: initialAddress || "" } : null });
+  }, [count, sysKw, annualKwh, savingsYr, sysCost, stc, stcValue, payback, co2, mode, batteryKwh, address, slope, azimuth, panel, backupHrs, autonomy, on, placed, rows, cols, orient, rot, geo, located]);
 
   return (
     <div className="fade-in">
@@ -6043,6 +6079,7 @@ function PVDesigner({ embedded, onSpec, initialAddress, panelOptions, preferredP
               <Icon d={ICONS.search} size={15} stroke={2.2} style={{ color: "var(--tx-dim)", flexShrink: 0 }} />
               <input className="pv-search-input" value={address} onChange={e => setAddress(e.target.value)} placeholder="Search a client address to locate the rooftop…" spellCheck={false} aria-label="Site address" />
               <button type="submit" className="pv-search-go" title="Locate rooftop">{geoBusy ? <span className="pv-spin" /> : <Icon d={ICONS.pin} size={14} stroke={2.2} />}</button>
+              <button type="button" className="pv-search-go" data-testid="pv-onsite" title="I'm on site — use this device's location" onClick={useMyLocation} style={{ marginLeft: 4, width: "auto", padding: "0 10px", fontSize: 12, fontWeight: 700 }}>I'm on site</button>
             </form>
             <div className="pv-zoom">
               <button onClick={() => setZoom(1)} title="Zoom in">+</button>
@@ -6553,10 +6590,10 @@ function StepClient({ cust, setCust, lines, setLines, enq, setEnq, status, setSt
 }
 
 /* ── Step 2: PV Designer ── */
-function StepDesign({ onSpec, clientAddress, panelOptions, preferredPanelId }) {
+function StepDesign({ onSpec, clientAddress, initialGeo, panelOptions, preferredPanelId }) {
   return (
     <div style={{ padding: "var(--gap) 28px" }}>
-      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} panelOptions={panelOptions} preferredPanelId={preferredPanelId} />
+      <PVDesigner embedded={true} onSpec={onSpec} initialAddress={clientAddress} initialGeo={initialGeo} panelOptions={panelOptions} preferredPanelId={preferredPanelId} />
     </div>
   );
 }
@@ -8651,7 +8688,7 @@ function QuoteSystem() {
               {capturing ? <span className="pv-spin" /> : <Icon d={ICONS.camera || ICONS.photo} size={14} stroke={2} />} Capture for quote
             </button>
           </div>
-          <StepDesign key={designKey} onSpec={onDesignSpec} clientAddress={cust.address}
+          <StepDesign key={designKey} onSpec={onDesignSpec} clientAddress={cust.address} initialGeo={spec.geo}
             panelOptions={catalogPanels} preferredPanelId={preferredPanelId} />
         </div>
       )}
