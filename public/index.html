@@ -15516,6 +15516,9 @@ const RDOC_INITIAL = [
   { id: "legal-terms", category: "agreements", title: "Website Terms of Use",
     desc: "Public terms of service for your platform. Edit the [brackets], then publish.",
     body: `<h1>Terms of Service — SolarSync CRM</h1><p><em>Last updated: [DATE]</em></p><p>These Terms govern your use of the SolarSync CRM platform provided by <strong>[YOUR LEGAL BUSINESS NAME]</strong> (ABN <strong>[ABN]</strong>).</p><h2>1. Acceptance</h2><p>By creating an account or using the platform, you agree to these Terms. If you don't agree, don't use the service.</p><h2>2. The service</h2><p>SolarSync CRM is subscription software for managing solar installation businesses (quoting, compliance, job management, client/contractor portals, payments). Features depend on your plan.</p><h2>3. Accounts</h2><p>Each user login is for a single named person; don't share credentials. You are responsible for activity under your account and for keeping your login secure.</p><h2>4. Subscriptions &amp; payment</h2><ul><li>Plans are billed monthly in advance (ex-GST, or as quoted).</li><li>Payments are processed by Stripe. By subscribing you authorise recurring charges.</li><li>No lock-in: cancel anytime; cancellation takes effect at the end of the current billing period. Fees already paid are non-refundable except where required by the Australian Consumer Law.</li></ul><h2>5. Your data</h2><p>You own the data you enter. We process it to provide the service (see our Privacy Policy). You are responsible for having the right to enter any customer data and for its accuracy.</p><h2>6. Acceptable use</h2><p>Don't misuse the platform, attempt to breach security, resell access without authorisation, or use it unlawfully.</p><h2>7. Compliance documents</h2><p>Templates (AS/NZS, SAA, etc.) are provided as tools. You are responsible for the accuracy and compliance of documents you generate and submit. They do not constitute legal, electrical or accreditation advice.</p><h2>8. Availability</h2><p>We aim for high uptime but don't guarantee uninterrupted service. Maintenance is performed where possible outside business hours.</p><h2>9. Liability</h2><p>To the extent permitted by law, our total liability is limited to the fees you paid in the 3 months before the claim. Nothing in these Terms excludes rights under the Australian Consumer Law.</p><h2>10. Termination</h2><p>We may suspend or terminate accounts that breach these Terms. On cancellation you may request an export of your data within 30 days.</p><h2>11. Governing law</h2><p>These Terms are governed by the laws of <strong>[STATE, e.g. Queensland], Australia</strong>.</p><p><strong>Contact:</strong> [CONTACT EMAIL] · [YOUR BUSINESS NAME]</p>` },
+  { id: "legal-ai", category: "agreements", title: "AI Use Policy",
+    desc: "How SolarSync uses AI (the optional AI Assistant only), what data is sent, and the rules. Edit the [brackets], then publish.",
+    body: `<h1>AI Use Policy — SolarSync CRM</h1><p><em>Last updated: [DATE] · Owner: [NAME, ROLE] · Next review: [DATE]</em></p><p>This policy explains how <strong>[YOUR LEGAL BUSINESS NAME]</strong> (ABN <strong>[ABN]</strong>) uses artificial intelligence (AI) in the SolarSync CRM platform, and the rules we follow. It supports our obligations under the <strong>Privacy Act 1988 (Cth)</strong> and the Australian Privacy Principles. [Have this reviewed by your adviser before publishing.]</p><hr><h2>1. Where AI is used</h2><p>SolarSync is an independent platform. AI is used in <strong>one place only: the optional AI Assistant</strong>.</p><ul><li><strong>Customer Service Copilot</strong> (company staff): helps draft replies to customers and explains solar topics.</li><li><strong>Customer assistant</strong> (end customers): answers general questions about their solar journey.</li></ul><p>No other part of SolarSync uses AI. Quotes, prices, costing sheets, roof designs, compliance reports, scheduling, sign-in, billing and accounting are all worked out by SolarSync itself, not by AI. Features with "AI" in their name in the roof designer (such as AI Auto-Layout) use fixed rules inside SolarSync and don't send data to an AI provider.</p><h2>2. The AI provider</h2><ul><li>The AI Assistant uses <strong>Anthropic</strong>'s Claude models through Anthropic's API.</li><li>It only runs when the platform owner switches it on. Companies choose whether to add it (paid add-on with a monthly limit).</li><li>Anthropic may process data outside Australia. [Confirm Anthropic's current data location, retention and training terms from its commercial terms and privacy policy, and record them here.]</li></ul><h2>3. What information is sent</h2><ul><li><strong>Only what a person types into the assistant</strong> (the last 20 messages of that chat, each limited to 4,000 characters) and the company's name.</li><li>SolarSync does <strong>not</strong> automatically send customer records, addresses, quotes, invoices, photos, documents, sign-in details or financial data to the AI provider.</li><li><strong>Don't type into the assistant:</strong> customers' full contact details, bank or card details, PINs, recovery codes, passwords or health information. Use a first name or a job reference instead.</li></ul><h2>4. People stay in charge</h2><ul><li>Every AI reply is labelled <strong>AI-generated</strong> and may be wrong.</li><li>Staff must <strong>read and check every AI draft</strong> before sending it to a customer or acting on it.</li><li>AI is never used to make decisions about a person: approving or refusing work, pricing, credit, employment or compliance sign-off are always made by a person.</li><li>Technical and compliance advice (AS/NZS standards, STCs, electrical safety) must be confirmed by a qualified person.</li></ul><h2>5. Being open with customers</h2><ul><li>The customer assistant is clearly named as an <strong>AI assistant</strong>, and its answers are labelled AI-generated.</li><li>Customers can always contact the company directly instead.</li></ul><h2>6. Risks and how we manage them</h2><table><tr><th>Risk</th><th>What we do</th></tr><tr><td>Wrong or made-up answers</td><td>Replies labelled AI-generated; staff check before use; qualified people confirm technical advice.</td></tr><tr><td>Personal information shared with the provider</td><td>Only typed text is sent; staff told not to enter sensitive details; provider terms reviewed.</td></tr><tr><td>Over-reliance on AI</td><td>AI only drafts and explains; people make every decision.</td></tr><tr><td>Unfair or inappropriate output</td><td>Staff review drafts; report problems (section 7).</td></tr><tr><td>Cost or misuse</td><td>Paid add-on with a monthly limit; sign-in required.</td></tr></table><h2>7. Problems and complaints</h2><p>Report a harmful, wrong or inappropriate AI reply to <strong>[CONTACT EMAIL / PHONE]</strong>. We'll look into it within <strong>[NUMBER]</strong> business days, and may switch the assistant off while we do. Privacy complaints follow our Privacy Policy.</p><h2>8. Switching AI off</h2><p>A company can stop using the AI Assistant at any time by asking us to remove the add-on. The platform owner can switch it off for everyone by removing the provider key, and the rest of SolarSync keeps working.</p><h2>9. Reviewing this policy</h2><p>We review this policy at least every <strong>[12]</strong> months, and whenever we change how AI is used or change provider.</p>` },
 
   /* ── Onboarding Handbooks ─ (one per role — share with new users) */
   { id: "hb-reseller", category: "handbooks", title: "Reseller Admin — Onboarding Handbook",
@@ -15745,7 +15748,21 @@ function DocEditor({ doc, onSave, onClose, brandHeader, lockedNote, clientPublis
 
 function ResellerDocuments() {
   const [docs, setDocs] = useStateR(() => {
-    try { const s = localStorage.getItem("ss_rdocs_v7"); return s ? JSON.parse(s) : RDOC_INITIAL; } catch(e) { return RDOC_INITIAL; }
+    try {
+      const saved = localStorage.getItem("ss_rdocs_v7");
+      if (!saved) return RDOC_INITIAL;
+      let list = JSON.parse(saved);
+      // The handbooks were rewritten for the new sign-in: swap in the new versions once.
+      if (!localStorage.getItem("ss_rdocs_hb2")) {
+        const fresh = Object.fromEntries(RDOC_INITIAL.filter(d => d.category === "handbooks").map(d => [d.id, d]));
+        list = list.map(d => fresh[d.id] || d);
+        localStorage.setItem("ss_rdocs_hb2", "1");
+      }
+      // Add any built-in documents that are new since this copy was saved (keeps your edits).
+      const have = new Set(list.map(d => d.id));
+      const added = RDOC_INITIAL.filter(d => !have.has(d.id));
+      return added.length ? list.concat(added) : list;
+    } catch(e) { return RDOC_INITIAL; }
   });
   React.useEffect(() => { try { localStorage.setItem("ss_rdocs_v7", JSON.stringify(docs)); } catch(e) {} }, [docs]);
   const [tab, setTab] = useStateR("packages");
@@ -22991,7 +23008,7 @@ function AIAssist({ portal, brand }) {
       if (r && r.configured === false) {
         setMsgs(m => [...m, { role: "assistant", content: "The AI assistant isn't switched on yet — the platform owner needs to add an Anthropic API key (ANTHROPIC_API_KEY) in the server settings. Once that's done, I'll be ready to help right here." }]);
       } else {
-        setMsgs(m => [...m, { role: "assistant", content: (r && r.reply) || "Sorry — I couldn't come up with a reply. Please try again." }]);
+        setMsgs(m => [...m, { role: "assistant", content: (r && r.reply) || "Sorry — I couldn't come up with a reply. Please try again.", ai: !!(r && r.reply) }]);
       }
     } catch (e) {
       const c = e && e.data && e.data.error;
@@ -23014,7 +23031,7 @@ function AIAssist({ portal, brand }) {
             <Icon d={ICONS.sparkle} size={16} fill={true} stroke={0} style={{ color: "var(--blue-light)" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "var(--font-head)", fontWeight: 700, fontSize: 13.5, color: "var(--tx-hi)" }}>{persona === "client" ? ((brand && brand.name) || "Solar") + " Assistant" : "Customer Service Copilot"}</div>
-              <div className="card-sub" style={{ fontSize: 11 }}>{persona === "client" ? "Answers about your solar journey" : "Drafts, solar know-how & next steps"}</div>
+              <div className="card-sub" style={{ fontSize: 11 }}>{persona === "client" ? "AI assistant · answers about your solar journey" : "AI assistant · drafts, solar know-how & next steps"}</div>
             </div>
             <button className="icon-btn" onClick={() => setOpen(false)} style={{ width: 28, height: 28 }}><Icon d="M18 6L6 18M6 6l12 12" size={14} stroke={2.2} /></button>
           </div>
@@ -23023,7 +23040,11 @@ function AIAssist({ portal, brand }) {
             {msgs.map((m, i) => (
               <div key={i} style={m.role === "user"
                 ? { alignSelf: "flex-end", maxWidth: "88%", background: "var(--blue-light)", color: "#fff", borderRadius: "12px 12px 4px 12px", padding: "9px 12px", fontSize: 12.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }
-                : { alignSelf: "flex-start", maxWidth: "88%", background: "rgba(58,125,255,0.1)", border: "1px solid rgba(58,125,255,0.25)", borderRadius: "12px 12px 12px 4px", padding: "9px 12px", fontSize: 12.5, lineHeight: 1.55, color: "var(--tx-hi)", whiteSpace: "pre-wrap" }}>{m.content}</div>
+                : { alignSelf: "flex-start", maxWidth: "88%", background: "rgba(58,125,255,0.1)", border: "1px solid rgba(58,125,255,0.25)", borderRadius: "12px 12px 12px 4px", padding: "9px 12px", fontSize: 12.5, lineHeight: 1.55, color: "var(--tx-hi)", whiteSpace: "pre-wrap" }}>{m.content}
+                {m.ai && <div data-testid="ai-label" style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid rgba(58,125,255,0.2)", fontSize: 10.5, color: "var(--tx-dim)", whiteSpace: "normal" }}>
+                  {persona === "client" ? "AI-generated answer — it can make mistakes. Your installer can confirm anything important." : "AI-generated — it can make mistakes. Check it before sending it to a customer or relying on it."}
+                </div>}
+              </div>
             ))}
             {busy && <div className="card-sub" style={{ alignSelf: "flex-start", fontSize: 12 }}>Thinking…</div>}
           </div>
