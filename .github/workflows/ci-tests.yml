@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Read-only token: this workflow only checks out and tests the code.
+permissions:
+  contents: read
+
 jobs:
   build-and-smoke:
     name: Build & smoke-test backend
